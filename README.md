@@ -147,10 +147,16 @@ database double and do not require a live PostgreSQL instance.
 
 ## Architecture and contributor guidance
 
+- [Documentation entrypoint](document/README.md)
+- [Documentation governance](document/documentation-governance.md)
 - [Architecture](document/architecture.md)
 - [API conventions](document/api-conventions.md)
 - [Development workflow](document/development.md)
 - [AI agent instructions](AGENTS.md)
+
+Every contributor and AI agent must start with the documentation entrypoint.
+Repository changes must keep the affected documentation current on the same
+branch before handoff or merge.
 
 The Prisma Client under `src/generated/prisma` and the local `.codegraph` index
 are generated artifacts and are intentionally not committed.

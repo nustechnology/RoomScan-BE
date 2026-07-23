@@ -5,6 +5,11 @@ It starts from `src/server.ts`, while `src/app.ts` creates the HTTP application
 from injected dependencies. Keeping `app.listen` outside the app factory makes
 API tests deterministic and prevents them from opening network ports.
 
+The current product-facing scope contains only the health module. The Prisma
+schema intentionally has no business models yet; Room, Scan, User, and
+authentication behavior must not be inferred until their requirements are
+defined.
+
 ## Request flow
 
 1. Pino HTTP attaches a request ID and structured request logger.
@@ -31,3 +36,19 @@ global Prisma client directly. Runtime composition belongs in `server.ts`.
 The server validates configuration before listening. SIGINT and SIGTERM close
 the HTTP server and disconnect Prisma. Uncaught exceptions and rejected
 promises are logged internally and trigger the same shutdown path.
+
+## Architecture documentation triggers
+
+Update this document in the same branch when a change affects:
+
+- Application startup, shutdown, dependency composition, or configuration
+  validation.
+- Middleware order or any cross-cutting request/response behavior.
+- Module ownership, boundaries, dependency direction, or shared abstractions.
+- Database access patterns, Prisma integration, or persistence topology.
+- The implemented product-module scope.
+
+Architectural decisions that introduce a new pattern must explain why the
+existing pattern is insufficient. Update the
+[documentation index](README.md) if architecture guidance is split into a new
+document.

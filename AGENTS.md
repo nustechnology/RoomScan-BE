@@ -2,10 +2,29 @@
 
 These instructions apply to every AI agent working in this repository.
 
+## Mandatory documentation-first workflow
+
+- Before analyzing, implementing, reviewing, or fixing anything, read
+  `document/README.md` completely, then read
+  `document/documentation-governance.md` and every task-specific document it
+  maps. Do this before inspecting or changing implementation.
+- Treat `document/` as the current human-readable contract for the checked-out
+  branch. Resolve mismatches between documentation, source, tests, OpenAPI, and
+  executable configuration in the same task.
+- Every task that changes repository files must synchronize affected
+  documentation on the same branch. Never defer documentation to a follow-up.
+- Before handoff, re-check documentation against the final diff and include the
+  required documentation-impact statement. If no documented fact changed, name
+  the documents reviewed and explain why no content update was necessary.
+
+The full completion gate in `document/documentation-governance.md` is
+non-negotiable and blocks handoff, commit, pull request, or merge when
+incomplete.
+
 ## Required context
 
-- Read `README.md` and the relevant file under `document/` before changing
-  behavior.
+- Read the root `README.md` when setup, commands, environment, Docker, or public
+  endpoints are relevant.
 - This is a Node.js 24, Yarn 4, Express 5, TypeScript ESM and Prisma 7 service.
 - Preserve the application factory/runtime composition split between
   `src/app.ts` and `src/server.ts`.
@@ -52,7 +71,8 @@ yarn build
 ```
 
 Run Docker checks when Docker or runtime composition changes. Update README,
-`document/` and OpenAPI registration whenever behavior changes.
+`document/` and OpenAPI registration whenever behavior changes. Documentation
+synchronization is required before these commands count as a complete handoff.
 
 ## Repository hygiene
 
