@@ -1,0 +1,32 @@
+# Dependencies and build output
+node_modules/
+dist/
+coverage/
+
+# Generated files
+src/generated/prisma/
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+
+# Runtime files
+*.log
+logs/
+tmp/
+
+# Tooling and editors
+.codegraph/
+.DS_Store
+.idea/
+.vscode/
+
+# Yarn local artifacts
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/sdks
+!.yarn/versions
+.pnp.*

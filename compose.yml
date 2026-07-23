@@ -1,0 +1,62 @@
+services:
+  db:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-roomscan}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-roomscan}
+      POSTGRES_DB: ${POSTGRES_DB:-roomscan}
+    ports:
+      - '5432:5432'
+    volumes:
+      - roomscan-postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  migrate:
+    build:
+      context: .
+      target: migration
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-roomscan}:${POSTGRES_PASSWORD:-roomscan}@db:5432/${POSTGRES_DB:-roomscan}?schema=public
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: 'no'
+
+  api:
+    build:
+      context: .
+      target: runtime
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: postgresql://${POSTGRES_USER:-roomscan}:${POSTGRES_PASSWORD:-roomscan}@db:5432/${POSTGRES_DB:-roomscan}?schema=public
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      CORS_ORIGIN: ${CORS_ORIGIN:-*}
+    ports:
+      - '${ROOMSCAN_PORT:-3000}:3000'
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3000/api/v1/health').then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 3s
+      start_period: 10s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  roomscan-postgres-data:

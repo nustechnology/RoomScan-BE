@@ -1,0 +1,6 @@
+if ! command -v corepack >/dev/null 2>&1; then
+  echo "RoomScan pre-commit requires Corepack. Install Node.js 24 and run: corepack enable" >&2
+  exit 1
+fi
+
+corepack yarn validate

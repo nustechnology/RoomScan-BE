@@ -1,0 +1,6 @@
+node_modules
+dist
+coverage
+.codegraph
+src/generated/prisma
+yarn.lock

@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CI: 'true'
+      HUSKY: '0'
+      DATABASE_URL: postgresql://roomscan:roomscan@localhost:5432/roomscan?schema=public
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24.18.0
+
+      - name: Enable Corepack
+        run: |
+          npm install --global corepack@0.35.0
+          corepack enable
+
+      - name: Install dependencies
+        run: yarn install --immutable
+
+      - name: Generate Prisma Client
+        run: yarn prisma:generate
+
+      - name: Check formatting
+        run: yarn format:check
+
+      - name: Lint
+        run: yarn lint
+
+      - name: Type-check
+        run: yarn typecheck
+
+      - name: Run tests with coverage
+        run: yarn test:coverage
+
+      - name: Build production output
+        run: yarn build
