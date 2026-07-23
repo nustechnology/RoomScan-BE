@@ -1,0 +1,4 @@
+interface:
+  display_name: 'Code Review and Quality'
+  short_description: 'Review code quality across five critical axes'
+  default_prompt: 'Use $code-review-and-quality to review this change and report evidence-backed findings by severity.'

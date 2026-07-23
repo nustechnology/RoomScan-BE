@@ -12,6 +12,18 @@ These instructions apply to every AI agent working in this repository.
 - Prefer CodeGraph for symbol, caller, callee and impact questions. If the local
   `.codegraph` index is absent, run `codegraph init -i` before structural work.
 
+## Repository skills
+
+Shared, repository-local skills live under `.agents/skills`. Read a selected
+skill's `SKILL.md` completely before following it, and resolve relative
+references from that skill directory.
+
+- Use
+  [code-review-and-quality](.agents/skills/code-review-and-quality/SKILL.md)
+  when asked to review code, assess code quality or merge readiness, review
+  another agent's implementation, or perform the review gate before merging a
+  change. Reviews are read-only unless the user also asks for fixes.
+
 ## Architecture rules
 
 - Put business behavior in a module under `src/modules`.
