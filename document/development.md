@@ -30,6 +30,7 @@ the new contract merely to make code and documentation agree.
    token secret must contain at least 32 characters.
 4. Run `yarn install --immutable` and `yarn prisma:generate`.
 5. Start PostgreSQL with `docker compose up db -d`.
+6. Run `yarn prisma:migrate:deploy` to apply the committed schema migration.
 
 The default development rate limits use the in-process MemoryStore and require
 no additional service. `TRUST_PROXY` remains empty for direct local and Compose

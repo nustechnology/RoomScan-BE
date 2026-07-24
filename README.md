@@ -39,6 +39,7 @@ cp .env.example .env
 yarn install --immutable
 yarn prisma:generate
 docker compose up db -d
+yarn prisma:migrate:deploy
 yarn dev
 ```
 
