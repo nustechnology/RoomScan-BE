@@ -15,6 +15,21 @@ const appleSignInResponse = authOpenApiRegistry.register(
 );
 const authErrorResponse = authOpenApiRegistry.register('AuthErrorResponse', ErrorResponseSchema);
 
+const rateLimitHeaders = {
+  RateLimit: {
+    description: 'Current quota state for the applicable rate-limit policies',
+    schema: {
+      type: 'string' as const,
+    },
+  },
+  'RateLimit-Policy': {
+    description: 'Rate-limit policies applied to this request',
+    schema: {
+      type: 'string' as const,
+    },
+  },
+};
+
 authOpenApiRegistry.registerPath({
   method: 'post',
   path: '/api/v1/auth/apple',
@@ -33,6 +48,7 @@ authOpenApiRegistry.registerPath({
   responses: {
     200: {
       description: 'The user was authenticated',
+      headers: rateLimitHeaders,
       content: {
         'application/json': {
           schema: appleSignInResponse,
@@ -41,6 +57,7 @@ authOpenApiRegistry.registerPath({
     },
     400: {
       description: 'The request body is invalid',
+      headers: rateLimitHeaders,
       content: {
         'application/json': {
           schema: authErrorResponse,
@@ -49,6 +66,7 @@ authOpenApiRegistry.registerPath({
     },
     401: {
       description: 'The Apple identity token is invalid',
+      headers: rateLimitHeaders,
       content: {
         'application/json': {
           schema: authErrorResponse,
@@ -57,6 +75,7 @@ authOpenApiRegistry.registerPath({
     },
     503: {
       description: 'Apple identity services are unavailable',
+      headers: rateLimitHeaders,
       content: {
         'application/json': {
           schema: authErrorResponse,
@@ -65,6 +84,25 @@ authOpenApiRegistry.registerPath({
     },
     500: {
       description: 'An internal server error occurred',
+      headers: rateLimitHeaders,
+      content: {
+        'application/json': {
+          schema: authErrorResponse,
+        },
+      },
+    },
+    429: {
+      description: 'The client exceeded an API or Apple authentication rate limit',
+      headers: {
+        ...rateLimitHeaders,
+        'Retry-After': {
+          description: 'Seconds until the client may retry',
+          schema: {
+            type: 'integer',
+            minimum: 0,
+          },
+        },
+      },
       content: {
         'application/json': {
           schema: authErrorResponse,

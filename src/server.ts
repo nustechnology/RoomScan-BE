@@ -1,4 +1,5 @@
 import { createApp } from './app.js';
+import { createRateLimiters } from './common/middleware/rate-limit.js';
 import { loadConfig } from './config/env.js';
 import { AppleIdentityTokenVerifier } from './infrastructure/auth/apple-identity-verifier.js';
 import { JoseAuthTokenIssuer } from './infrastructure/auth/jwt-token-issuer.js';
@@ -25,7 +26,8 @@ const authService = new AuthService({
   userRepository,
   tokenIssuer,
 });
-const app = createApp({ config, database, logger, authService });
+const rateLimiters = createRateLimiters(config, logger);
+const app = createApp({ config, database, logger, authService, rateLimiters });
 
 let isShuttingDown = false;
 

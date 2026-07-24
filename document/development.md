@@ -31,6 +31,11 @@ the new contract merely to make code and documentation agree.
 4. Run `yarn install --immutable` and `yarn prisma:generate`.
 5. Start PostgreSQL with `docker compose up db -d`.
 
+The default development rate limits use the in-process MemoryStore and require
+no additional service. `TRUST_PROXY` remains empty for direct local and Compose
+connections. Set it only when requests arrive exclusively through a known
+reverse-proxy topology.
+
 ## Before handoff
 
 First complete the branch documentation gate in
@@ -55,6 +60,8 @@ docker compose up -d
 ```
 
 Confirm `/api/v1/ready` and `/api-doc` before stopping the stack.
+Also confirm that repeated malformed Apple authentication requests eventually
+return 429 while health and readiness continue to return 200.
 
 The handoff must state:
 
@@ -88,6 +95,11 @@ the local CodeGraph index.
 Apple identity verification and RoomScan JWT signing use the pinned `jose`
 dependency. Unit tests inject local signing keys and custom JWKS fetch
 implementations, so the quality gate does not call Apple over the network.
+
+HTTP quotas use the pinned `express-rate-limit` dependency. Tests construct
+fresh process-local stores with small quotas and inject them through the
+application factory. Production currently uses the same MemoryStore; adding
+multiple API replicas requires a shared store such as Redis.
 
 Update this document in the same branch whenever development commands, required
 tool versions, environment setup, tests, coverage, hooks, CI, Docker, Prisma

@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
 import { createApp } from '../src/app.js';
+import { createRateLimiters } from '../src/common/middleware/rate-limit.js';
 import { ErrorResponseSchema } from '../src/common/schemas/error.js';
 import type { AppConfig } from '../src/config/env.js';
 import type { DatabaseHealth } from '../src/infrastructure/database/database.js';
@@ -24,6 +25,11 @@ const config: AppConfig = {
   databaseUrl: 'postgresql://roomscan:roomscan@localhost:5432/roomscan',
   logLevel: 'silent',
   corsOrigins: '*',
+  trustProxy: false,
+  apiRateLimitWindowSeconds: 60,
+  apiRateLimitMaxRequests: 120,
+  appleAuthRateLimitWindowSeconds: 900,
+  appleAuthRateLimitMaxRequests: 20,
   appleClientId: 'com.example.roomscan',
   accessTokenSecret: 'access-secret-that-is-at-least-32-characters',
   refreshTokenSecret: 'refresh-secret-that-is-at-least-32-characters',
@@ -41,6 +47,7 @@ describe('RoomScan HTTP application', () => {
     disconnect,
   };
   const logger = pino({ enabled: false });
+  const rateLimiters = createRateLimiters(config, logger);
   const signInWithApple = vi.fn<AppleAuthService['signInWithApple']>();
   const authService: AppleAuthService = {
     signInWithApple,
@@ -51,6 +58,7 @@ describe('RoomScan HTTP application', () => {
     database,
     logger,
     authService,
+    rateLimiters,
     clock,
   });
 
@@ -87,6 +95,7 @@ describe('RoomScan HTTP application', () => {
       database,
       logger,
       authService,
+      rateLimiters,
     });
     const response = await request(defaultClockApp).get('/api/v1/health').expect(200);
     const body = HealthResponseSchema.parse(response.body as unknown);
@@ -161,8 +170,23 @@ describe('RoomScan HTTP application', () => {
       .parse(body.paths['/api/v1/auth/apple']);
 
     expect(Object.keys(authPath.post.responses)).toEqual(
-      expect.arrayContaining(['200', '400', '401', '500', '503']),
+      expect.arrayContaining(['200', '400', '401', '429', '500', '503']),
     );
+    const rateLimitResponse = z
+      .object({
+        headers: z.object({
+          RateLimit: z.unknown(),
+          'RateLimit-Policy': z.unknown(),
+          'Retry-After': z.unknown(),
+        }),
+      })
+      .parse(authPath.post.responses['429']);
+
+    expect(Object.keys(rateLimitResponse.headers)).toEqual([
+      'RateLimit',
+      'RateLimit-Policy',
+      'Retry-After',
+    ]);
   });
 
   it('serves the Swagger UI', async () => {
@@ -222,6 +246,23 @@ describe('RoomScan HTTP application', () => {
       },
     });
     expect(response.headers['x-request-id']).toBe('apple-auth-request');
+    expect(response.headers.ratelimit).toContain('"api"');
+    expect(response.headers.ratelimit).toContain('"auth-apple"');
+    expect(response.headers['ratelimit-policy']).toContain('"api"');
+    expect(response.headers['ratelimit-policy']).toContain('"auth-apple"');
+    expect(response.headers['x-ratelimit-limit']).toBeUndefined();
+  });
+
+  it('exposes standard rate-limit headers through CORS', async () => {
+    const response = await request(app)
+      .post('/api/v1/auth/apple')
+      .set('origin', 'https://app.roomscan.dev')
+      .send({ identityToken: 'apple-identity-token' })
+      .expect(200);
+
+    expect(response.headers['access-control-expose-headers']).toBe(
+      'RateLimit,RateLimit-Policy,Retry-After',
+    );
   });
 
   it('rejects a missing Apple identity token', async () => {

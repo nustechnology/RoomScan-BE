@@ -13,16 +13,20 @@ defined.
 ## Request flow
 
 1. Pino HTTP attaches a request ID and structured request logger.
-2. Helmet, CORS, compression and body parsers apply transport policies.
-3. Swagger or versioned API routers handle the request.
-4. Zod validates request/response data and supplies OpenAPI schemas.
-5. Unknown routes and thrown errors pass through the central error middleware.
-6. The response contains a request ID without exposing internal exceptions.
+2. Helmet and CORS apply security and cross-origin policies.
+3. A general IP rate limiter protects `/api/v1` before request bodies are
+   parsed, excluding liveness and readiness.
+4. Compression and body parsers apply transport policies.
+5. Swagger or versioned API routers handle the request. Apple authentication
+   applies its stricter limiter before request validation.
+6. Zod validates request/response data and supplies OpenAPI schemas.
+7. Unknown routes and thrown errors pass through the central error middleware.
+8. The response contains a request ID without exposing internal exceptions.
 
 ## Boundaries
 
 - `config`: environment validation and stable application constants.
-- `common`: reusable HTTP errors, middleware and schemas.
+- `common`: reusable HTTP errors, middleware, rate-limit policies and schemas.
 - `infrastructure`: PostgreSQL/Prisma, Apple identity-token verification,
   RoomScan token issuance and logging implementations.
 - `modules`: product-facing route modules. Each module owns its schemas,
@@ -49,11 +53,35 @@ consumed by an endpoint yet. Apple authorization-code exchange, nonce
 validation, application refresh-token rotation and revocation are outside the
 implemented scope.
 
+## Rate limiting
+
+The composition root creates independent general API and Apple authentication
+rate limiters and injects them into the application factory. The general policy
+allows 120 requests per 60 seconds for each client IP. Apple authentication has
+an additional policy allowing 20 attempts per 15 minutes. Every Apple attempt
+counts regardless of its outcome.
+
+Liveness, readiness, Swagger and raw OpenAPI are exempt. Rejected requests use
+the standard error middleware and return 429 with `RateLimit`,
+`RateLimit-Policy`, `Retry-After` and `x-request-id` headers.
+
+The current built-in MemoryStore is process-local: counters reset when the
+process restarts and are not shared between replicas. Store errors fail open
+and are logged because rate limiting is a defense-in-depth control, not a
+required authentication dependency. A multi-replica deployment must replace
+the stores with shared Redis-backed stores without changing module routes.
+
+Client keys come from Express `request.ip`; IPv6 addresses are grouped by `/56`.
+The application does not trust forwarding headers by default. Deployments
+behind a reverse proxy must configure `TRUST_PROXY` to the exact hop count or
+trusted IP/CIDR topology rather than trusting every proxy.
+
 ## Persistence
 
 The composition root creates one Prisma Client and injects it into the database
-health/lifecycle adapter and the Apple user repository. Product modules never
-import that client directly. The unique provider identity constraint makes
+health/lifecycle adapter and the Apple user repository. It also creates the two
+rate-limit middleware instances once per process. Product modules never import
+the Prisma client directly. The unique provider identity constraint makes
 concurrent first-time Apple logins idempotent at the database boundary.
 
 ## Lifecycle

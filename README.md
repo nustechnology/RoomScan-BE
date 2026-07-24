@@ -110,25 +110,41 @@ refresh JWTs. Email is stored when present but is never an account identifier.
 The current API issues the refresh JWT but does not yet expose refresh, rotation
 or revocation endpoints.
 
+API requests are limited by client IP. `/api/v1` permits 120 requests per
+minute, and Apple sign-in additionally permits 20 attempts per 15 minutes.
+Health, readiness, Swagger and raw OpenAPI are exempt. Exceeded quotas return
+429 with `RATE_LIMIT_EXCEEDED`, `RateLimit`, `RateLimit-Policy`, `Retry-After`
+and `x-request-id`.
+
 ## Environment variables
 
-| Variable                         | Required | Default       | Description                                        |
-| -------------------------------- | -------- | ------------- | -------------------------------------------------- |
-| `NODE_ENV`                       | No       | `development` | `development`, `test` or `production`              |
-| `PORT`                           | No       | `3000`        | HTTP port inside the process                       |
-| `DATABASE_URL`                   | Yes      | —             | PostgreSQL connection string                       |
-| `LOG_LEVEL`                      | No       | `info`        | Pino log level                                     |
-| `CORS_ORIGIN`                    | No       | `*`           | `*` or comma-separated allowed origins             |
-| `APPLE_CLIENT_ID`                | Yes      | —             | Native app bundle identifier used as Apple `aud`   |
-| `AUTH_ACCESS_TOKEN_SECRET`       | Yes      | —             | HS256 access-token secret, at least 32 characters  |
-| `AUTH_REFRESH_TOKEN_SECRET`      | Yes      | —             | HS256 refresh-token secret, at least 32 characters |
-| `AUTH_ACCESS_TOKEN_TTL_SECONDS`  | No       | `900`         | RoomScan access-token lifetime                     |
-| `AUTH_REFRESH_TOKEN_TTL_SECONDS` | No       | `2592000`     | RoomScan refresh-token lifetime                    |
+| Variable                               | Required | Default       | Description                                          |
+| -------------------------------------- | -------- | ------------- | ---------------------------------------------------- |
+| `NODE_ENV`                             | No       | `development` | `development`, `test` or `production`                |
+| `PORT`                                 | No       | `3000`        | HTTP port inside the process                         |
+| `DATABASE_URL`                         | Yes      | —             | PostgreSQL connection string                         |
+| `LOG_LEVEL`                            | No       | `info`        | Pino log level                                       |
+| `CORS_ORIGIN`                          | No       | `*`           | `*` or comma-separated allowed origins               |
+| `TRUST_PROXY`                          | No       | disabled      | Trusted hop count or comma-separated proxy IPs/CIDRs |
+| `RATE_LIMIT_API_WINDOW_SECONDS`        | No       | `60`          | General API rate-limit window                        |
+| `RATE_LIMIT_API_MAX_REQUESTS`          | No       | `120`         | Requests per IP in the general API window            |
+| `RATE_LIMIT_APPLE_AUTH_WINDOW_SECONDS` | No       | `900`         | Apple sign-in rate-limit window                      |
+| `RATE_LIMIT_APPLE_AUTH_MAX_REQUESTS`   | No       | `20`          | Apple sign-in attempts per IP in its window          |
+| `APPLE_CLIENT_ID`                      | Yes      | —             | Native app bundle identifier used as Apple `aud`     |
+| `AUTH_ACCESS_TOKEN_SECRET`             | Yes      | —             | HS256 access-token secret, at least 32 characters    |
+| `AUTH_REFRESH_TOKEN_SECRET`            | Yes      | —             | HS256 refresh-token secret, at least 32 characters   |
+| `AUTH_ACCESS_TOKEN_TTL_SECONDS`        | No       | `900`         | RoomScan access-token lifetime                       |
+| `AUTH_REFRESH_TOKEN_TTL_SECONDS`       | No       | `2592000`     | RoomScan refresh-token lifetime                      |
 
 The remaining PostgreSQL and `ROOMSCAN_PORT` values in `.env.example` configure
 Docker Compose. The refresh TTL must exceed the access TTL. Replace all
 authentication placeholders before deployment; never commit `.env` or real
 credentials.
+
+Rate-limit counters are stored in the API process, reset on restart and are not
+shared by replicas. The current single-instance Compose topology needs no
+additional store. Before deploying behind a reverse proxy, set `TRUST_PROXY` to
+the exact proxy hop count or trusted IP/CIDR list. Never set it to `true`.
 
 ## Project scripts
 
@@ -191,6 +207,11 @@ are generated artifacts and are intentionally not committed.
   `PATH`.
 - If Prisma types are missing, run `yarn prisma:generate`.
 - If readiness returns 503, check `DATABASE_URL` and `docker compose ps`.
+- If all clients share one rate-limit bucket, verify `TRUST_PROXY` against the
+  actual reverse-proxy topology. A wrong value can also allow clients to spoof
+  their source IP.
+- If legitimate users receive 429 behind a shared carrier or office IP, tune
+  the `RATE_LIMIT_*` values and inspect structured 429 logs.
 - If port 5432 is already in use, stop the other PostgreSQL service or adjust
   the database port mapping and connection URL together.
 - If Git hooks are absent after cloning, run `yarn install` or `yarn prepare`.

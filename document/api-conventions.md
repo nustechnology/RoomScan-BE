@@ -38,11 +38,40 @@ Expected errors use `AppError` and the following envelope:
 `details` is optional. Never expose stack traces, SQL, credentials, connection
 strings or raw dependency errors. Use 400 for validation/malformed input, 404
 for missing routes/resources, 409 for state conflicts, 401 for rejected
-credentials and 503 for unavailable dependencies.
+credentials, 429 for an exceeded request quota and 503 for unavailable
+dependencies.
 
 Every response includes a request correlation ID in the `x-request-id` header.
 Error responses also include it in the `requestId` field. A non-empty incoming
 `x-request-id` may be reused; otherwise the application generates one.
+
+## Rate limiting
+
+Public API traffic has two process-local per-IP policies:
+
+- `/api/v1` allows 120 requests per 60 seconds.
+- `POST /api/v1/auth/apple` additionally allows 20 requests per 15 minutes.
+
+`/api/v1/health`, `/api/v1/ready`, `/api-doc` and `/api-doc.json` are exempt.
+All Apple attempts count, including validation, credential and dependency
+failures. IPv6 clients are grouped by `/56`.
+
+Allowed and rejected limited requests expose draft-8 `RateLimit` and
+`RateLimit-Policy` headers. A rejected request additionally returns
+`Retry-After`, HTTP 429 and:
+
+```json
+{
+  "error": {
+    "code": "RATE_LIMIT_EXCEEDED",
+    "message": "Too many requests; please try again later"
+  },
+  "requestId": "request-correlation-id"
+}
+```
+
+Rate-limit responses never expose the raw client IP, token, unhashed store key
+or store details. Browser clients may read the three headers through CORS.
 
 ## Apple authentication
 
@@ -70,7 +99,8 @@ verification claims, signing details or secrets.
 
 Malformed or unverifiable Apple tokens return 401 with
 `INVALID_APPLE_IDENTITY_TOKEN`. Apple JWKS fetch failures return 503 with
-`APPLE_IDENTITY_PROVIDER_UNAVAILABLE`. Both use generic client-facing messages.
+`APPLE_IDENTITY_PROVIDER_UNAVAILABLE`. Exceeded API or Apple quotas return 429
+with `RATE_LIMIT_EXCEEDED`. These errors use generic client-facing messages.
 The endpoint does not exchange Apple authorization codes and does not provide
 an application refresh endpoint.
 

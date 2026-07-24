@@ -10,6 +10,7 @@ import swaggerUi from 'swagger-ui-express';
 
 import { errorHandler } from './common/middleware/error-handler.js';
 import { notFoundHandler } from './common/middleware/not-found.js';
+import type { RateLimiters } from './common/middleware/rate-limit.js';
 import { API_DOC_PATH, API_PREFIX } from './config/constants.js';
 import type { AppConfig } from './config/env.js';
 import type { DatabaseHealth } from './infrastructure/database/database.js';
@@ -23,6 +24,7 @@ export interface AppDependencies {
   database: DatabaseHealth;
   logger: Logger;
   authService: AppleAuthService;
+  rateLimiters: RateLimiters;
   clock?: () => Date;
 }
 
@@ -31,12 +33,14 @@ export function createApp({
   database,
   logger,
   authService,
+  rateLimiters,
   clock,
 }: AppDependencies): Express {
   const app = express();
   const openApiDocument = createOpenApiDocument();
 
   app.disable('x-powered-by');
+  app.set('trust proxy', config.trustProxy);
 
   app.use(
     pinoHttp({
@@ -69,9 +73,11 @@ export function createApp({
     cors({
       origin: config.corsOrigins,
       credentials: config.corsOrigins !== '*',
+      exposedHeaders: ['RateLimit', 'RateLimit-Policy', 'Retry-After'],
     }),
   );
   app.use(compression());
+  app.use(API_PREFIX, rateLimiters.api);
   app.use(express.json({ limit: '1mb' }));
   app.use(express.urlencoded({ extended: false, limit: '1mb' }));
 
@@ -93,6 +99,7 @@ export function createApp({
     API_PREFIX,
     createAuthRouter({
       authService,
+      rateLimiter: rateLimiters.appleAuth,
     }),
   );
   app.use(

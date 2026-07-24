@@ -2633,6 +2633,18 @@ __metadata:
   languageName: node
   linkType: hard
 
+"express-rate-limit@npm:8.6.0":
+  version: 8.6.0
+  resolution: "express-rate-limit@npm:8.6.0"
+  dependencies:
+    debug: "npm:^4.4.3"
+    ip-address: "npm:^10.2.0"
+  peerDependencies:
+    express: ">= 4.11"
+  checksum: 10c0/cce72e87963d90797ddced59de71046b90ca3ca088ab8e73587b50e812aaefa0b79f5a779743034f3ada01fd27d5c7f82063992a02981c7bc9ac74f8b01bb41a
+  languageName: node
+  linkType: hard
+
 "express@npm:5.2.1":
   version: 5.2.1
   resolution: "express@npm:5.2.1"
@@ -3115,6 +3127,13 @@ __metadata:
   version: 2.0.3
   resolution: "internmap@npm:2.0.3"
   checksum: 10c0/8cedd57f07bbc22501516fbfc70447f0c6812871d471096fad9ea603516eacc2137b633633daf432c029712df0baefd793686388ddf5737e3ea15074b877f7ed
+  languageName: node
+  linkType: hard
+
+"ip-address@npm:^10.2.0":
+  version: 10.2.0
+  resolution: "ip-address@npm:10.2.0"
+  checksum: 10c0/5a00aada6e922c9c69dfc800ed5d0fa3348675ebdeed0e1575f503f27ca385b5f534363c9af7ad1daf64c1f1409388cdd3cc2e9b9b0fe1c924a431378d55075a
   languageName: node
   linkType: hard
 
@@ -4324,6 +4343,7 @@ __metadata:
     eslint: "npm:10.7.0"
     eslint-config-prettier: "npm:10.1.8"
     express: "npm:5.2.1"
+    express-rate-limit: "npm:8.6.0"
     globals: "npm:16.5.0"
     helmet: "npm:8.1.0"
     husky: "npm:9.1.7"
