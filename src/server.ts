@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import { createApp } from './app.js';
 import { createRateLimiters } from './common/middleware/rate-limit.js';
 import { loadConfig } from './config/env.js';
@@ -7,7 +8,6 @@ import { createPrismaClient, PrismaDatabase } from './infrastructure/database/pr
 import { PrismaAppleUserRepository } from './infrastructure/database/prisma-user-repository.js';
 import { createLogger } from './infrastructure/logging/logger.js';
 import { AuthService } from './modules/auth/auth.service.js';
-import 'dotenv/config';
 
 const config = loadConfig();
 const logger = createLogger(config);
