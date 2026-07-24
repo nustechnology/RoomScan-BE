@@ -4,6 +4,7 @@
 
 - Public application routes are versioned under `/api/v1`.
 - Liveness and readiness are `/api/v1/health` and `/api/v1/ready`.
+- Apple authentication is `POST /api/v1/auth/apple`.
 - Swagger UI remains at `/api-doc`; raw OpenAPI is `/api-doc.json`.
 - Resource paths use plural nouns and kebab-case when business modules arrive.
 
@@ -36,12 +37,42 @@ Expected errors use `AppError` and the following envelope:
 
 `details` is optional. Never expose stack traces, SQL, credentials, connection
 strings or raw dependency errors. Use 400 for validation/malformed input, 404
-for missing routes/resources, 409 for state conflicts and 503 for unavailable
-dependencies.
+for missing routes/resources, 409 for state conflicts, 401 for rejected
+credentials and 503 for unavailable dependencies.
 
 Every response includes a request correlation ID in the `x-request-id` header.
 Error responses also include it in the `requestId` field. A non-empty incoming
 `x-request-id` may be reused; otherwise the application generates one.
+
+## Apple authentication
+
+The request body contains only a non-empty `identityToken` string of at most
+16 KiB. Unknown fields are rejected. The server validates the Apple signature,
+issuer, client audience, expiration, issued-at time and subject before looking
+up a user.
+
+Successful authentication always returns 200:
+
+```json
+{
+  "accessToken": "roomscan-access-jwt",
+  "refreshToken": "roomscan-refresh-jwt",
+  "user": {
+    "id": "eb5d278f-c857-45c7-887d-7be65288cb75",
+    "email": "user@example.com",
+    "provider": "apple"
+  }
+}
+```
+
+`user.email` may be `null`. The response never contains the Apple subject,
+verification claims, signing details or secrets.
+
+Malformed or unverifiable Apple tokens return 401 with
+`INVALID_APPLE_IDENTITY_TOKEN`. Apple JWKS fetch failures return 503 with
+`APPLE_IDENTITY_PROVIDER_UNAVAILABLE`. Both use generic client-facing messages.
+The endpoint does not exchange Apple authorization codes and does not provide
+an application refresh endpoint.
 
 ## Health semantics
 

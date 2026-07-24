@@ -35,6 +35,7 @@ nvm use
 corepack enable
 corepack install
 cp .env.example .env
+# Replace APPLE_CLIENT_ID and both AUTH_*_TOKEN_SECRET placeholders.
 yarn install --immutable
 yarn prisma:generate
 docker compose up db -d
@@ -44,12 +45,9 @@ yarn dev
 The API is available at <http://localhost:3000>. The application validates all
 required environment variables before opening the HTTP port.
 
-The initial Prisma schema intentionally has no business models. Add the first
-model before creating the first development migration:
-
-```bash
-yarn prisma:migrate:dev --name init
-```
+The committed Prisma migration creates the user storage required by Apple
+authentication. Local production-style startup applies committed migrations
+through the Compose `migrate` service.
 
 ## Run everything with Docker
 
@@ -74,12 +72,13 @@ the local PostgreSQL data volume.
 
 ## HTTP endpoints
 
-| Method | Path             | Purpose                                        |
-| ------ | ---------------- | ---------------------------------------------- |
-| `GET`  | `/api/v1/health` | Liveness; does not query PostgreSQL            |
-| `GET`  | `/api/v1/ready`  | Readiness; verifies PostgreSQL with `SELECT 1` |
-| `GET`  | `/api-doc`       | Interactive Swagger UI                         |
-| `GET`  | `/api-doc.json`  | Generated OpenAPI 3.1 document                 |
+| Method | Path                 | Purpose                                        |
+| ------ | -------------------- | ---------------------------------------------- |
+| `GET`  | `/api/v1/health`     | Liveness; does not query PostgreSQL            |
+| `GET`  | `/api/v1/ready`      | Readiness; verifies PostgreSQL with `SELECT 1` |
+| `POST` | `/api/v1/auth/apple` | Authenticate with an Apple identity token      |
+| `GET`  | `/api-doc`           | Interactive Swagger UI                         |
+| `GET`  | `/api-doc.json`      | Generated OpenAPI 3.1 document                 |
 
 Errors use a stable envelope:
 
@@ -97,18 +96,39 @@ Errors use a stable envelope:
 Clients may send `x-request-id`; otherwise the API generates one and returns it
 in the response header.
 
+Apple authentication accepts:
+
+```json
+{
+  "identityToken": "<apple-identity-token>"
+}
+```
+
+The server verifies the token against Apple's public JWKS, identifies the user
+by Apple `sub`, creates the user when necessary and returns RoomScan access and
+refresh JWTs. Email is stored when present but is never an account identifier.
+The current API issues the refresh JWT but does not yet expose refresh, rotation
+or revocation endpoints.
+
 ## Environment variables
 
-| Variable       | Required | Default       | Description                            |
-| -------------- | -------- | ------------- | -------------------------------------- |
-| `NODE_ENV`     | No       | `development` | `development`, `test` or `production`  |
-| `PORT`         | No       | `3000`        | HTTP port inside the process           |
-| `DATABASE_URL` | Yes      | —             | PostgreSQL connection string           |
-| `LOG_LEVEL`    | No       | `info`        | Pino log level                         |
-| `CORS_ORIGIN`  | No       | `*`           | `*` or comma-separated allowed origins |
+| Variable                         | Required | Default       | Description                                        |
+| -------------------------------- | -------- | ------------- | -------------------------------------------------- |
+| `NODE_ENV`                       | No       | `development` | `development`, `test` or `production`              |
+| `PORT`                           | No       | `3000`        | HTTP port inside the process                       |
+| `DATABASE_URL`                   | Yes      | —             | PostgreSQL connection string                       |
+| `LOG_LEVEL`                      | No       | `info`        | Pino log level                                     |
+| `CORS_ORIGIN`                    | No       | `*`           | `*` or comma-separated allowed origins             |
+| `APPLE_CLIENT_ID`                | Yes      | —             | Native app bundle identifier used as Apple `aud`   |
+| `AUTH_ACCESS_TOKEN_SECRET`       | Yes      | —             | HS256 access-token secret, at least 32 characters  |
+| `AUTH_REFRESH_TOKEN_SECRET`      | Yes      | —             | HS256 refresh-token secret, at least 32 characters |
+| `AUTH_ACCESS_TOKEN_TTL_SECONDS`  | No       | `900`         | RoomScan access-token lifetime                     |
+| `AUTH_REFRESH_TOKEN_TTL_SECONDS` | No       | `2592000`     | RoomScan refresh-token lifetime                    |
 
 The remaining PostgreSQL and `ROOMSCAN_PORT` values in `.env.example` configure
-Docker Compose. Never commit `.env` or real credentials.
+Docker Compose. The refresh TTL must exceed the access TTL. Replace all
+authentication placeholders before deployment; never commit `.env` or real
+credentials.
 
 ## Project scripts
 
@@ -142,8 +162,9 @@ GUIs cannot accidentally use a globally installed Yarn 1. It requires the
 4. Unit/API tests
 
 GitHub Actions repeats those checks using an immutable Yarn install, adds
-coverage enforcement, and builds the production output. Unit tests inject a
-database double and do not require a live PostgreSQL instance.
+coverage enforcement, and builds the production output. Unit tests inject
+database, Apple JWKS and authentication doubles and do not require a live
+PostgreSQL instance or Apple network access.
 
 ## Architecture and contributor guidance
 

@@ -8,6 +8,12 @@ import { ErrorResponseSchema } from '../src/common/schemas/error.js';
 import type { AppConfig } from '../src/config/env.js';
 import type { DatabaseHealth } from '../src/infrastructure/database/database.js';
 import {
+  AppleIdentityProviderUnavailableError,
+  InvalidAppleIdentityTokenError,
+} from '../src/modules/auth/auth.errors.js';
+import { AppleSignInResponseSchema } from '../src/modules/auth/auth.schemas.js';
+import type { AppleAuthService } from '../src/modules/auth/auth.types.js';
+import {
   HealthResponseSchema,
   ReadinessResponseSchema,
 } from '../src/modules/health/health.schemas.js';
@@ -18,6 +24,11 @@ const config: AppConfig = {
   databaseUrl: 'postgresql://roomscan:roomscan@localhost:5432/roomscan',
   logLevel: 'silent',
   corsOrigins: '*',
+  appleClientId: 'com.example.roomscan',
+  accessTokenSecret: 'access-secret-that-is-at-least-32-characters',
+  refreshTokenSecret: 'refresh-secret-that-is-at-least-32-characters',
+  accessTokenTtlSeconds: 900,
+  refreshTokenTtlSeconds: 2_592_000,
 };
 
 const clock = () => new Date('2026-07-23T07:00:00.000Z');
@@ -30,16 +41,30 @@ describe('RoomScan HTTP application', () => {
     disconnect,
   };
   const logger = pino({ enabled: false });
+  const signInWithApple = vi.fn<AppleAuthService['signInWithApple']>();
+  const authService: AppleAuthService = {
+    signInWithApple,
+  };
 
   const app = createApp({
     config,
     database,
     logger,
+    authService,
     clock,
   });
 
   beforeEach(() => {
     checkConnection.mockResolvedValue(undefined);
+    signInWithApple.mockResolvedValue({
+      accessToken: 'roomscan-access-token',
+      refreshToken: 'roomscan-refresh-token',
+      user: {
+        id: 'eb5d278f-c857-45c7-887d-7be65288cb75',
+        email: 'user@example.com',
+        provider: 'apple',
+      },
+    });
   });
 
   it('returns liveness without checking the database', async () => {
@@ -61,6 +86,7 @@ describe('RoomScan HTTP application', () => {
       config,
       database,
       logger,
+      authService,
     });
     const response = await request(defaultClockApp).get('/api/v1/health').expect(200);
     const body = HealthResponseSchema.parse(response.body as unknown);
@@ -125,6 +151,18 @@ describe('RoomScan HTTP application', () => {
     });
     expect(body.paths).toHaveProperty('/api/v1/health');
     expect(body.paths).toHaveProperty('/api/v1/ready');
+    expect(body.paths).toHaveProperty('/api/v1/auth/apple');
+    const authPath = z
+      .object({
+        post: z.object({
+          responses: z.record(z.string(), z.unknown()),
+        }),
+      })
+      .parse(body.paths['/api/v1/auth/apple']);
+
+    expect(Object.keys(authPath.post.responses)).toEqual(
+      expect.arrayContaining(['200', '400', '401', '500', '503']),
+    );
   });
 
   it('serves the Swagger UI', async () => {
@@ -163,5 +201,81 @@ describe('RoomScan HTTP application', () => {
       message: 'Invalid request payload',
     });
     expect(body.requestId).toEqual(expect.any(String));
+  });
+
+  it('authenticates with an Apple identity token', async () => {
+    const response = await request(app)
+      .post('/api/v1/auth/apple')
+      .set('x-request-id', 'apple-auth-request')
+      .send({ identityToken: 'apple-identity-token' })
+      .expect(200);
+    const body = AppleSignInResponseSchema.parse(response.body as unknown);
+
+    expect(signInWithApple).toHaveBeenCalledWith('apple-identity-token');
+    expect(body).toEqual({
+      accessToken: 'roomscan-access-token',
+      refreshToken: 'roomscan-refresh-token',
+      user: {
+        id: 'eb5d278f-c857-45c7-887d-7be65288cb75',
+        email: 'user@example.com',
+        provider: 'apple',
+      },
+    });
+    expect(response.headers['x-request-id']).toBe('apple-auth-request');
+  });
+
+  it('rejects a missing Apple identity token', async () => {
+    const response = await request(app).post('/api/v1/auth/apple').send({}).expect(400);
+    const body = ErrorResponseSchema.parse(response.body as unknown);
+
+    expect(body.error.code).toBe('VALIDATION_ERROR');
+    expect(signInWithApple).not.toHaveBeenCalled();
+  });
+
+  it('rejects an invalid Apple identity token without exposing verification details', async () => {
+    signInWithApple.mockRejectedValueOnce(new InvalidAppleIdentityTokenError());
+
+    const response = await request(app)
+      .post('/api/v1/auth/apple')
+      .send({ identityToken: 'invalid-token' })
+      .expect(401);
+    const body = ErrorResponseSchema.parse(response.body as unknown);
+
+    expect(body.error).toEqual({
+      code: 'INVALID_APPLE_IDENTITY_TOKEN',
+      message: 'Apple identity token is invalid',
+    });
+    expect(JSON.stringify(body)).not.toContain('invalid-token');
+  });
+
+  it('reports Apple identity services as unavailable', async () => {
+    signInWithApple.mockRejectedValueOnce(new AppleIdentityProviderUnavailableError());
+
+    const response = await request(app)
+      .post('/api/v1/auth/apple')
+      .send({ identityToken: 'valid-format-token' })
+      .expect(503);
+    const body = ErrorResponseSchema.parse(response.body as unknown);
+
+    expect(body.error).toEqual({
+      code: 'APPLE_IDENTITY_PROVIDER_UNAVAILABLE',
+      message: 'Apple identity provider is unavailable',
+    });
+  });
+
+  it('returns a safe internal error when authentication fails unexpectedly', async () => {
+    signInWithApple.mockRejectedValueOnce(new Error('secret=do-not-expose'));
+
+    const response = await request(app)
+      .post('/api/v1/auth/apple')
+      .send({ identityToken: 'valid-format-token' })
+      .expect(500);
+    const body = ErrorResponseSchema.parse(response.body as unknown);
+
+    expect(body.error).toEqual({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: 'An unexpected error occurred',
+    });
+    expect(JSON.stringify(body)).not.toContain('do-not-expose');
   });
 });

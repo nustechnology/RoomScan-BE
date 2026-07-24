@@ -13,6 +13,8 @@ import { notFoundHandler } from './common/middleware/not-found.js';
 import { API_DOC_PATH, API_PREFIX } from './config/constants.js';
 import type { AppConfig } from './config/env.js';
 import type { DatabaseHealth } from './infrastructure/database/database.js';
+import { createAuthRouter } from './modules/auth/auth.routes.js';
+import type { AppleAuthService } from './modules/auth/auth.types.js';
 import { createHealthRouter } from './modules/health/health.routes.js';
 import { createOpenApiDocument } from './openapi/document.js';
 
@@ -20,10 +22,17 @@ export interface AppDependencies {
   config: AppConfig;
   database: DatabaseHealth;
   logger: Logger;
+  authService: AppleAuthService;
   clock?: () => Date;
 }
 
-export function createApp({ config, database, logger, clock }: AppDependencies): Express {
+export function createApp({
+  config,
+  database,
+  logger,
+  authService,
+  clock,
+}: AppDependencies): Express {
   const app = express();
   const openApiDocument = createOpenApiDocument();
 
@@ -80,6 +89,12 @@ export function createApp({ config, database, logger, clock }: AppDependencies):
     }),
   );
 
+  app.use(
+    API_PREFIX,
+    createAuthRouter({
+      authService,
+    }),
+  );
   app.use(
     API_PREFIX,
     createHealthRouter({

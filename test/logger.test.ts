@@ -10,6 +10,11 @@ function makeConfig(logLevel: AppConfig['logLevel']): AppConfig {
     databaseUrl: 'postgresql://roomscan:roomscan@localhost:5432/roomscan',
     logLevel,
     corsOrigins: '*',
+    appleClientId: 'com.example.roomscan',
+    accessTokenSecret: 'access-secret-that-is-at-least-32-characters',
+    refreshTokenSecret: 'refresh-secret-that-is-at-least-32-characters',
+    accessTokenTtlSeconds: 900,
+    refreshTokenTtlSeconds: 2_592_000,
   };
 }
 

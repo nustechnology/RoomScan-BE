@@ -5,9 +5,9 @@ It starts from `src/server.ts`, while `src/app.ts` creates the HTTP application
 from injected dependencies. Keeping `app.listen` outside the app factory makes
 API tests deterministic and prevents them from opening network ports.
 
-The current product-facing scope contains only the health module. The Prisma
-schema intentionally has no business models yet; Room, Scan, User, and
-authentication behavior must not be inferred until their requirements are
+The current product-facing scope contains health checks and Apple Sign-In
+authentication. The Prisma schema owns the `User` model used by authentication;
+Room and Scan behavior must not be inferred until their requirements are
 defined.
 
 ## Request flow
@@ -23,7 +23,8 @@ defined.
 
 - `config`: environment validation and stable application constants.
 - `common`: reusable HTTP errors, middleware and schemas.
-- `infrastructure`: PostgreSQL/Prisma and logging implementations.
+- `infrastructure`: PostgreSQL/Prisma, Apple identity-token verification,
+  RoomScan token issuance and logging implementations.
 - `modules`: product-facing route modules. Each module owns its schemas,
   router and OpenAPI registration.
 - `openapi`: combines module registries into the public OpenAPI document.
@@ -31,11 +32,36 @@ defined.
 Business modules should depend on small interfaces rather than importing the
 global Prisma client directly. Runtime composition belongs in `server.ts`.
 
+## Authentication
+
+`POST /api/v1/auth/apple` accepts only an Apple identity token. The auth module
+depends on interfaces for Apple verification, user persistence and application
+token issuance. Infrastructure adapters verify RS256 tokens against Apple's
+cached remote JWKS, atomically upsert users by `(provider, providerId)`, and
+sign RoomScan access and refresh JWTs with separate secrets.
+
+Apple `sub` is the stable external identifier. Email is nullable and is never
+used to find or link a user. A supplied email updates the stored email and
+verification state; an absent email leaves existing values unchanged.
+
+The refresh JWT is issued for the mobile client but is not persisted or
+consumed by an endpoint yet. Apple authorization-code exchange, nonce
+validation, application refresh-token rotation and revocation are outside the
+implemented scope.
+
+## Persistence
+
+The composition root creates one Prisma Client and injects it into the database
+health/lifecycle adapter and the Apple user repository. Product modules never
+import that client directly. The unique provider identity constraint makes
+concurrent first-time Apple logins idempotent at the database boundary.
+
 ## Lifecycle
 
 The server validates configuration before listening. SIGINT and SIGTERM close
-the HTTP server and disconnect Prisma. Uncaught exceptions and rejected
-promises are logged internally and trigger the same shutdown path.
+the HTTP server and disconnect the shared Prisma Client. Uncaught exceptions
+and rejected promises are logged internally and trigger the same shutdown
+path.
 
 ## Architecture documentation triggers
 
