@@ -22,8 +22,8 @@ export class AuthService {
     this.#tokenIssuer = tokenIssuer;
   }
 
-  async signInWithApple(identityToken: string): Promise<AppleAuthResult> {
-    const identity = await this.#appleIdentityVerifier.verify(identityToken);
+  async signInWithApple(identityToken: string, nonce?: string): Promise<AppleAuthResult> {
+    const identity = await this.#appleIdentityVerifier.verify(identityToken, nonce);
     const user = await this.#userRepository.upsertAppleUser(identity);
     const tokens = await this.#tokenIssuer.issueTokens(user.id);
 

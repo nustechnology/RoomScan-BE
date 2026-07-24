@@ -5,7 +5,7 @@ export interface VerifiedAppleIdentity {
 }
 
 export interface AppleIdentityVerifier {
-  verify(identityToken: string): Promise<VerifiedAppleIdentity>;
+  verify(identityToken: string, nonce?: string): Promise<VerifiedAppleIdentity>;
 }
 
 export interface AuthenticatedUser {
@@ -32,5 +32,5 @@ export interface AppleAuthResult extends AuthTokenPair {
 }
 
 export interface AppleAuthService {
-  signInWithApple(identityToken: string): Promise<AppleAuthResult>;
+  signInWithApple(identityToken: string, nonce?: string): Promise<AppleAuthResult>;
 }

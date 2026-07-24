@@ -90,6 +90,35 @@ describe('AppleIdentityTokenVerifier', () => {
     });
   });
 
+  it('verifies a token with a matching nonce', async () => {
+    const verifier = createVerifier();
+    const token = await createIdentityToken({ nonce: 'client-nonce-123' });
+
+    await expect(verifier.verify(token, 'client-nonce-123')).resolves.toEqual({
+      providerId: 'apple-subject',
+      email: 'user@example.com',
+      emailVerified: true,
+    });
+  });
+
+  it('rejects a token whose nonce does not match the client nonce', async () => {
+    const verifier = createVerifier();
+    const token = await createIdentityToken({ nonce: 'server-nonce' });
+
+    await expect(verifier.verify(token, 'client-nonce')).rejects.toBeInstanceOf(
+      InvalidAppleIdentityTokenError,
+    );
+  });
+
+  it('rejects a token missing a nonce claim when a client nonce is provided', async () => {
+    const verifier = createVerifier();
+    const token = await createIdentityToken();
+
+    await expect(verifier.verify(token, 'client-nonce')).rejects.toBeInstanceOf(
+      InvalidAppleIdentityTokenError,
+    );
+  });
+
   it('accepts boolean email verification claims', async () => {
     const verifier = createVerifier();
 

@@ -38,7 +38,7 @@ describe('AuthService', () => {
         provider: 'apple',
       },
     });
-    expect(verify).toHaveBeenCalledWith('identity-token');
+    expect(verify).toHaveBeenCalledWith('identity-token', undefined);
     expect(upsertAppleUser).toHaveBeenCalledWith({
       providerId: 'apple-subject',
       email: 'user@example.com',
@@ -61,6 +61,32 @@ describe('AuthService', () => {
     await expect(service.signInWithApple('identity-token')).rejects.toBe(verificationError);
     expect(upsertAppleUser).not.toHaveBeenCalled();
     expect(issueTokens).not.toHaveBeenCalled();
+  });
+
+  it('threads a client nonce through to the identity verifier', async () => {
+    const verify = vi.fn<AppleIdentityVerifier['verify']>().mockResolvedValue({
+      providerId: 'apple-subject',
+      email: 'user@example.com',
+      emailVerified: true,
+    });
+    const upsertAppleUser = vi.fn<AppleUserRepository['upsertAppleUser']>().mockResolvedValue({
+      id: 'eb5d278f-c857-45c7-887d-7be65288cb75',
+      email: 'user@example.com',
+      provider: 'apple',
+    });
+    const issueTokens = vi.fn<AuthTokenIssuer['issueTokens']>().mockResolvedValue({
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+    });
+    const service = new AuthService({
+      appleIdentityVerifier: { verify },
+      userRepository: { upsertAppleUser },
+      tokenIssuer: { issueTokens },
+    });
+
+    await service.signInWithApple('identity-token', 'client-nonce');
+
+    expect(verify).toHaveBeenCalledWith('identity-token', 'client-nonce');
   });
 
   it('does not issue tokens when user provisioning fails', async () => {

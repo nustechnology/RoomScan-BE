@@ -30,6 +30,7 @@ const appleClaimsSchema = z.object({
   iat: z.number().int(),
   email: optionalEmailSchema,
   email_verified: z.union([z.boolean(), z.enum(['true', 'false'])]).optional(),
+  nonce: z.string().trim().min(1).optional(),
 });
 
 export interface AppleIdentityTokenVerifierOptions {
@@ -78,7 +79,7 @@ export class AppleIdentityTokenVerifier implements AppleIdentityVerifier {
     this.#clock = clock;
   }
 
-  async verify(identityToken: string): Promise<VerifiedAppleIdentity> {
+  async verify(identityToken: string, nonce?: string): Promise<VerifiedAppleIdentity> {
     try {
       const currentDate = this.#clock();
       const { payload } = await jwtVerify(identityToken, this.#keyResolver, {
@@ -93,6 +94,10 @@ export class AppleIdentityTokenVerifier implements AppleIdentityVerifier {
       const nowSeconds = Math.floor(currentDate.getTime() / 1000);
 
       if (claims.iat > nowSeconds + CLOCK_TOLERANCE_SECONDS) {
+        throw new InvalidAppleIdentityTokenError();
+      }
+
+      if (nonce !== undefined && claims.nonce !== nonce) {
         throw new InvalidAppleIdentityTokenError();
       }
 

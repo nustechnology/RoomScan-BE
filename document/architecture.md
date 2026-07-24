@@ -55,28 +55,18 @@ are outside the implemented scope.
 Apple authorization-code exchange is not implemented: the endpoint accepts only
 Apple identity tokens, not authorization codes.
 
-### Nonce binding and replay protection
+### Nonce binding
 
-Nonce binding is not implemented. The client sends an identity token without a
-nonce, and the server verifies it without requiring or checking a nonce claim.
-This means the identity token is not bound to a single authentication request:
-a captured token can be replayed against this endpoint until it expires.
+The endpoint supports nonce binding to prevent identity-token replay. Clients
+may generate a random nonce, include it in the Sign In with Apple authorization
+request, receive it back in the identity token's `nonce` claim, and pass the
+same nonce alongside the token in `POST /api/v1/auth/apple`.
 
-**Security exception**: Without nonce binding, the Apple identity token is
-vulnerable to replay attacks. An attacker who intercepts a valid identity token
-can authenticate as that user for the token's remaining lifetime (Apple identity
-tokens expire within a few minutes). To close this gap, implementers should:
-
-1. Have the client generate a random nonce, include it in the Sign In with Apple
-   authorization request, and receive the nonce back in the `nonce` claim of the
-   identity token.
-2. Pass the nonce alongside the identity token in `POST /api/v1/auth/apple`.
-3. Validate in `AppleIdentityTokenVerifier` that the token's `nonce` claim
-   matches the client-provided nonce.
-
-Until then, the rate limiter (20 attempts per 15 minutes) provides limited
-mitigation against brute-force replay but does not prevent single-replay
-attacks.
+When the client provides a nonce, `AppleIdentityTokenVerifier` requires the
+token's `nonce` claim to match exactly. Missing or mismatched nonces are
+rejected as `InvalidAppleIdentityTokenError`. When no nonce is provided, the
+claim is not checked — allowing non-upgraded clients to authenticate, but
+without replay protection.
 
 ## Rate limiting
 

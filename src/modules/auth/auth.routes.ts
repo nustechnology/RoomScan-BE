@@ -27,8 +27,9 @@ export function createAuthRouter({ authService, rateLimiter }: AuthRouterDepende
     validateRequest({ body: AppleSignInRequestSchema }),
     async (_request, response, next) => {
       try {
-        const { identityToken } = (response.locals.validated as { body: AppleSignInRequest }).body;
-        const result = await authService.signInWithApple(identityToken);
+        const { identityToken, nonce } = (response.locals.validated as { body: AppleSignInRequest })
+          .body;
+        const result = await authService.signInWithApple(identityToken, nonce);
         const body = AppleSignInResponseSchema.parse(result);
 
         response.status(200).json(body);

@@ -75,10 +75,12 @@ or store details. Browser clients may read the three headers through CORS.
 
 ## Apple authentication
 
-The request body contains only a non-empty `identityToken` string of at most
-16 KiB. Unknown fields are rejected. The server validates the Apple signature,
-issuer, client audience, expiration, issued-at time and subject before looking
-up a user.
+The request body contains a non-empty `identityToken` string of at most
+16 KiB and an optional `nonce` string of at most 512 bytes. Unknown fields are
+rejected. When a nonce is provided the server validates it against the identity
+token's `nonce` claim before looking up a user. The server validates the Apple
+signature, issuer, client audience, expiration, issued-at time and subject
+regardless of nonce.
 
 Successful authentication always returns 200:
 

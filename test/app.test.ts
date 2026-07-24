@@ -235,7 +235,7 @@ describe('RoomScan HTTP application', () => {
       .expect(200);
     const body = AppleSignInResponseSchema.parse(response.body as unknown);
 
-    expect(signInWithApple).toHaveBeenCalledWith('apple-identity-token');
+    expect(signInWithApple).toHaveBeenCalledWith('apple-identity-token', undefined);
     expect(body).toEqual({
       accessToken: 'roomscan-access-token',
       refreshToken: 'roomscan-refresh-token',
@@ -251,6 +251,27 @@ describe('RoomScan HTTP application', () => {
     expect(response.headers['ratelimit-policy']).toContain('"api"');
     expect(response.headers['ratelimit-policy']).toContain('"auth-apple"');
     expect(response.headers['x-ratelimit-limit']).toBeUndefined();
+  });
+
+  it('authenticates with an Apple identity token and nonce', async () => {
+    const response = await request(app)
+      .post('/api/v1/auth/apple')
+      .set('x-request-id', 'apple-auth-nonce-request')
+      .send({ identityToken: 'apple-identity-token', nonce: 'client-nonce' })
+      .expect(200);
+    const body = AppleSignInResponseSchema.parse(response.body as unknown);
+
+    expect(signInWithApple).toHaveBeenCalledWith('apple-identity-token', 'client-nonce');
+    expect(body).toEqual({
+      accessToken: 'roomscan-access-token',
+      refreshToken: 'roomscan-refresh-token',
+      user: {
+        id: 'eb5d278f-c857-45c7-887d-7be65288cb75',
+        email: 'user@example.com',
+        provider: 'apple',
+      },
+    });
+    expect(response.headers['x-request-id']).toBe('apple-auth-nonce-request');
   });
 
   it('exposes standard rate-limit headers through CORS', async () => {
