@@ -99,6 +99,11 @@ allow-listed sorting, stable ID tie-breaking, and offset pagination. The
 `@@index([ownerId, deletedAt, updatedAt, id])` index supports the default
 active-owner listing ordered by latest activity.
 
+Canonical project detail resolves the record and the caller's Owner or active
+Viewer role in one repository lookup. An Owner update performs its guarded
+write and response read in one transaction, so an overlapping deletion cannot
+turn an already-applied update into a not-found response.
+
 Deletion marks `Project.deletedAt` and revokes active `ProjectAccess` records in
 one database transaction. A repeated deletion by the same Owner is idempotent.
 Physical cleanup remains outside this module. Scan, Invitation, Note, thumbnail,

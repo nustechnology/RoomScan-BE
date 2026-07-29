@@ -61,7 +61,7 @@ export function createProjectRouter({
 
         response.status(201).json(responseBody);
       } catch (error) {
-        next(projectNotFoundToAppError(error) ?? error);
+        next(error);
       }
     },
   );
@@ -84,7 +84,7 @@ export function createProjectRouter({
 
         response.status(200).json(responseBody);
       } catch (error) {
-        next(projectNotFoundToAppError(error) ?? error);
+        next(error);
       }
     },
   );

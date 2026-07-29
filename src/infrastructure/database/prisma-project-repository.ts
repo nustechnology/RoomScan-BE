@@ -1,5 +1,5 @@
-import { ProjectRole as PrismaProjectRole } from '../../generated/prisma/enums.js';
 import type { PrismaClient } from '../../generated/prisma/client.js';
+import { ProjectRole as PrismaProjectRole } from '../../generated/prisma/enums.js';
 import { ProjectNotFoundError } from '../../modules/project/project.errors.js';
 import type {
   ProjectCreateInput,
@@ -82,6 +82,25 @@ function orderByFor(sort: ProjectSort): ProjectOrderBy[] {
   return [{ [field]: direction }, { id: direction }];
 }
 
+function viewableProjectWhere(id: string, userId: string) {
+  return {
+    id,
+    deletedAt: null,
+    OR: [
+      { ownerId: userId },
+      {
+        accesses: {
+          some: {
+            userId,
+            role: PrismaProjectRole.VIEWER,
+            revokedAt: null,
+          },
+        },
+      },
+    ],
+  };
+}
+
 export class PrismaProjectRepository implements ProjectRepository {
   readonly #client: Pick<PrismaClient, 'project' | '$transaction'>;
 
@@ -135,33 +154,28 @@ export class PrismaProjectRepository implements ProjectRepository {
     };
   }
 
-  async findById(id: string): Promise<ProjectRecord | null> {
+  async findByIdForUser(
+    id: string,
+    userId: string,
+  ): Promise<{ record: ProjectRecord; role: ProjectRole } | null> {
     const row = await this.#client.project.findFirst({
-      where: { id, deletedAt: null },
+      where: viewableProjectWhere(id, userId),
       select: projectSelect,
     });
 
-    return row === null ? null : toProjectRecord(row);
+    if (row === null) {
+      return null;
+    }
+
+    return {
+      record: toProjectRecord(row),
+      role: row.ownerId === userId ? 'OWNER' : 'VIEWER',
+    };
   }
 
   async findAccessRole(id: string, userId: string): Promise<ProjectRole | null> {
     const project = await this.#client.project.findFirst({
-      where: {
-        id,
-        deletedAt: null,
-        OR: [
-          { ownerId: userId },
-          {
-            accesses: {
-              some: {
-                userId,
-                role: PrismaProjectRole.VIEWER,
-                revokedAt: null,
-              },
-            },
-          },
-        ],
-      },
+      where: viewableProjectWhere(id, userId),
       select: {
         ownerId: true,
       },
@@ -175,25 +189,27 @@ export class PrismaProjectRepository implements ProjectRepository {
   }
 
   async update(id: string, ownerId: string, data: ProjectUpdateInput): Promise<ProjectRecord> {
-    const result = await this.#client.project.updateMany({
-      where: { id, ownerId, deletedAt: null },
-      data,
+    return await this.#client.$transaction(async (transaction) => {
+      const result = await transaction.project.updateMany({
+        where: { id, ownerId, deletedAt: null },
+        data,
+      });
+
+      if (result.count === 0) {
+        throw new ProjectNotFoundError();
+      }
+
+      const row = await transaction.project.findFirst({
+        where: { id, ownerId, deletedAt: null },
+        select: projectSelect,
+      });
+
+      if (row === null) {
+        throw new ProjectNotFoundError();
+      }
+
+      return toProjectRecord(row);
     });
-
-    if (result.count === 0) {
-      throw new ProjectNotFoundError();
-    }
-
-    const row = await this.#client.project.findFirst({
-      where: { id, ownerId, deletedAt: null },
-      select: projectSelect,
-    });
-
-    if (row === null) {
-      throw new ProjectNotFoundError();
-    }
-
-    return toProjectRecord(row);
   }
 
   async softDelete(id: string, ownerId: string): Promise<void> {

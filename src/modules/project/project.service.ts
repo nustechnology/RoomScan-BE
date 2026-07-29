@@ -73,12 +73,11 @@ export class ProjectService {
   }
 
   async getById(userId: string, projectId: string): Promise<ProjectResult> {
-    const record = await this.#repository.findById(projectId);
-    if (record === null) {
+    const project = await this.#repository.findByIdForUser(projectId, userId);
+    if (project === null) {
       throw new ProjectNotFoundError();
     }
-    const role = await this.#permissions.requireView(projectId, userId);
-    return toResult(record, role);
+    return toResult(project.record, project.role);
   }
 
   async update(

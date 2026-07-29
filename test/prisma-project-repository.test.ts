@@ -165,23 +165,52 @@ describe('PrismaProjectRepository', () => {
     );
   });
 
-  it('finds only a non-deleted project by ID', async () => {
+  it('finds an active project that the Owner can view in one lookup', async () => {
     const { client, project } = createClient();
     const repository = new PrismaProjectRepository(client);
 
-    await expect(repository.findById(PROJECT_ID)).resolves.toMatchObject({ id: PROJECT_ID });
+    await expect(repository.findByIdForUser(PROJECT_ID, OWNER_ID)).resolves.toMatchObject({
+      record: { id: PROJECT_ID },
+      role: 'OWNER',
+    });
     expect(project.findFirst).toHaveBeenCalledWith({
-      where: { id: PROJECT_ID, deletedAt: null },
+      where: {
+        id: PROJECT_ID,
+        deletedAt: null,
+        OR: [
+          { ownerId: OWNER_ID },
+          {
+            accesses: {
+              some: {
+                userId: OWNER_ID,
+                role: 'VIEWER',
+                revokedAt: null,
+              },
+            },
+          },
+        ],
+      },
       select: expectedProjectSelect,
     });
   });
 
-  it('returns null when project detail is absent', async () => {
+  it('returns null when project detail is absent or inaccessible', async () => {
     const { client, project } = createClient();
     project.findFirst.mockResolvedValue(null);
     const repository = new PrismaProjectRepository(client);
 
-    await expect(repository.findById(PROJECT_ID)).resolves.toBeNull();
+    await expect(repository.findByIdForUser(PROJECT_ID, VIEWER_ID)).resolves.toBeNull();
+  });
+
+  it('returns Viewer for an active Viewer detail lookup', async () => {
+    const { client, project } = createClient();
+    project.findFirst.mockResolvedValue({ ...createRow(), ownerId: OWNER_ID });
+    const repository = new PrismaProjectRepository(client);
+
+    await expect(repository.findByIdForUser(PROJECT_ID, VIEWER_ID)).resolves.toMatchObject({
+      record: { id: PROJECT_ID },
+      role: 'VIEWER',
+    });
   });
 
   it('recognizes the Owner through the shared access lookup', async () => {
@@ -220,8 +249,8 @@ describe('PrismaProjectRepository', () => {
     await expect(repository.findAccessRole(PROJECT_ID, VIEWER_ID)).resolves.toBeNull();
   });
 
-  it('updates only an active project owned by the caller', async () => {
-    const { client, project } = createClient();
+  it('updates and reads only an active project owned by the caller in one transaction', async () => {
+    const { client, project, transaction } = createClient();
     const repository = new PrismaProjectRepository(client);
 
     await repository.update(PROJECT_ID, OWNER_ID, {
@@ -237,6 +266,7 @@ describe('PrismaProjectRepository', () => {
       where: { id: PROJECT_ID, ownerId: OWNER_ID, deletedAt: null },
       select: expectedProjectSelect,
     });
+    expect(transaction).toHaveBeenCalledOnce();
   });
 
   it('throws a hidden not-found error when an update affects no rows', async () => {

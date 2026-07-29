@@ -36,7 +36,9 @@ function createRepository() {
     list: vi
       .fn<ProjectRepository['list']>()
       .mockResolvedValue({ items: [createRecord()], total: 1 }),
-    findById: vi.fn<ProjectRepository['findById']>().mockResolvedValue(createRecord()),
+    findByIdForUser: vi
+      .fn<ProjectRepository['findByIdForUser']>()
+      .mockResolvedValue({ record: createRecord(), role: 'OWNER' }),
     findAccessRole: vi
       .fn<ProjectRepository['findAccessRole']>()
       .mockImplementation(async (_projectId, userId) =>
@@ -131,8 +133,8 @@ describe('ProjectService', () => {
 
     const result = await service.getById(OWNER_ID, PROJECT_ID);
 
-    expect(mocks.findAccessRole).toHaveBeenCalledWith(PROJECT_ID, OWNER_ID);
-    expect(mocks.findById).toHaveBeenCalledWith(PROJECT_ID);
+    expect(mocks.findByIdForUser).toHaveBeenCalledWith(PROJECT_ID, OWNER_ID);
+    expect(mocks.findAccessRole).not.toHaveBeenCalled();
     expect(result.permissions).toMatchObject({
       role: 'OWNER',
       canView: true,
@@ -142,7 +144,8 @@ describe('ProjectService', () => {
   });
 
   it('returns read-only permissions for an active Viewer', async () => {
-    const { service } = createRepository();
+    const { mocks, service } = createRepository();
+    mocks.findByIdForUser.mockResolvedValue({ record: createRecord(), role: 'VIEWER' });
 
     const result = await service.getById(VIEWER_ID, PROJECT_ID);
 
@@ -156,24 +159,24 @@ describe('ProjectService', () => {
     });
   });
 
-  it('hides a missing, deleted, revoked, or inaccessible project', async () => {
+  it('hides an inaccessible project as if it does not exist', async () => {
     const { mocks, service } = createRepository();
-    mocks.findAccessRole.mockResolvedValue(null);
+    mocks.findByIdForUser.mockResolvedValue(null);
 
     await expect(service.getById(VIEWER_ID, PROJECT_ID)).rejects.toBeInstanceOf(
       ProjectNotFoundError,
     );
-    expect(mocks.findById).toHaveBeenCalledWith(PROJECT_ID);
+    expect(mocks.findByIdForUser).toHaveBeenCalledWith(PROJECT_ID, VIEWER_ID);
   });
 
-  it('hides a missing project before checking access', async () => {
+  it('hides a missing project', async () => {
     const { mocks, service } = createRepository();
-    mocks.findById.mockResolvedValue(null);
+    mocks.findByIdForUser.mockResolvedValue(null);
 
     await expect(service.getById(OWNER_ID, PROJECT_ID)).rejects.toBeInstanceOf(
       ProjectNotFoundError,
     );
-    expect(mocks.findAccessRole).not.toHaveBeenCalled();
+    expect(mocks.findByIdForUser).toHaveBeenCalledWith(PROJECT_ID, OWNER_ID);
   });
 
   it('updates a project as its Owner', async () => {

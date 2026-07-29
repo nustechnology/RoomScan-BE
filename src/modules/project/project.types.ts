@@ -86,7 +86,10 @@ export interface ProjectRepository {
     items: ProjectRecord[];
     total: number;
   }>;
-  findById(id: string): Promise<ProjectRecord | null>;
+  findByIdForUser(
+    id: string,
+    userId: string,
+  ): Promise<{ record: ProjectRecord; role: ProjectRole } | null>;
   findAccessRole(id: string, userId: string): Promise<ProjectRole | null>;
   update(id: string, ownerId: string, data: ProjectUpdateInput): Promise<ProjectRecord>;
   softDelete(id: string, ownerId: string): Promise<void>;
