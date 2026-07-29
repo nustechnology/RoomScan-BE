@@ -134,7 +134,7 @@ and `x-request-id`.
 | `APPLE_CLIENT_ID`                      | Yes      | —             | Native app bundle identifier used as Apple `aud`     |
 | `AUTH_ACCESS_TOKEN_SECRET`             | Yes      | —             | HS256 access-token secret, at least 32 characters    |
 | `AUTH_REFRESH_TOKEN_SECRET`            | Yes      | —             | HS256 refresh-token secret, at least 32 characters   |
-| `AUTH_ACCESS_TOKEN_TTL_SECONDS`        | No       | `900`         | RoomScan access-token lifetime                       |
+| `AUTH_ACCESS_TOKEN_TTL_SECONDS`        | No       | `3600`        | RoomScan access-token lifetime                       |
 | `AUTH_REFRESH_TOKEN_TTL_SECONDS`       | No       | `2592000`     | RoomScan refresh-token lifetime                      |
 
 The remaining PostgreSQL and `ROOMSCAN_PORT` values in `.env.example` configure

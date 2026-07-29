@@ -12,7 +12,7 @@ describe('JoseAuthTokenIssuer', () => {
     const issuer = new JoseAuthTokenIssuer({
       accessTokenSecret: ACCESS_SECRET,
       refreshTokenSecret: REFRESH_SECRET,
-      accessTokenTtlSeconds: 900,
+      accessTokenTtlSeconds: 3600,
       refreshTokenTtlSeconds: 2_592_000,
       clock: () => NOW,
     });
@@ -45,7 +45,7 @@ describe('JoseAuthTokenIssuer', () => {
       aud: 'roomscan-mobile',
       iat: Math.floor(NOW.getTime() / 1000),
     });
-    expect(access.payload.exp! - access.payload.iat!).toBe(900);
+    expect(access.payload.exp! - access.payload.iat!).toBe(3600);
     expect(refresh.payload.exp! - refresh.payload.iat!).toBe(2_592_000);
     expect(access.payload.jti).toEqual(expect.any(String));
     expect(refresh.payload.jti).toEqual(expect.any(String));
@@ -56,7 +56,7 @@ describe('JoseAuthTokenIssuer', () => {
     const issuer = new JoseAuthTokenIssuer({
       accessTokenSecret: ACCESS_SECRET,
       refreshTokenSecret: REFRESH_SECRET,
-      accessTokenTtlSeconds: 900,
+      accessTokenTtlSeconds: 3600,
       refreshTokenTtlSeconds: 2_592_000,
       clock: () => NOW,
     });

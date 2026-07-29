@@ -18,7 +18,7 @@ function makeConfig(logLevel: AppConfig['logLevel']): AppConfig {
     appleClientId: 'com.example.roomscan',
     accessTokenSecret: 'access-secret-that-is-at-least-32-characters',
     refreshTokenSecret: 'refresh-secret-that-is-at-least-32-characters',
-    accessTokenTtlSeconds: 900,
+    accessTokenTtlSeconds: 3600,
     refreshTokenTtlSeconds: 2_592_000,
   };
 }

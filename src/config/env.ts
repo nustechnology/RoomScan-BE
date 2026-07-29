@@ -108,7 +108,7 @@ export const environmentSchema = z
     APPLE_CLIENT_ID: z.string().trim().min(1).max(255),
     AUTH_ACCESS_TOKEN_SECRET: z.string().min(32),
     AUTH_REFRESH_TOKEN_SECRET: z.string().min(32),
-    AUTH_ACCESS_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(900),
+    AUTH_ACCESS_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(3600),
     AUTH_REFRESH_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(2_592_000),
   })
   .superRefine((environment, context) => {
