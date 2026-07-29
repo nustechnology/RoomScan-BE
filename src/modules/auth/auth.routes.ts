@@ -1,4 +1,4 @@
-import { Router, type RequestHandler } from 'express';
+import { Router } from 'express';
 
 import { AppError } from '../../common/errors/app-error.js';
 import { validateRequest } from '../../common/middleware/validate-request.js';
@@ -15,15 +15,13 @@ import type { AppleAuthService } from './auth.types.js';
 
 export interface AuthRouterDependencies {
   authService: AppleAuthService;
-  rateLimiter: RequestHandler;
 }
 
-export function createAuthRouter({ authService, rateLimiter }: AuthRouterDependencies): Router {
+export function createAuthRouter({ authService }: AuthRouterDependencies): Router {
   const router = Router();
 
   router.post(
     '/auth/apple',
-    rateLimiter,
     validateRequest({ body: AppleSignInRequestSchema }),
     async (_request, response, next) => {
       try {

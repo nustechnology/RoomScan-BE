@@ -78,6 +78,7 @@ export function createApp({
   );
   app.use(compression());
   app.use(API_PREFIX, rateLimiters.api);
+  app.use(`${API_PREFIX}/auth/apple`, rateLimiters.appleAuth);
   app.use(express.json({ limit: '1mb' }));
   app.use(express.urlencoded({ extended: false, limit: '1mb' }));
 
@@ -99,7 +100,6 @@ export function createApp({
     API_PREFIX,
     createAuthRouter({
       authService,
-      rateLimiter: rateLimiters.appleAuth,
     }),
   );
   app.use(

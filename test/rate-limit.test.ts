@@ -134,6 +134,22 @@ describe('rate limiting', () => {
     expect(signInWithApple).not.toHaveBeenCalled();
   });
 
+  it('counts Apple malformed-JSON requests against the Apple policy', async () => {
+    const { app, signInWithApple } = createTestApp({
+      apiRateLimitMaxRequests: 10,
+      appleAuthRateLimitMaxRequests: 1,
+    });
+
+    await request(app)
+      .post('/api/v1/auth/apple')
+      .set('content-type', 'application/json')
+      .send('{"broken":')
+      .expect(400);
+    await signIn(app).expect(429);
+
+    expect(signInWithApple).not.toHaveBeenCalled();
+  });
+
   it('does not limit health, readiness, Swagger, or OpenAPI', async () => {
     const { app } = createTestApp({
       apiRateLimitMaxRequests: 1,
