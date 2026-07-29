@@ -31,6 +31,28 @@ the new contract merely to make code and documentation agree.
 4. Run `yarn install --immutable` and `yarn prisma:generate`.
 5. Start PostgreSQL with `docker compose up db -d`.
 6. Run `yarn prisma:migrate:deploy` to apply the committed schema migration.
+7. To use the local Apple-login shortcut, set
+   `LOCAL_TEST_AUTH_ENABLED=true`, run `yarn seed:local`, and start the API with
+   `yarn dev`.
+
+Docker supplies only PostgreSQL in the standard local workflow. Run Prisma
+commands, seeds, the API, validation, tests, coverage and builds natively with
+Yarn. If the `db` service is already healthy, leave it running across tasks;
+do not restart or recreate it as part of final verification.
+
+The local seed is idempotent and refuses to run unless
+`NODE_ENV=development`. With the shortcut enabled, use:
+
+```json
+{
+  "identityToken": "roomscan-local-test-user"
+}
+```
+
+at `POST /api/v1/auth/apple`. The response contains normally signed RoomScan
+access and refresh JWTs for `local-test@roomscan.dev`. Other identity tokens
+continue through Apple verification. The production-style Compose API sets
+`NODE_ENV=production`, so it never enables this shortcut.
 
 The default development rate limits use the in-process MemoryStore and require
 no additional service. `TRUST_PROXY` remains empty for direct local and Compose
@@ -52,17 +74,17 @@ The Git pre-commit hook invokes `corepack yarn validate` rather than a global
 `yarn` binary. This keeps terminal and Git GUI commits on the version declared
 in `packageManager`.
 
-For container changes also run:
+The commands above are the routine final verification gate. Do not run
+`docker compose build`, start the Compose API/migrate services, or bring up the
+full stack during normal task verification. Start `docker compose up db -d`
+only when PostgreSQL is unavailable, then run any required migrations and
+endpoint checks against the natively started API.
 
-```bash
-docker compose config
-docker compose build
-docker compose up -d
-```
-
-Confirm `/api/v1/ready` and `/api-doc` before stopping the stack.
-Also confirm that repeated malformed Apple authentication requests eventually
-return 429 while health and readiness continue to return 200.
+Docker-specific verification is outside the routine handoff gate. Run targeted
+Docker checks only when the user explicitly requests them or when the task's
+acceptance criteria directly target the Dockerfile, Compose topology, container
+startup, or container-only behavior. Report exactly which Docker checks were
+run or why they were not applicable.
 
 The handoff must state:
 
@@ -83,8 +105,14 @@ The handoff must state:
 - Never edit `src/generated/prisma` manually.
 
 The committed `add_apple_auth` migration creates the Apple auth provider enum,
-the `users` table and its unique `(provider, providerId)` constraint. Tests use
-a Prisma delegate double; migration and Docker verification use PostgreSQL.
+the `users` table and its unique `(provider, providerId)` constraint. The
+`add_projects` migration creates the `projects` table with a UUID primary key,
+a `users` foreign key with `ON DELETE RESTRICT`, a nullable soft-delete
+timestamp, 50/500-character storage bounds, and an index on
+`(ownerId, deletedAt, updatedAt, id)` for active owner listings. It also creates
+the `ProjectRole` enum and `project_accesses` table used for revocable Viewer
+access. Tests use Prisma delegate doubles; native migration and endpoint
+verification use the PostgreSQL `db` container.
 
 ## Dependency and generated-file policy
 

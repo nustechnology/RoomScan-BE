@@ -1,0 +1,20 @@
+import type { PrismaClient } from '../../generated/prisma/client.js';
+import type { CurrentUser, CurrentUserRepository } from '../../common/middleware/authenticate.js';
+
+export class PrismaCurrentUserRepository implements CurrentUserRepository {
+  readonly #client: Pick<PrismaClient, 'user'>;
+
+  constructor(client: Pick<PrismaClient, 'user'>) {
+    this.#client = client;
+  }
+
+  async findById(userId: string): Promise<CurrentUser | null> {
+    return await this.#client.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+      },
+    });
+  }
+}

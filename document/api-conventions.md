@@ -5,6 +5,8 @@
 - Public application routes are versioned under `/api/v1`.
 - Liveness and readiness are `/api/v1/health` and `/api/v1/ready`.
 - Apple authentication is `POST /api/v1/auth/apple`.
+- Project management is `POST`, `GET`, `GET/:id`, `PATCH/:id`, and `DELETE` at
+  `/api/v1/projects`.
 - Swagger UI remains at `/api-doc`; raw OpenAPI is `/api-doc.json`.
 - Resource paths use plural nouns and kebab-case when business modules arrive.
 
@@ -105,6 +107,115 @@ Malformed or unverifiable Apple tokens return 401 with
 with `RATE_LIMIT_EXCEEDED`. These errors use generic client-facing messages.
 The endpoint does not exchange Apple authorization codes and does not provide
 an application refresh endpoint.
+
+For local development only, `LOCAL_TEST_AUTH_ENABLED=true` with
+`NODE_ENV=development` permits the fixed identity token
+`roomscan-local-test-user`. That sentinel bypasses Apple cryptographic
+verification, resolves the user provisioned by `yarn seed:local`, and otherwise
+uses the normal user upsert and RoomScan JWT issuance flow. Any other token
+still goes through Apple. Configuration rejects the flag in test, staging, and
+production, so this shortcut is not part of the deployed OpenAPI contract.
+
+## Projects
+
+Every project endpoint requires a valid Bearer access token in the
+`Authorization` header. The token subject must still identify a database user.
+The `ownerId` is derived from that current user and is never accepted from
+clients.
+
+| Method   | Endpoint                      | Result                                            |
+| -------- | ----------------------------- | ------------------------------------------------- |
+| `POST`   | `/api/v1/projects`            | Create an owned project; return `201`             |
+| `GET`    | `/api/v1/projects`            | List projects owned by the current user           |
+| `GET`    | `/api/v1/projects/:projectId` | Get detail as the Owner or an active Viewer       |
+| `PATCH`  | `/api/v1/projects/:projectId` | Partially update as the Owner; return `200`       |
+| `DELETE` | `/api/v1/projects/:projectId` | Soft-delete as the Owner; return idempotent `204` |
+
+Project response:
+
+```json
+{
+  "id": "eb5d278f-c857-45c7-887d-7be65288cb75",
+  "name": "District 2 Apartment",
+  "description": "Apartment survey",
+  "owner": {
+    "id": "8c53d31d-2788-48de-82a0-c4f219ca3701",
+    "email": "owner@example.com"
+  },
+  "scanCount": 0,
+  "sharedCount": 0,
+  "thumbnail": null,
+  "syncStatus": null,
+  "createdAt": "2026-07-29T10:00:00.000Z",
+  "updatedAt": "2026-07-29T10:00:00.000Z",
+  "permissions": {
+    "role": "OWNER",
+    "canView": true,
+    "canEdit": true,
+    "canDelete": true,
+    "canShare": true,
+    "canCreateScan": true
+  }
+}
+```
+
+`owner.email` is nullable. An active Viewer receives role `VIEWER` with only
+`canView: true`. `sharedCount` counts active Viewer access records.
+`scanCount` is `0`, and `thumbnail` and `syncStatus` are `null`, until the
+downstream Scan, thumbnail, and sync persistence features are present.
+
+The owned-project list supports case-insensitive name search and page-based
+pagination:
+
+```http
+GET /api/v1/projects?search=apartment&page=1&limit=5&sort=updatedAt:desc
+```
+
+```json
+{
+  "items": [],
+  "pagination": {
+    "page": 1,
+    "limit": 5,
+    "total": 0,
+    "totalPages": 0
+  }
+}
+```
+
+Blank `search` values are treated as absent. `page` defaults to 1; `limit`
+defaults to 5 and may not exceed 100. `sort` defaults to `updatedAt:desc`.
+Supported values are `updatedAt:desc`, `updatedAt:asc`, `createdAt:desc`,
+`createdAt:asc`, `name:asc`, and `name:desc`. Every order uses `id` as its final
+stable tie-breaker.
+
+Validation rules:
+
+- `projectId`: UUID.
+- `name`: trimmed Unicode string, 1–50 characters; duplicate names are allowed.
+- `description`: optional nullable string, maximum 500 characters.
+- Create and update objects reject unknown fields.
+- PATCH must contain at least one supported field.
+- `"description": null` clears the stored description.
+- Clients cannot submit `id`, `ownerId`, `createdAt`, or `updatedAt`.
+
+Authorization and deletion rules:
+
+- The Owner has full project control.
+- An active Viewer may only read canonical project detail.
+- Owned-project listing never includes Viewer-only or soft-deleted projects.
+- Delete sets `deletedAt` and revokes active Viewer access in one transaction.
+- Repeating delete as the same Owner returns `204`; other users receive the
+  hidden not-found response.
+
+Error behavior:
+
+- `400 VALIDATION_ERROR`: invalid body, path parameters, or query parameters.
+- `401 UNAUTHORIZED`: missing/invalid access token or missing current user.
+- `404 PROJECT_NOT_FOUND`: project missing, deleted, revoked, or inaccessible.
+- `429 RATE_LIMIT_EXCEEDED`: API quota exceeded.
+- `500 INTERNAL_SERVER_ERROR`: unexpected failure without Prisma, SQL, or secret
+  leakage.
 
 ## Health semantics
 

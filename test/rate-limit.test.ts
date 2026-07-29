@@ -4,10 +4,15 @@ import { describe, expect, it, vi } from 'vitest';
 import type { Store } from 'express-rate-limit';
 
 import { createApp } from '../src/app.js';
+import type {
+  AccessTokenVerifier,
+  CurrentUserRepository,
+} from '../src/common/middleware/authenticate.js';
 import { createRateLimiters, type RateLimitStores } from '../src/common/middleware/rate-limit.js';
 import { ErrorResponseSchema } from '../src/common/schemas/error.js';
 import type { AppConfig } from '../src/config/env.js';
 import type { AppleAuthService } from '../src/modules/auth/auth.types.js';
+import type { ProjectService } from '../src/modules/project/project.service.js';
 
 const baseConfig: AppConfig = {
   nodeEnv: 'test',
@@ -25,6 +30,7 @@ const baseConfig: AppConfig = {
   refreshTokenSecret: 'refresh-secret-that-is-at-least-32-characters',
   accessTokenTtlSeconds: 3600,
   refreshTokenTtlSeconds: 2_592_000,
+  localTestAuthEnabled: false,
 };
 
 function createTestApp(overrides: Partial<AppConfig> = {}, stores: RateLimitStores = {}) {
@@ -46,6 +52,22 @@ function createTestApp(overrides: Partial<AppConfig> = {}, stores: RateLimitStor
   const authService: AppleAuthService = {
     signInWithApple,
   };
+  const accessTokenVerifier: AccessTokenVerifier = {
+    verify: vi.fn().mockResolvedValue({ userId: 'eb5d278f-c857-45c7-887d-7be65288cb75' }),
+  };
+  const currentUserRepository: CurrentUserRepository = {
+    findById: vi.fn().mockResolvedValue({
+      id: 'eb5d278f-c857-45c7-887d-7be65288cb75',
+      email: 'user@example.com',
+    }),
+  };
+  const projectService = {
+    create: vi.fn(),
+    list: vi.fn(),
+    getById: vi.fn(),
+    update: vi.fn(),
+    delete: vi.fn(),
+  } as unknown as ProjectService;
   const rateLimiters = createRateLimiters(config, logger, stores);
   const app = createApp({
     config,
@@ -55,6 +77,9 @@ function createTestApp(overrides: Partial<AppConfig> = {}, stores: RateLimitStor
     },
     logger,
     authService,
+    projectService,
+    accessTokenVerifier,
+    currentUserRepository,
     rateLimiters,
   });
 

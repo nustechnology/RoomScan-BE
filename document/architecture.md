@@ -5,10 +5,10 @@ It starts from `src/server.ts`, while `src/app.ts` creates the HTTP application
 from injected dependencies. Keeping `app.listen` outside the app factory makes
 API tests deterministic and prevents them from opening network ports.
 
-The current product-facing scope contains health checks and Apple Sign-In
-authentication. The Prisma schema owns the `User` model used by authentication;
-Room and Scan behavior must not be inferred until their requirements are
-defined.
+The current product-facing scope contains health checks, Apple Sign-In
+authentication, and Owner/Viewer project management. The Prisma schema owns the
+`User`, `Project`, and `ProjectAccess` models; Room, Scan, Invitation, Note, and
+asset behavior must not be inferred until their requirements are implemented.
 
 ## Request flow
 
@@ -40,11 +40,21 @@ global Prisma client directly. Runtime composition belongs in `server.ts`.
 
 ## Authentication
 
-`POST /api/v1/auth/apple` accepts only an Apple identity token. The auth module
-depends on interfaces for Apple verification, user persistence and application
-token issuance. Infrastructure adapters verify RS256 tokens against Apple's
-cached remote JWKS, atomically upsert users by `(provider, providerId)`, and
-sign RoomScan access and refresh JWTs with separate secrets.
+`POST /api/v1/auth/apple` normally accepts an Apple identity token. The auth
+module depends on interfaces for Apple verification, user persistence and
+application token issuance. Infrastructure adapters verify RS256 tokens against
+Apple's cached remote JWKS, atomically upsert users by `(provider, providerId)`,
+and sign RoomScan access and refresh JWTs with separate secrets.
+
+An opt-in local development adapter recognizes the fixed
+`roomscan-local-test-user` sentinel instead of calling Apple. Configuration
+validation permits this adapter only when `NODE_ENV=development` and
+`LOCAL_TEST_AUTH_ENABLED=true`; the composition root also requires both
+conditions. The adapter returns the same provider identity created by
+`yarn seed:local`, then the normal user repository and token issuer produce
+real RoomScan access and refresh JWTs. All other tokens still use Apple
+verification. Staging, test, production, and the production-style Compose API
+cannot enable this shortcut.
 
 Apple `sub` is the stable external identifier. Email is nullable and is never
 used to find or link a user. A supplied email updates the stored email and
@@ -54,8 +64,49 @@ The refresh JWT is issued for the mobile client but is not persisted or
 consumed by an endpoint yet. Application refresh-token rotation and revocation
 are outside the implemented scope.
 
-Apple authorization-code exchange is not implemented: the endpoint accepts only
-Apple identity tokens, not authorization codes.
+Apple authorization-code exchange is not implemented: outside the explicitly
+enabled local sentinel, the endpoint accepts only Apple identity tokens, not
+authorization codes.
+
+### Access-token authentication
+
+Project endpoints require a valid RoomScan access token. The
+`AccessTokenVerifier` abstraction verifies HS256 signature, issuer, audience,
+expiration, `tokenType: "access"`, and a UUID `sub` claim using the same issuer
+and audience constants as the token issuer. The JOSE implementation
+(`JoseAccessTokenVerifier`) shares the access-token secret with
+`JoseAuthTokenIssuer`.
+
+The `authenticate` middleware extracts the Bearer token from the
+`Authorization` header, verifies it, loads the current database user, and stores
+that user in `request.locals`. Missing, malformed, expired, refresh, or
+otherwise invalid tokens—and valid tokens whose subject no longer exists—are
+rejected with `401 UNAUTHORIZED`. Handlers read the authenticated user ID
+through `getUserId(request)`.
+
+## Project module
+
+The Project module provides authenticated project creation, owned-project
+listing and search, canonical detail, Owner-only updates, and soft deletion.
+`ProjectPermissionService` authorizes detail for the Owner or an active Viewer;
+only the Owner receives mutation capabilities. Missing, deleted, revoked, and
+inaccessible resources all return `404 PROJECT_NOT_FOUND` to avoid
+resource-existence disclosure.
+
+The `ProjectRepository` interface isolates the service from Prisma.
+`PrismaProjectRepository` performs case-insensitive name search, total counting,
+allow-listed sorting, stable ID tie-breaking, and offset pagination. The
+`@@index([ownerId, deletedAt, updatedAt, id])` index supports the default
+active-owner listing ordered by latest activity.
+
+Deletion marks `Project.deletedAt` and revokes active `ProjectAccess` records in
+one database transaction. A repeated deletion by the same Owner is idempotent.
+Physical cleanup remains outside this module. Scan, Invitation, Note, thumbnail,
+sync-state, and asset cleanup are not claimed here because their persistence
+models are not yet present on this branch.
+
+The owner relation uses `onDelete: Restrict` to prevent accidental project loss
+when a user is deleted. Project names are not unique per owner.
 
 ### Nonce binding
 
@@ -96,10 +147,14 @@ trusted IP/CIDR topology rather than trusting every proxy.
 ## Persistence
 
 The composition root creates one Prisma Client and injects it into the database
-health/lifecycle adapter and the Apple user repository. It also creates the two
-rate-limit middleware instances once per process. Product modules never import
+health/lifecycle adapter, the Apple user repository, the current-user
+repository, and the project repository. It also creates the two rate-limit
+middleware instances, the access-token verifier, the project permission
+service, and the project service once per process. Product modules never import
 the Prisma client directly. The unique provider identity constraint makes
-concurrent first-time Apple logins idempotent at the database boundary.
+concurrent first-time Apple logins idempotent at the database boundary. The
+projects table has a foreign key to users with `onDelete: Restrict`; project
+access has unique `(projectId, userId)` membership and revocation state.
 
 ## Lifecycle
 

@@ -101,6 +101,9 @@ A task is not ready for handoff, commit, pull request, or merge until:
   applicable.
 - Commands, paths, links, schemas, and examples in changed documents were
   verified.
+- Final verification follows the native-command policy in
+  [Development workflow](development.md); the full Docker stack is not a
+  routine completion gate.
 - Stale or contradictory statements were removed.
 - The handoff includes the documentation-impact statement.
 
