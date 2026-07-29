@@ -3,12 +3,16 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '../../generated/prisma/client.js';
 import type { DatabaseHealth } from './database.js';
 
+export function createPrismaClient(connectionString: string): PrismaClient {
+  const adapter = new PrismaPg({ connectionString });
+  return new PrismaClient({ adapter });
+}
+
 export class PrismaDatabase implements DatabaseHealth {
   readonly #client: PrismaClient;
 
-  constructor(connectionString: string) {
-    const adapter = new PrismaPg({ connectionString });
-    this.#client = new PrismaClient({ adapter });
+  constructor(client: PrismaClient) {
+    this.#client = client;
   }
 
   async checkConnection(): Promise<void> {
