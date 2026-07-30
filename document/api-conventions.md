@@ -5,7 +5,7 @@
 - Public application routes are versioned under `/api/v1`.
 - Liveness and readiness are `/api/v1/health` and `/api/v1/ready`.
 - Apple authentication is `POST /api/v1/auth/apple`.
-- Project management is `POST`, `GET`, `GET/:id`, `PATCH/:id`, and `DELETE` at
+- Project management is `POST`, `GET`, `GET/:id`, `PATCH/:id`, and `DELETE/:id` at
   `/api/v1/projects`.
 - Swagger UI remains at `/api-doc`; raw OpenAPI is `/api-doc.json`.
 - Resource paths use plural nouns and kebab-case when business modules arrive.

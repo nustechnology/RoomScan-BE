@@ -29,7 +29,8 @@ the new contract merely to make code and documentation agree.
 3. Replace the Apple client ID and authentication-secret placeholders. Each
    token secret must contain at least 32 characters.
 4. Run `yarn install --immutable` and `yarn prisma:generate`.
-5. Start PostgreSQL with `docker compose up db -d`.
+5. Start PostgreSQL with `docker compose up db -d` when it is not already
+   running and healthy; leave an existing healthy container running.
 6. Run `yarn prisma:migrate:deploy` to apply the committed schema migration.
 7. To use the local Apple-login shortcut, set
    `LOCAL_TEST_AUTH_ENABLED=true`, run `yarn seed:local`, and start the API with

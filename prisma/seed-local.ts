@@ -14,7 +14,7 @@ const client = createPrismaClient(config.databaseUrl);
 
 try {
   const user = await seedLocalTestUser(client);
-  console.info(`Local test user ready: ${user.email ?? user.id}`);
+  console.info(`Local test user ready: ${user.id}`);
 } finally {
   await client.$disconnect();
 }

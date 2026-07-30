@@ -137,7 +137,16 @@ describe('JoseAccessTokenVerifier', () => {
     const verifier = new JoseAccessTokenVerifier({
       accessTokenSecret: ACCESS_SECRET,
     });
-    const token = await signToken({ tokenType: 'access' }, ACCESS_SECRET);
+    const now = Math.floor(Date.now() / 1000);
+    const encoder = new TextEncoder();
+    const token = await new SignJWT({ tokenType: 'access' })
+      .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
+      .setSubject(USER_ID)
+      .setIssuer(TOKEN_ISSUER)
+      .setAudience(TOKEN_AUDIENCE)
+      .setIssuedAt(now)
+      .setExpirationTime(now + 3600)
+      .sign(encoder.encode(ACCESS_SECRET));
 
     await expect(verifier.verify(token)).resolves.toEqual({ userId: USER_ID });
   });
