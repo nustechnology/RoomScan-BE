@@ -40,7 +40,9 @@ global Prisma client directly. Runtime composition belongs in `server.ts`.
 
 ## Authentication
 
-`POST /api/v1/auth/apple` accepts only an Apple identity token. The auth module
+`POST /api/v1/auth/apple` accepts an Apple identity token and an optional raw nonce.
+Nonce-bound tokens require the raw nonce so the verifier can validate the binding.
+The auth module
 depends on interfaces for Apple verification, user persistence and application
 token issuance. Infrastructure adapters verify RS256 tokens against Apple's
 cached remote JWKS, atomically upsert users by `(provider, providerId)`, and
