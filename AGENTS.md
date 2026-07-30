@@ -70,9 +70,20 @@ yarn test:coverage
 yarn build
 ```
 
-Run Docker checks when Docker or runtime composition changes. Update README,
-`document/` and OpenAPI registration whenever behavior changes. Documentation
-synchronization is required before these commands count as a complete handoff.
+Local development uses Docker only for PostgreSQL. Run the API, Prisma
+commands, seeds, validation, tests, coverage and builds natively with Yarn.
+Start the database with `docker compose up db -d` only when it is not already
+running, and do not restart or recreate it as a routine final check.
+
+Do not run `docker compose build`, start the Compose API/migrate services, or
+bring up the full stack during normal task verification. Docker-specific
+validation is required only when the user explicitly requests it or the task's
+acceptance criteria directly target Docker/container behavior. In that case,
+run only the targeted checks needed and report them separately.
+
+Update README, `document/` and OpenAPI registration whenever behavior changes.
+Documentation synchronization is required before the native commands count as
+a complete handoff.
 
 ## Repository hygiene
 

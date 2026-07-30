@@ -27,6 +27,7 @@
     "prisma:migrate:dev": "prisma migrate dev",
     "prisma:migrate:deploy": "prisma migrate deploy",
     "prisma:studio": "prisma studio",
+    "seed:local": "tsx prisma/seed-local.ts",
     "prepare": "node .husky/install.mjs"
   },
   "dependencies": {

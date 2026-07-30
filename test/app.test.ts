@@ -4,6 +4,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
 import { createApp } from '../src/app.js';
+import type {
+  AccessTokenVerifier,
+  CurrentUserRepository,
+} from '../src/common/middleware/authenticate.js';
 import { createRateLimiters } from '../src/common/middleware/rate-limit.js';
 import { ErrorResponseSchema } from '../src/common/schemas/error.js';
 import type { AppConfig } from '../src/config/env.js';
@@ -18,6 +22,7 @@ import {
   HealthResponseSchema,
   ReadinessResponseSchema,
 } from '../src/modules/health/health.schemas.js';
+import type { ProjectService } from '../src/modules/project/project.service.js';
 
 const config: AppConfig = {
   nodeEnv: 'test',
@@ -35,6 +40,7 @@ const config: AppConfig = {
   refreshTokenSecret: 'refresh-secret-that-is-at-least-32-characters',
   accessTokenTtlSeconds: 3600,
   refreshTokenTtlSeconds: 2_592_000,
+  localTestAuthEnabled: false,
 };
 
 const clock = () => new Date('2026-07-23T07:00:00.000Z');
@@ -52,12 +58,31 @@ describe('RoomScan HTTP application', () => {
   const authService: AppleAuthService = {
     signInWithApple,
   };
+  const accessTokenVerifier: AccessTokenVerifier = {
+    verify: vi.fn().mockResolvedValue({ userId: 'eb5d278f-c857-45c7-887d-7be65288cb75' }),
+  };
+  const currentUserRepository: CurrentUserRepository = {
+    findById: vi.fn().mockResolvedValue({
+      id: 'eb5d278f-c857-45c7-887d-7be65288cb75',
+      email: 'user@example.com',
+    }),
+  };
+  const projectService = {
+    create: vi.fn(),
+    list: vi.fn(),
+    getById: vi.fn(),
+    update: vi.fn(),
+    delete: vi.fn(),
+  } as unknown as ProjectService;
 
   const app = createApp({
     config,
     database,
     logger,
     authService,
+    projectService,
+    accessTokenVerifier,
+    currentUserRepository,
     rateLimiters,
     clock,
   });
@@ -95,6 +120,9 @@ describe('RoomScan HTTP application', () => {
       database,
       logger,
       authService,
+      projectService,
+      accessTokenVerifier,
+      currentUserRepository,
       rateLimiters,
     });
     const response = await request(defaultClockApp).get('/api/v1/health').expect(200);
