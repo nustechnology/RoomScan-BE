@@ -65,7 +65,8 @@ authOpenApiRegistry.registerPath({
       },
     },
     401: {
-      description: 'The Apple identity token is invalid',
+      description:
+        'The Apple identity token or its required raw nonce binding is missing or invalid',
       headers: rateLimitHeaders,
       content: {
         'application/json': {

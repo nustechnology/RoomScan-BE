@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import {
   customFetch,
   createLocalJWKSet,
@@ -23,6 +25,10 @@ const NOW = new Date('2026-07-23T07:00:00.000Z');
 const NOW_SECONDS = Math.floor(NOW.getTime() / 1000);
 const CLIENT_ID = 'com.example.roomscan';
 const KEY_ID = 'apple-key';
+
+function hashNonce(rawNonce: string): string {
+  return createHash('sha256').update(rawNonce, 'utf8').digest('hex');
+}
 
 type GeneratedKeyPair = Awaited<ReturnType<typeof generateKeyPair>>;
 
@@ -90,11 +96,12 @@ describe('AppleIdentityTokenVerifier', () => {
     });
   });
 
-  it('verifies a token with a matching nonce', async () => {
+  it('verifies a token whose nonce claim matches the SHA-256 digest of the raw nonce', async () => {
     const verifier = createVerifier();
-    const token = await createIdentityToken({ nonce: 'client-nonce-123' });
+    const rawNonce = 'client-nonce-123';
+    const token = await createIdentityToken({ nonce: hashNonce(rawNonce) });
 
-    await expect(verifier.verify(token, 'client-nonce-123')).resolves.toEqual({
+    await expect(verifier.verify(token, rawNonce)).resolves.toEqual({
       providerId: 'apple-subject',
       email: 'user@example.com',
       emailVerified: true,
@@ -103,11 +110,18 @@ describe('AppleIdentityTokenVerifier', () => {
 
   it('rejects a token whose nonce does not match the client nonce', async () => {
     const verifier = createVerifier();
-    const token = await createIdentityToken({ nonce: 'server-nonce' });
+    const token = await createIdentityToken({ nonce: hashNonce('server-nonce') });
 
     await expect(verifier.verify(token, 'client-nonce')).rejects.toBeInstanceOf(
       InvalidAppleIdentityTokenError,
     );
+  });
+
+  it('rejects a token with a nonce claim when the raw nonce is missing', async () => {
+    const verifier = createVerifier();
+    const token = await createIdentityToken({ nonce: hashNonce('client-nonce') });
+
+    await expect(verifier.verify(token)).rejects.toBeInstanceOf(InvalidAppleIdentityTokenError);
   });
 
   it('rejects a token missing a nonce claim when a client nonce is provided', async () => {
@@ -115,6 +129,17 @@ describe('AppleIdentityTokenVerifier', () => {
     const token = await createIdentityToken();
 
     await expect(verifier.verify(token, 'client-nonce')).rejects.toBeInstanceOf(
+      InvalidAppleIdentityTokenError,
+    );
+  });
+
+  it('rejects an already-hashed nonce instead of the required raw nonce', async () => {
+    const verifier = createVerifier();
+    const rawNonce = 'client-nonce';
+    const hashedNonce = hashNonce(rawNonce);
+    const token = await createIdentityToken({ nonce: hashedNonce });
+
+    await expect(verifier.verify(token, hashedNonce)).rejects.toBeInstanceOf(
       InvalidAppleIdentityTokenError,
     );
   });
