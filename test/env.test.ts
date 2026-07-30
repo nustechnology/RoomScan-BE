@@ -37,6 +37,15 @@ describe('loadConfig', () => {
     });
   });
 
+  it('accepts staging as NODE_ENV', () => {
+    const config = loadConfig({
+      ...validEnvironment,
+      NODE_ENV: 'staging',
+    });
+
+    expect(config.nodeEnv).toBe('staging');
+  });
+
   it('supports a wildcard CORS origin', () => {
     const config = loadConfig({
       ...validEnvironment,

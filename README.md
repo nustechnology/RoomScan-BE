@@ -128,7 +128,7 @@ and `x-request-id`.
 
 | Variable                               | Required | Default       | Description                                          |
 | -------------------------------------- | -------- | ------------- | ---------------------------------------------------- |
-| `NODE_ENV`                             | No       | `development` | `development`, `test` or `production`                |
+| `NODE_ENV`                             | No       | `development` | `development`, `staging`, `test` or `production`     |
 | `PORT`                                 | No       | `3000`        | HTTP port inside the process                         |
 | `DATABASE_URL`                         | Yes      | —             | PostgreSQL connection string                         |
 | `LOG_LEVEL`                            | No       | `info`        | Pino log level                                       |
