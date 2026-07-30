@@ -60,15 +60,16 @@ Apple identity tokens, not authorization codes.
 ### Nonce binding
 
 The endpoint supports nonce binding to prevent identity-token replay. Clients
-may generate a random nonce, include it in the Sign In with Apple authorization
-request, receive it back in the identity token's `nonce` claim, and pass the
-same nonce alongside the token in `POST /api/v1/auth/apple`.
+generate a random raw nonce, send its lowercase hexadecimal SHA-256 digest in
+the Sign in with Apple authorization request, and pass the raw nonce alongside
+the resulting identity token in `POST /api/v1/auth/apple`.
 
-When the client provides a nonce, `AppleIdentityTokenVerifier` requires the
-token's `nonce` claim to match exactly. Missing or mismatched nonces are
-rejected as `InvalidAppleIdentityTokenError`. When no nonce is provided, the
-claim is not checked — allowing non-upgraded clients to authenticate, but
-without replay protection.
+After cryptographically verifying the token, `AppleIdentityTokenVerifier`
+hashes the supplied raw nonce and requires the digest to match the token's
+`nonce` claim. A token containing a nonce claim requires a request nonce, and a
+request nonce requires a token claim. Missing or mismatched bindings are
+rejected as `InvalidAppleIdentityTokenError`. Legacy tokens without a nonce
+claim remain accepted only when the request also omits the nonce.
 
 ## Rate limiting
 

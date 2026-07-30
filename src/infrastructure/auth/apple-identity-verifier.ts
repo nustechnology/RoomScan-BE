@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import {
   createRemoteJWKSet,
   errors,
@@ -19,6 +21,19 @@ import type {
 const APPLE_ISSUER = 'https://appleid.apple.com';
 const APPLE_JWKS_URL = new URL('https://appleid.apple.com/auth/keys');
 const CLOCK_TOLERANCE_SECONDS = 60;
+
+function isNonceBindingValid(
+  tokenNonce: string | undefined,
+  rawNonce: string | undefined,
+): boolean {
+  if (tokenNonce === undefined || rawNonce === undefined) {
+    return tokenNonce === rawNonce;
+  }
+
+  const hashedNonce = createHash('sha256').update(rawNonce, 'utf8').digest('hex');
+
+  return tokenNonce === hashedNonce;
+}
 
 const optionalEmailSchema = z.preprocess(
   (value) => (value === '' ? undefined : value),
@@ -97,7 +112,7 @@ export class AppleIdentityTokenVerifier implements AppleIdentityVerifier {
         throw new InvalidAppleIdentityTokenError();
       }
 
-      if (nonce !== undefined && claims.nonce !== nonce) {
+      if (!isNonceBindingValid(claims.nonce, nonce)) {
         throw new InvalidAppleIdentityTokenError();
       }
 
