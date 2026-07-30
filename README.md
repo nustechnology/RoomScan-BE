@@ -115,7 +115,8 @@ Apple authentication accepts:
 
 ```json
 {
-  "identityToken": "<apple-identity-token>"
+  "identityToken": "<apple-identity-token>",
+  "nonce": "<raw-client-nonce>"
 }
 ```
 
@@ -151,6 +152,12 @@ has full project control; an active Viewer can only use the canonical project
 detail endpoint. Deleted, revoked, missing, and inaccessible projects are
 hidden behind `404 PROJECT_NOT_FOUND`. Deletion is soft and idempotent for the
 same Owner.
+
+For nonce-bound sign-in, the client generates a raw nonce, sends its lowercase
+hexadecimal SHA-256 digest to Apple, and sends the raw nonce in the request
+above. If the identity token contains a `nonce` claim, the raw request nonce is
+required and its digest must match. Legacy tokens without a nonce claim remain
+valid only when the request also omits `nonce`.
 
 API requests are limited by client IP. `/api/v1` permits 120 requests per
 minute, and Apple sign-in additionally permits 20 attempts per 15 minutes.

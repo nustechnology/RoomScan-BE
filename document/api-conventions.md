@@ -78,11 +78,18 @@ or store details. Browser clients may read the three headers through CORS.
 ## Apple authentication
 
 The request body contains a non-empty `identityToken` string of at most
-16 KiB and an optional `nonce` string of at most 512 bytes. Unknown fields are
-rejected. When a nonce is provided the server validates it against the identity
-token's `nonce` claim before looking up a user. The server validates the Apple
-signature, issuer, client audience, expiration, issued-at time and subject
-regardless of nonce.
+16 KiB and an optional raw `nonce` string of at most 512 bytes. Unknown fields
+are rejected. Clients send the lowercase hexadecimal SHA-256 digest of the raw
+nonce to Apple, then send the raw value to this endpoint. After validating the
+Apple signature, issuer, client audience, expiration, issued-at time and
+subject, the server hashes the supplied raw nonce and compares it with the
+token's `nonce` claim before looking up a user.
+
+When the identity token contains a nonce claim, the request must contain the
+corresponding raw nonce. When the token has no nonce claim, the request must
+also omit the nonce for legacy compatibility. Missing, unexpected, or
+mismatched nonce bindings return 401 with `INVALID_APPLE_IDENTITY_TOKEN`; they
+are credential failures rather than 400 request-schema failures.
 
 Successful authentication always returns 200:
 

@@ -24,13 +24,12 @@ export function createAuthRouter({ authService }: AuthRouterDependencies): Route
     '/auth/apple',
     validateRequest({ body: AppleSignInRequestSchema }),
     async (_request, response, next) => {
+      let result: Awaited<ReturnType<AppleAuthService['signInWithApple']>>;
+
       try {
         const { identityToken, nonce } = (response.locals.validated as { body: AppleSignInRequest })
           .body;
-        const result = await authService.signInWithApple(identityToken, nonce);
-        const body = AppleSignInResponseSchema.parse(result);
-
-        response.status(200).json(body);
+        result = await authService.signInWithApple(identityToken, nonce);
       } catch (error) {
         if (error instanceof InvalidAppleIdentityTokenError) {
           next(
@@ -55,6 +54,21 @@ export function createAuthRouter({ authService }: AuthRouterDependencies): Route
         }
 
         next(error);
+        return;
+      }
+
+      try {
+        const body = AppleSignInResponseSchema.parse(result);
+
+        response.status(200).json(body);
+      } catch {
+        next(
+          new AppError({
+            statusCode: 500,
+            code: 'INTERNAL_SERVER_ERROR',
+            message: 'An unexpected error occurred',
+          }),
+        );
       }
     },
   );
