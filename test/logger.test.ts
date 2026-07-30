@@ -20,6 +20,7 @@ function makeConfig(logLevel: AppConfig['logLevel']): AppConfig {
     refreshTokenSecret: 'refresh-secret-that-is-at-least-32-characters',
     accessTokenTtlSeconds: 3600,
     refreshTokenTtlSeconds: 2_592_000,
+    localTestAuthEnabled: false,
   };
 }
 

@@ -40,6 +40,8 @@ yarn install --immutable
 yarn prisma:generate
 docker compose up db -d
 yarn prisma:migrate:deploy
+# Optional: set LOCAL_TEST_AUTH_ENABLED=true in .env, then:
+yarn seed:local
 yarn dev
 ```
 
@@ -50,7 +52,12 @@ The committed Prisma migration creates the user storage required by Apple
 authentication. Local production-style startup applies committed migrations
 through the Compose `migrate` service.
 
-## Run everything with Docker
+The standard local workflow uses Docker only for the PostgreSQL `db` service.
+Run migrations, seeds, the API, validation, tests, coverage and builds natively
+with Yarn. Keep a healthy database container running across tasks rather than
+restarting it during final verification.
+
+## Optional production-style Docker stack
 
 ```bash
 cp .env.example .env
@@ -58,7 +65,9 @@ docker compose up --build
 ```
 
 Compose starts PostgreSQL, runs `prisma migrate deploy` as a one-shot service,
-then starts the non-root production API container.
+then starts the non-root production API container. This is an optional
+production-style check, not the normal local development or agent handoff
+workflow.
 
 Useful commands:
 
@@ -73,13 +82,18 @@ the local PostgreSQL data volume.
 
 ## HTTP endpoints
 
-| Method | Path                 | Purpose                                        |
-| ------ | -------------------- | ---------------------------------------------- |
-| `GET`  | `/api/v1/health`     | Liveness; does not query PostgreSQL            |
-| `GET`  | `/api/v1/ready`      | Readiness; verifies PostgreSQL with `SELECT 1` |
-| `POST` | `/api/v1/auth/apple` | Authenticate with an Apple identity token      |
-| `GET`  | `/api-doc`           | Interactive Swagger UI                         |
-| `GET`  | `/api-doc.json`      | Generated OpenAPI 3.1 document                 |
+| Method   | Path                          | Purpose                                        |
+| -------- | ----------------------------- | ---------------------------------------------- |
+| `GET`    | `/api/v1/health`              | Liveness; does not query PostgreSQL            |
+| `GET`    | `/api/v1/ready`               | Readiness; verifies PostgreSQL with `SELECT 1` |
+| `POST`   | `/api/v1/auth/apple`          | Authenticate with an Apple identity token      |
+| `POST`   | `/api/v1/projects`            | Create a project (Bearer token required)       |
+| `GET`    | `/api/v1/projects`            | List the authenticated user’s projects         |
+| `GET`    | `/api/v1/projects/:projectId` | Get a project as Owner or active Viewer        |
+| `PATCH`  | `/api/v1/projects/:projectId` | Update an owned project                        |
+| `DELETE` | `/api/v1/projects/:projectId` | Soft-delete an owned project                   |
+| `GET`    | `/api-doc`                    | Interactive Swagger UI                         |
+| `GET`    | `/api-doc.json`               | Generated OpenAPI 3.1 document                 |
 
 Errors use a stable envelope:
 
@@ -112,6 +126,33 @@ refresh JWTs. Email is stored when present but is never an account identifier.
 The current API issues the refresh JWT but does not yet expose refresh, rotation
 or revocation endpoints.
 
+For local `yarn dev`, set `NODE_ENV=development` and
+`LOCAL_TEST_AUTH_ENABLED=true`, then run `yarn seed:local`. Sending
+`{"identityToken":"roomscan-local-test-user"}` to the same Apple endpoint skips
+Apple verification for `local-test@roomscan.dev` and returns normally signed
+RoomScan tokens. The flag is rejected in test, staging, and production; the
+production-style Compose API therefore cannot expose this shortcut.
+
+Project endpoints require a Bearer access token obtained from Apple
+authentication:
+
+```http
+Authorization: Bearer <access-token>
+```
+
+The server verifies the HS256 signature, issuer, audience, expiration,
+`tokenType: "access"`, and UUID `sub` claim, then confirms that the subject
+still identifies a database user. The `ownerId` is derived from that current
+user and is never accepted from clients.
+
+`GET /api/v1/projects` lists only projects owned by the current user. It uses
+page-based pagination (`page=1`, `limit=5` by default), optional
+case-insensitive name search, and an allow-listed `sort` parameter. An Owner
+has full project control; an active Viewer can only use the canonical project
+detail endpoint. Deleted, revoked, missing, and inaccessible projects are
+hidden behind `404 PROJECT_NOT_FOUND`. Deletion is soft and idempotent for the
+same Owner.
+
 For nonce-bound sign-in, the client generates a raw nonce, sends its lowercase
 hexadecimal SHA-256 digest to Apple, and sends the raw nonce in the request
 above. If the identity token contains a `nonce` claim, the raw request nonce is
@@ -143,6 +184,7 @@ and `x-request-id`.
 | `AUTH_REFRESH_TOKEN_SECRET`            | Yes      | —             | HS256 refresh-token secret, at least 32 characters   |
 | `AUTH_ACCESS_TOKEN_TTL_SECONDS`        | No       | `3600`        | RoomScan access-token lifetime                       |
 | `AUTH_REFRESH_TOKEN_TTL_SECONDS`       | No       | `2592000`     | RoomScan refresh-token lifetime                      |
+| `LOCAL_TEST_AUTH_ENABLED`              | No       | `false`       | Enable the seeded login only in `development`        |
 
 The remaining PostgreSQL and `ROOMSCAN_PORT` values in `.env.example` configure
 Docker Compose. The refresh TTL must exceed the access TTL. Replace all
@@ -172,6 +214,7 @@ the exact proxy hop count or trusted IP/CIDR list. Never set it to `true`.
 | `yarn prisma:migrate:dev`           | Create/apply a development migration                     |
 | `yarn prisma:migrate:deploy`        | Apply committed migrations                               |
 | `yarn prisma:studio`                | Open Prisma Studio                                       |
+| `yarn seed:local`                   | Create or refresh the development-only login user        |
 
 ## Quality gates
 
@@ -189,6 +232,12 @@ GitHub Actions repeats those checks using an immutable Yarn install, adds
 coverage enforcement, and builds the production output. Unit tests inject
 database, Apple JWKS and authentication doubles and do not require a live
 PostgreSQL instance or Apple network access.
+
+For routine task handoff, agents run `yarn validate`, `yarn test:coverage` and
+`yarn build` natively. They do not rebuild or start the full Compose stack and
+do not restart a healthy PostgreSQL container. Targeted Docker verification is
+reserved for explicit requests or acceptance criteria about container
+behavior.
 
 ## Architecture and contributor guidance
 

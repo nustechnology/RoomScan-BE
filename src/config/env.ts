@@ -90,6 +90,10 @@ const rateLimitWindowSecondsSchema = z.coerce
   .positive()
   .max(MAX_MEMORY_STORE_WINDOW_SECONDS);
 const rateLimitMaxRequestsSchema = z.coerce.number().int().positive().max(Number.MAX_SAFE_INTEGER);
+const environmentBooleanSchema = z
+  .enum(['true', 'false'])
+  .default('false')
+  .transform((value) => value === 'true');
 
 export const environmentSchema = z
   .object({
@@ -110,6 +114,7 @@ export const environmentSchema = z
     AUTH_REFRESH_TOKEN_SECRET: z.string().min(32),
     AUTH_ACCESS_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(3600),
     AUTH_REFRESH_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(2_592_000),
+    LOCAL_TEST_AUTH_ENABLED: environmentBooleanSchema,
   })
   .superRefine((environment, context) => {
     if (environment.AUTH_REFRESH_TOKEN_TTL_SECONDS <= environment.AUTH_ACCESS_TOKEN_TTL_SECONDS) {
@@ -117,6 +122,14 @@ export const environmentSchema = z
         code: 'custom',
         path: ['AUTH_REFRESH_TOKEN_TTL_SECONDS'],
         message: 'AUTH_REFRESH_TOKEN_TTL_SECONDS must be greater than access token TTL',
+      });
+    }
+
+    if (environment.LOCAL_TEST_AUTH_ENABLED && environment.NODE_ENV !== 'development') {
+      context.addIssue({
+        code: 'custom',
+        path: ['LOCAL_TEST_AUTH_ENABLED'],
+        message: 'LOCAL_TEST_AUTH_ENABLED may only be enabled when NODE_ENV=development',
       });
     }
   });
@@ -137,6 +150,7 @@ export interface AppConfig {
   refreshTokenSecret: string;
   accessTokenTtlSeconds: number;
   refreshTokenTtlSeconds: number;
+  localTestAuthEnabled: boolean;
 }
 
 export function loadConfig(input: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -164,5 +178,6 @@ export function loadConfig(input: NodeJS.ProcessEnv = process.env): AppConfig {
     refreshTokenSecret: environment.AUTH_REFRESH_TOKEN_SECRET,
     accessTokenTtlSeconds: environment.AUTH_ACCESS_TOKEN_TTL_SECONDS,
     refreshTokenTtlSeconds: environment.AUTH_REFRESH_TOKEN_TTL_SECONDS,
+    localTestAuthEnabled: environment.LOCAL_TEST_AUTH_ENABLED,
   };
 }

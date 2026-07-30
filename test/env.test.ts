@@ -34,7 +34,41 @@ describe('loadConfig', () => {
       refreshTokenSecret: 'refresh-secret-that-is-at-least-32-characters',
       accessTokenTtlSeconds: 3600,
       refreshTokenTtlSeconds: 2_592_000,
+      localTestAuthEnabled: false,
     });
+  });
+
+  it('enables local test authentication only in development', () => {
+    const config = loadConfig({
+      ...validEnvironment,
+      NODE_ENV: 'development',
+      LOCAL_TEST_AUTH_ENABLED: 'true',
+    });
+
+    expect(config.localTestAuthEnabled).toBe(true);
+  });
+
+  it.each(['test', 'staging', 'production'])(
+    'rejects local test authentication in NODE_ENV=%s',
+    (nodeEnv) => {
+      expect(() =>
+        loadConfig({
+          ...validEnvironment,
+          NODE_ENV: nodeEnv,
+          LOCAL_TEST_AUTH_ENABLED: 'true',
+        }),
+      ).toThrow(/only be enabled when NODE_ENV=development/);
+    },
+  );
+
+  it('rejects an invalid local test authentication flag', () => {
+    expect(() =>
+      loadConfig({
+        ...validEnvironment,
+        NODE_ENV: 'development',
+        LOCAL_TEST_AUTH_ENABLED: 'yes',
+      }),
+    ).toThrow(ZodError);
   });
 
   it('accepts staging as NODE_ENV', () => {
