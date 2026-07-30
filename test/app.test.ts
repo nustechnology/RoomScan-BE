@@ -29,7 +29,7 @@ const config: AppConfig = {
   apiRateLimitWindowSeconds: 60,
   apiRateLimitMaxRequests: 120,
   appleAuthRateLimitWindowSeconds: 900,
-  appleAuthRateLimitMaxRequests: 20,
+  appleAuthRateLimitMaxRequests: 500,
   appleClientId: 'com.example.roomscan',
   accessTokenSecret: 'access-secret-that-is-at-least-32-characters',
   refreshTokenSecret: 'refresh-secret-that-is-at-least-32-characters',
@@ -308,6 +308,24 @@ describe('RoomScan HTTP application', () => {
       message: 'Apple identity token is invalid',
     });
     expect(JSON.stringify(body)).not.toContain('invalid-token');
+  });
+
+  it('rejects an invalid nonce binding without exposing token or nonce details', async () => {
+    signInWithApple.mockRejectedValueOnce(new InvalidAppleIdentityTokenError());
+
+    const response = await request(app)
+      .post('/api/v1/auth/apple')
+      .send({ identityToken: 'signed-apple-token', nonce: 'raw-client-nonce' })
+      .expect(401);
+    const body = ErrorResponseSchema.parse(response.body as unknown);
+
+    expect(signInWithApple).toHaveBeenCalledWith('signed-apple-token', 'raw-client-nonce');
+    expect(body.error).toEqual({
+      code: 'INVALID_APPLE_IDENTITY_TOKEN',
+      message: 'Apple identity token is invalid',
+    });
+    expect(JSON.stringify(body)).not.toContain('signed-apple-token');
+    expect(JSON.stringify(body)).not.toContain('raw-client-nonce');
   });
 
   it('reports Apple identity services as unavailable', async () => {

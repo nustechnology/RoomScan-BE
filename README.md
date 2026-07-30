@@ -101,7 +101,8 @@ Apple authentication accepts:
 
 ```json
 {
-  "identityToken": "<apple-identity-token>"
+  "identityToken": "<apple-identity-token>",
+  "nonce": "<raw-client-nonce>"
 }
 ```
 
@@ -110,6 +111,12 @@ by Apple `sub`, creates the user when necessary and returns RoomScan access and
 refresh JWTs. Email is stored when present but is never an account identifier.
 The current API issues the refresh JWT but does not yet expose refresh, rotation
 or revocation endpoints.
+
+For nonce-bound sign-in, the client generates a raw nonce, sends its lowercase
+hexadecimal SHA-256 digest to Apple, and sends the raw nonce in the request
+above. If the identity token contains a `nonce` claim, the raw request nonce is
+required and its digest must match. Legacy tokens without a nonce claim remain
+valid only when the request also omits `nonce`.
 
 API requests are limited by client IP. `/api/v1` permits 120 requests per
 minute, and Apple sign-in additionally permits 20 attempts per 15 minutes.
