@@ -11,12 +11,18 @@ import swaggerUi from 'swagger-ui-express';
 import { errorHandler } from './common/middleware/error-handler.js';
 import { notFoundHandler } from './common/middleware/not-found.js';
 import type { RateLimiters } from './common/middleware/rate-limit.js';
+import type {
+  AccessTokenVerifier,
+  CurrentUserRepository,
+} from './common/middleware/authenticate.js';
 import { API_DOC_PATH, API_PREFIX } from './config/constants.js';
 import type { AppConfig } from './config/env.js';
 import type { DatabaseHealth } from './infrastructure/database/database.js';
 import { createAuthRouter } from './modules/auth/auth.routes.js';
 import type { AppleAuthService } from './modules/auth/auth.types.js';
 import { createHealthRouter } from './modules/health/health.routes.js';
+import { createProjectRouter } from './modules/project/project.routes.js';
+import type { ProjectService } from './modules/project/project.service.js';
 import { createOpenApiDocument } from './openapi/document.js';
 
 export interface AppDependencies {
@@ -24,6 +30,9 @@ export interface AppDependencies {
   database: DatabaseHealth;
   logger: Logger;
   authService: AppleAuthService;
+  projectService: ProjectService;
+  accessTokenVerifier: AccessTokenVerifier;
+  currentUserRepository: CurrentUserRepository;
   rateLimiters: RateLimiters;
   clock?: () => Date;
 }
@@ -33,6 +42,9 @@ export function createApp({
   database,
   logger,
   authService,
+  projectService,
+  accessTokenVerifier,
+  currentUserRepository,
   rateLimiters,
   clock,
 }: AppDependencies): Express {
@@ -100,6 +112,14 @@ export function createApp({
     API_PREFIX,
     createAuthRouter({
       authService,
+    }),
+  );
+  app.use(
+    API_PREFIX,
+    createProjectRouter({
+      projectService,
+      accessTokenVerifier,
+      currentUserRepository,
     }),
   );
   app.use(

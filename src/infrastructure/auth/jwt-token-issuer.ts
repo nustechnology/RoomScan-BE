@@ -2,10 +2,8 @@ import { randomUUID } from 'node:crypto';
 
 import { SignJWT } from 'jose';
 
+import { TOKEN_AUDIENCE, TOKEN_ISSUER } from '../../config/constants.js';
 import type { AuthTokenIssuer, AuthTokenPair } from '../../modules/auth/auth.types.js';
-
-const TOKEN_ISSUER = 'roomscan-api';
-const TOKEN_AUDIENCE = 'roomscan-mobile';
 
 export interface JoseAuthTokenIssuerOptions {
   accessTokenSecret: string;

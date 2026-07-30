@@ -11,7 +11,9 @@ same branch before handoff; documentation may not be deferred.
 At minimum: use Node 24/Yarn 4, preserve the injected Express app architecture,
 reuse Zod schemas for validation and OpenAPI, never edit generated Prisma
 Client, re-check documents against the final diff, and run `yarn validate`,
-`yarn test:coverage`, and `yarn build` before handoff.
+`yarn test:coverage`, and `yarn build` natively before handoff. Docker is used
+only for the local PostgreSQL service; do not rebuild, restart, or start the
+full Compose stack as a routine final verification step.
 
 Shared skills are stored in `.agents/skills`. For code review, code quality, or
 merge-readiness work, read and follow
