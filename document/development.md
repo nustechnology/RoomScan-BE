@@ -42,7 +42,10 @@ Yarn. If the `db` service is already healthy, leave it running across tasks;
 do not restart or recreate it as part of final verification.
 
 The local seed is idempotent and refuses to run unless
-`NODE_ENV=development`. With the shortcut enabled, use:
+`NODE_ENV=development`. It creates (or refreshes) the fixed local Apple user,
+then seeds a demo project owned by that user with a set of room scans that
+exercise a range of asset and sync states so the list and detail screens can be
+tried without manual setup. With the shortcut enabled, use:
 
 ```json
 {
