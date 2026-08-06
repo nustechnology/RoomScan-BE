@@ -1,6 +1,7 @@
 import 'dotenv/config';
 
 import { loadConfig } from '../src/config/env.js';
+import { seedLocalTestProject } from '../src/infrastructure/database/local-test-project-seed.js';
 import { seedLocalTestUser } from '../src/infrastructure/database/local-test-user-seed.js';
 import { createPrismaClient } from '../src/infrastructure/database/prisma.js';
 
@@ -15,6 +16,8 @@ const client = createPrismaClient(config.databaseUrl);
 try {
   const user = await seedLocalTestUser(client);
   console.info(`Local test user ready: ${user.id}`);
+  await seedLocalTestProject(client);
+  console.info('Local test project and scans ready');
 } finally {
   await client.$disconnect();
 }

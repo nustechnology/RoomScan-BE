@@ -23,6 +23,8 @@ import type { AppleAuthService, TokenRefreshService } from './modules/auth/auth.
 import { createHealthRouter } from './modules/health/health.routes.js';
 import { createProjectRouter } from './modules/project/project.routes.js';
 import type { ProjectService } from './modules/project/project.service.js';
+import { createScanRouter } from './modules/scan/scan.routes.js';
+import type { ScanService } from './modules/scan/scan.service.js';
 import { createOpenApiDocument } from './openapi/document.js';
 
 export interface AppDependencies {
@@ -32,6 +34,7 @@ export interface AppDependencies {
   authService: AppleAuthService;
   refreshTokenService: TokenRefreshService;
   projectService: ProjectService;
+  scanService: ScanService;
   accessTokenVerifier: AccessTokenVerifier;
   currentUserRepository: CurrentUserRepository;
   rateLimiters: RateLimiters;
@@ -45,6 +48,7 @@ export function createApp({
   authService,
   refreshTokenService,
   projectService,
+  scanService,
   accessTokenVerifier,
   currentUserRepository,
   rateLimiters,
@@ -122,6 +126,14 @@ export function createApp({
     API_PREFIX,
     createProjectRouter({
       projectService,
+      accessTokenVerifier,
+      currentUserRepository,
+    }),
+  );
+  app.use(
+    API_PREFIX,
+    createScanRouter({
+      scanService,
       accessTokenVerifier,
       currentUserRepository,
     }),

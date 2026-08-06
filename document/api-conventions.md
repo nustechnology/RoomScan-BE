@@ -8,6 +8,8 @@
 - Token refresh is `POST /api/v1/auth/refresh`.
 - Project management is `POST`, `GET`, `GET/:id`, `PATCH/:id`, and `DELETE/:id` at
   `/api/v1/projects`.
+- Scan metadata is `POST` and `GET` at `/api/v1/projects/:projectId/scans`, and
+  `GET`, `PATCH`, and `DELETE` at `/api/v1/scans/:scanId`.
 - Swagger UI remains at `/api-doc`; raw OpenAPI is `/api-doc.json`.
 - Resource paths use plural nouns and kebab-case when business modules arrive.
 
@@ -205,8 +207,9 @@ Project response:
 
 `owner.email` is nullable. An active Viewer receives role `VIEWER` with only
 `canView: true`. `sharedCount` counts active Viewer access records.
-`scanCount` is `0`, and `thumbnail` and `syncStatus` are `null`, until the
-downstream Scan, thumbnail, and sync persistence features are present.
+`scanCount` counts active (non-deleted) scans in the project. `thumbnail` and
+`syncStatus` are `null` until the downstream thumbnail and sync persistence
+features are present.
 
 The owned-project list supports case-insensitive name search and page-based
 pagination:
@@ -257,6 +260,102 @@ Error behavior:
 - `400 VALIDATION_ERROR`: invalid body, path parameters, or query parameters.
 - `401 UNAUTHORIZED`: missing/invalid access token or missing current user.
 - `404 PROJECT_NOT_FOUND`: project missing, deleted, revoked, or inaccessible.
+- `429 RATE_LIMIT_EXCEEDED`: API quota exceeded.
+- `500 INTERNAL_SERVER_ERROR`: unexpected failure without Prisma, SQL, or secret
+  leakage.
+
+## Scans
+
+Every scan endpoint requires a valid Bearer access token. Scans belong to
+exactly one project; the Owner (creator) has full control, and an active Viewer
+may only read. Create and list are scoped under the parent project; detail,
+update, and delete are scoped under the scan id.
+
+| Method   | Endpoint                            | Result                                                             |
+| -------- | ----------------------------------- | ------------------------------------------------------------------ |
+| `POST`   | `/api/v1/projects/:projectId/scans` | Create scan metadata; Owner only; return `201` or idempotent `200` |
+| `GET`    | `/api/v1/projects/:projectId/scans` | List scans; Owner or active Viewer; paginated                      |
+| `GET`    | `/api/v1/scans/:scanId`             | Get scan detail; Owner or active Viewer                            |
+| `PATCH`  | `/api/v1/scans/:scanId`             | Partially update name/description; Owner only                      |
+| `DELETE` | `/api/v1/scans/:scanId`             | Soft-delete a scan; Owner only; idempotent `204`                   |
+
+Scan response:
+
+```json
+{
+  "id": "f1e2d3c4-a5b6-7890-abcd-ef1234567890",
+  "projectId": "a1b2c3d4-e5f6-4890-abcd-ef1234567890",
+  "name": "Living Room",
+  "description": null,
+  "thumbnail": null,
+  "creator": {
+    "id": "eb5d278f-c857-45c7-887d-7be65288cb75",
+    "email": "owner@example.com"
+  },
+  "noteCount": 0,
+  "assetStatus": "NONE",
+  "syncStatus": "PENDING",
+  "modelVersion": 1,
+  "createdAt": "2026-07-29T10:00:00.000Z",
+  "updatedAt": "2026-07-29T10:00:00.000Z",
+  "permissions": {
+    "role": "OWNER",
+    "canView": true,
+    "canEdit": true,
+    "canDelete": true
+  }
+}
+```
+
+`creator.email` is nullable. `noteCount` is `0` until the Note persistence
+model is present. `assetStatus` uses `NONE | PENDING | UPLOADING | UPLOADED |
+FAILED` and starts `NONE` for a metadata-only scan; `syncStatus` uses `PENDING |
+SYNCING | SYNCED | FAILED | CONFLICT` and starts `PENDING`. The metadata
+endpoints never accept model-file data; the asset and sync status write path is
+the responsibility of the future upload module.
+
+The scan list supports page-based pagination and an allow-listed sort. `page`
+defaults to 1; `limit` defaults to 20 and may not exceed 100. `sort` defaults to
+`createdAt:desc`. Supported values are `createdAt:desc`, `createdAt:asc`,
+`updatedAt:desc`, `updatedAt:asc`, `name:asc`, and `name:desc`. Every order uses
+`id` as its final stable tie-breaker.
+
+Validation rules:
+
+- `projectId` and `scanId`: UUID.
+- `name` on create: required, trimmed Unicode string, 1–100 characters, not
+  whitespace-only; duplicate names are allowed.
+- `description`: optional nullable string, maximum 500 characters.
+- `clientMutationId` on create: optional string, 1–128 characters; used for
+  idempotent create and unique per project.
+- Create and update objects reject unknown fields; PATCH must contain at least
+  one supported field; `"description": null` clears the stored description.
+- Clients cannot submit `id`, `projectId`, `createdById`, `createdAt`,
+  `updatedAt`, `assetStatus`, `syncStatus`, or `modelVersion`.
+
+Authorization and deletion rules:
+
+- The Owner of the parent project has full scan control.
+- An active Viewer may only read scan list and detail.
+- Create with a reused active `clientMutationId` in the same project returns the
+  existing scan with `200` instead of creating a duplicate.
+- Reusing a `clientMutationId` that matches a soft-deleted scan in the same
+  project restores that scan (clears its `deletedAt`), applies the submitted
+  `name` and `description`, and returns the restored scan with `200` (not
+  created) instead of inserting a new row. A `clientMutationId` is unique per
+  project, so the same value in a different project creates a new scan.
+- Delete sets `deletedAt` and touches the parent project `updatedAt` in one
+  transaction.
+- Repeating delete as the same Owner returns `204`; other users receive the
+  hidden not-found response.
+
+Error behavior:
+
+- `400 VALIDATION_ERROR`: invalid body, path parameters, or query parameters.
+- `401 UNAUTHORIZED`: missing/invalid access token or missing current user.
+- `404 PROJECT_NOT_FOUND`: parent project missing, deleted, or inaccessible.
+- `404 SCAN_NOT_FOUND`: scan missing, deleted, or inaccessible through its
+  parent project.
 - `429 RATE_LIMIT_EXCEEDED`: API quota exceeded.
 - `500 INTERNAL_SERVER_ERROR`: unexpected failure without Prisma, SQL, or secret
   leakage.

@@ -6,9 +6,10 @@ from injected dependencies. Keeping `app.listen` outside the app factory makes
 API tests deterministic and prevents them from opening network ports.
 
 The current product-facing scope contains health checks, Apple Sign-In
-authentication, and Owner/Viewer project management. The Prisma schema owns the
-`User`, `Project`, and `ProjectAccess` models; Room, Scan, Invitation, Note, and
-asset behavior must not be inferred until their requirements are implemented.
+authentication, Owner/Viewer project management, and room-scan metadata. The
+Prisma schema owns the `User`, `Project`, `ProjectAccess`, and `Scan` models;
+Invitation, Note, and asset behavior must not be inferred until their
+requirements are implemented.
 
 ## Request flow
 
@@ -112,14 +113,48 @@ turn an already-applied update into a not-found response.
 
 Deletion marks `Project.deletedAt` and revokes active `ProjectAccess` records in
 one database transaction. A repeated deletion by the same Owner is idempotent.
-Physical cleanup remains outside this module. Scan, Invitation, Note, thumbnail,
+Physical cleanup remains outside this module. Invitation, Note, thumbnail,
 sync-state, and asset cleanup are not claimed here because their persistence
 models are not yet present on this branch.
 
 The owner relation uses `onDelete: Restrict` to prevent accidental project loss
 when a user is deleted. Project names are not unique per owner.
 
-### Nonce binding
+## Scan module
+
+The Scan module provides authenticated scan-metadata creation, listing, detail,
+Owner-only updates, and soft deletion. Scans belong to exactly one project
+(`onDelete: Cascade` from the parent project) and record their creator
+(`onDelete: Restrict` to the user).
+
+`ScanService` depends on a `ScanRepository` interface plus the shared
+`ProjectPermissionService`, so it reuses the same Owner/active-Viewer access
+rules as the Project module. Every project-level permission failure is converted
+to `ScanNotFoundError`, so scan endpoints expose the same hidden 404 behavior as
+projects.
+
+`PrismaScanRepository` performs the `clientMutationId` idempotency check at the
+database boundary scoped to the parent project, backed by the composite
+`@@unique([projectId, clientMutationId])` constraint, so the same value in a
+different project never collides. Creating a scan with a reused active
+`clientMutationId` returns the existing scan as not created; a reused value
+matching a soft-deleted scan restores it (clears `deletedAt`) while applying the
+submitted `name` and `description` and returns it as not created. A concurrent
+duplicate insert raises `P2002`, which the repository catches and resolves to
+the existing row instead of rethrowing. The repository also performs
+allow-listed sorting with a stable `id` tie-breaker and offset pagination. An
+Owner update runs its guarded write and response read in one transaction.
+Deleting a scan marks `Scan.deletedAt` and touches the parent project
+`updatedAt` in the same transaction; a repeated delete by the same Owner is
+idempotent. Scan deletion does not cascade because Note and asset models are
+not yet present; future note queries will filter on the scan `deletedAt`.
+
+The `Scan` model stores metadata only: name, description, thumbnail reference,
+`assetStatus`, `syncStatus`, and `modelVersion`. The metadata endpoints never
+accept model-file bytes; the asset/sync write path belongs to a future upload
+module.
+
+## Nonce binding
 
 The endpoint supports nonce binding to prevent identity-token replay. Clients
 generate a random raw nonce, send its lowercase hexadecimal SHA-256 digest in
@@ -161,10 +196,11 @@ trusted IP/CIDR topology rather than trusting every proxy.
 
 The composition root creates one Prisma Client and injects it into the database
 health/lifecycle adapter, the Apple user repository, the current-user
-repository, and the project repository. It also creates the two rate-limit
-middleware instances, the access-token verifier, the project permission
-service, and the project service once per process. Product modules never import
-the Prisma client directly. The unique provider identity constraint makes
+repository, the project repository, and the scan repository. It also creates the
+two rate-limit middleware instances, the access-token verifier, the project
+permission service, the project service, and the scan service once per process.
+Product modules never import the Prisma client directly. The unique provider
+identity constraint makes
 concurrent first-time Apple logins idempotent at the database boundary. The
 projects table has a foreign key to users with `onDelete: Restrict`; project
 access has unique `(projectId, userId)` membership and revocation state.
