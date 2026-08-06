@@ -161,7 +161,8 @@ scan's model and thumbnail. It depends on a `ScanAssetRepository`, the shared
 `assetType`, creates or re-uses a single `ScanAsset` row per `(scan, assetType)`,
 and mints upload and download URLs carrying the configured TTL metadata. The
 repository resolves a concurrent create for the same `(scan, assetType)` key to
-the existing row instead of surfacing the unique-constraint error. An active,
+the existing row instead of surfacing the unique-constraint error, so the
+duplicate request is reported as not created and returns `200`. An active,
 unexpired upload session is returned idempotently (`200`), and refreshing an
 expired session also returns `200` rather than reporting a new creation.
 Completion is idempotent and, when the provider can verify the object, marks the

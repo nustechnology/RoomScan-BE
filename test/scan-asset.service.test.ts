@@ -60,7 +60,9 @@ function createHarness() {
   const findByScanAndType = vi
     .fn<ScanAssetRepository['findByScanAndType']>()
     .mockResolvedValue(null);
-  const create = vi.fn<ScanAssetRepository['create']>().mockResolvedValue(createAssetRecord());
+  const create = vi
+    .fn<ScanAssetRepository['create']>()
+    .mockResolvedValue({ record: createAssetRecord(), created: true });
   const update = vi.fn<ScanAssetRepository['update']>().mockResolvedValue(createAssetRecord());
   const listByScan = vi.fn<ScanAssetRepository['listByScan']>().mockResolvedValue([]);
   const assetRepository: ScanAssetRepository = {
@@ -182,7 +184,8 @@ describe('ScanAssetService', () => {
     const { service, findByScanAndType, create } = createHarness();
     findByScanAndType.mockResolvedValue(null);
     const record = createAssetRecord();
-    create.mockResolvedValue(record);
+    create.mockResolvedValueOnce({ record, created: true });
+    create.mockResolvedValue({ record, created: false });
 
     const payload = {
       assetType: 'MODEL' as const,
@@ -197,7 +200,9 @@ describe('ScanAssetService', () => {
     ]);
 
     expect(first.uploadSessionId).toBe(record.id);
+    expect(first.created).toBe(true);
     expect(second.uploadSessionId).toBe(record.id);
+    expect(second.created).toBe(false);
     expect(create).toHaveBeenCalledTimes(2);
   });
 

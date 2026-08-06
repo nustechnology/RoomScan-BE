@@ -213,7 +213,7 @@ export class ScanAssetService {
       idempotencyKey: data.idempotencyKey ?? null,
       uploadUrlExpiresAt: uploadOptions.expiresAt,
     };
-    const record = await this.#repository.create(createData);
+    const { record, created } = await this.#repository.create(createData);
     const uploadUrl = await this.#storage.createUploadUrl(objectKey, uploadOptions);
     return {
       uploadSessionId: record.id,
@@ -222,7 +222,7 @@ export class ScanAssetService {
       status: record.status,
       uploadUrl: uploadUrl.url,
       uploadUrlExpiresAt: uploadUrl.expiresAt.toISOString(),
-      created: true,
+      created,
     };
   }
 

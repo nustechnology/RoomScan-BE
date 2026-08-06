@@ -88,7 +88,7 @@ export class PrismaScanAssetRepository implements ScanAssetRepository {
     return row === null ? null : toScanAssetRecord(row);
   }
 
-  async create(data: ScanAssetCreateData): Promise<ScanAssetRecord> {
+  async create(data: ScanAssetCreateData): Promise<{ record: ScanAssetRecord; created: boolean }> {
     try {
       const row = await this.#client.scanAsset.create({
         data: {
@@ -105,7 +105,7 @@ export class PrismaScanAssetRepository implements ScanAssetRepository {
         },
         select: scanAssetSelect,
       });
-      return toScanAssetRecord(row);
+      return { record: toScanAssetRecord(row), created: true };
     } catch (error) {
       if (this.#isDuplicateAsset(error)) {
         const existing = await this.#client.scanAsset.findUnique({
@@ -114,7 +114,7 @@ export class PrismaScanAssetRepository implements ScanAssetRepository {
         });
 
         if (existing !== null) {
-          return toScanAssetRecord(existing);
+          return { record: toScanAssetRecord(existing), created: false };
         }
       }
 

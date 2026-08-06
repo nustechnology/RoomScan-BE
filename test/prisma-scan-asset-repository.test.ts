@@ -87,11 +87,11 @@ describe('PrismaScanAssetRepository', () => {
     expect(result?.assetType).toBe('MODEL');
   });
 
-  it('creates an asset row in PENDING state', async () => {
+  it('creates an asset row in PENDING state and reports a fresh insert', async () => {
     const { client, scanAsset } = createClient();
     const repository = new PrismaScanAssetRepository(client);
 
-    await repository.create({
+    const result = await repository.create({
       scanId: SCAN_ID,
       assetType: 'MODEL',
       contentType: 'model/gltf-binary',
@@ -118,9 +118,11 @@ describe('PrismaScanAssetRepository', () => {
       },
       select: scanAssetSelect,
     });
+    expect(result.created).toBe(true);
+    expect(result.record.id).toBe(ASSET_ID);
   });
 
-  it('resolves a concurrent duplicate insert to the existing upload session', async () => {
+  it('resolves a concurrent duplicate insert to the existing session as not created', async () => {
     const { client, scanAsset } = createClient();
     const conflict = new Prisma.PrismaClientKnownRequestError('unique constraint', {
       code: 'P2002',
@@ -147,7 +149,8 @@ describe('PrismaScanAssetRepository', () => {
       where: { scanId_assetType: { scanId: SCAN_ID, assetType: 'MODEL' } },
       select: scanAssetSelect,
     });
-    expect(result.id).toBe(ASSET_ID);
+    expect(result.created).toBe(false);
+    expect(result.record.id).toBe(ASSET_ID);
   });
 
   it('rethrows non-duplicate errors from create', async () => {
