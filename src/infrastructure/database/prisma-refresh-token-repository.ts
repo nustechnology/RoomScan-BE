@@ -18,26 +18,12 @@ export class PrismaRefreshTokenRepository implements RefreshTokenRepository {
     });
   }
 
-  async findActiveByJti(jti: string): Promise<{ userId: string; expiresAt: Date } | null> {
-    const record = await this.#client.refreshToken.findFirst({
-      where: { jti, revokedAt: null },
-      select: {
-        userId: true,
-        expiresAt: true,
-      },
-    });
-
-    if (record === null || record.expiresAt <= new Date()) {
-      return null;
-    }
-
-    return record;
-  }
-
-  async revokeByJti(jti: string): Promise<void> {
-    await this.#client.refreshToken.updateMany({
-      where: { jti, revokedAt: null },
+  async consume(jti: string): Promise<boolean> {
+    const result = await this.#client.refreshToken.updateMany({
+      where: { jti, revokedAt: null, expiresAt: { gt: new Date() } },
       data: { revokedAt: new Date() },
     });
+
+    return result.count > 0;
   }
 }

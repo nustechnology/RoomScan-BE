@@ -52,14 +52,14 @@ Error responses also include it in the `requestId` field. A non-empty incoming
 
 ## Rate limiting
 
-Public API traffic has two process-local per-IP policies:
+Public API traffic has three process-local per-IP policies:
 
 - `/api/v1` allows 120 requests per 60 seconds.
 - `POST /api/v1/auth/apple` additionally allows 20 requests per 15 minutes.
 - `POST /api/v1/auth/refresh` additionally allows 10 requests per 15 minutes.
 
 `/api/v1/health`, `/api/v1/ready`, `/api-doc` and `/api-doc.json` are exempt.
-All Apple attempts count, including validation, credential and dependency
+All Apple and refresh attempts count, including validation, credential and dependency
 failures. IPv6 clients are grouped by `/56`.
 
 Allowed and rejected limited requests expose draft-8 `RateLimit` and
@@ -148,16 +148,23 @@ Errors:
 
 | Code                    | HTTP | Meaning                                                |
 | ----------------------- | ---- | ------------------------------------------------------ |
-| `INVALID_REFRESH_TOKEN` | 401  | Missing, expired, revoked, or otherwise invalid token  |
+| `VALIDATION_ERROR`      | 400  | The request body is missing `refreshToken`             |
+| `INVALID_REFRESH_TOKEN` | 401  | The supplied token is invalid, expired, or revoked     |
 | `RATE_LIMIT_EXCEEDED`   | 429  | Per-IP quota exceeded (10 req / 15 min)                |
 | `INTERNAL_SERVER_ERROR` | 500  | Unexpected failure without secret or database exposure |
 
 Rotation is stateful: each issued refresh JWT has a unique `jti` (JWT ID)
-persisted in the `refresh_tokens` table until it expires or is revoked. When an
-already-revoked `jti` is reused, the endpoint returns 401 with
-`INVALID_REFRESH_TOKEN`. The service is designed to support token-theft
-detection by revoking all sessions for a user when a stale `jti` is presented,
-though the current implementation only rejects the stale token.
+persisted in the `refresh_tokens` table until it expires. Revocation sets
+`revokedAt` without deleting the row, so every recorded JTI remains queryable
+for audit and future theft-detection. The service consumes the presented JTI
+atomically: a single database operation matches the unrevoked, unexpired row and
+sets `revokedAt` in place of the former separate lookup-and-revoke. When an
+already-revoked or unknown `jti` is consumed, the operation affects zero rows
+and the endpoint returns 401 with `INVALID_REFRESH_TOKEN`. This prevents
+concurrent requests from both rotating the same token. The service is designed
+to support token-theft detection by revoking all sessions for a user when a
+stale `jti` is presented, though the current implementation only rejects the
+stale token.
 
 The same per-IP rate-limit headers (`RateLimit`, `RateLimit-Policy`, and
 `Retry-After` on 429) apply to this endpoint.

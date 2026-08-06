@@ -38,19 +38,14 @@ function createTestToken(options: {
 describe('RefreshTokenService', () => {
   let verifyMock = vi.fn<RefreshTokenVerifier['verify']>();
   let saveTokenMock = vi.fn<RefreshTokenRepository['saveToken']>();
-  let findActiveByJtiMock = vi.fn<RefreshTokenRepository['findActiveByJti']>();
-  let revokeByJtiMock = vi.fn<RefreshTokenRepository['revokeByJti']>();
+  let consumeMock = vi.fn<RefreshTokenRepository['consume']>();
   let issueTokensMock = vi.fn<AuthTokenIssuer['issueTokens']>();
   let service: RefreshTokenService;
 
   beforeEach(() => {
     verifyMock = vi.fn();
     saveTokenMock = vi.fn();
-    findActiveByJtiMock = vi.fn().mockResolvedValue({
-      userId: USER_ID,
-      expiresAt: new Date('2026-07-30T10:00:00.000Z'),
-    });
-    revokeByJtiMock = vi.fn();
+    consumeMock = vi.fn().mockResolvedValue(true);
     issueTokensMock = vi.fn().mockImplementation((userId: string): Promise<IssuedTokenPair> => {
       const encoder = new TextEncoder();
       const issuedAt = Math.floor(NOW.getTime() / 1000);
@@ -92,8 +87,7 @@ describe('RefreshTokenService', () => {
     };
     const tokenRepository: RefreshTokenRepository = {
       saveToken: saveTokenMock,
-      findActiveByJti: findActiveByJtiMock,
-      revokeByJti: revokeByJtiMock,
+      consume: consumeMock,
     };
     const tokenIssuer: AuthTokenIssuer = {
       issueTokens: issueTokensMock,
@@ -112,8 +106,7 @@ describe('RefreshTokenService', () => {
     const result = await service.refresh(oldToken);
 
     expect(verifyMock).toHaveBeenCalledWith(oldToken);
-    expect(findActiveByJtiMock).toHaveBeenCalledWith('eb5d278f-c857-45c7-887d-7be65288cb75');
-    expect(revokeByJtiMock).toHaveBeenCalledWith('eb5d278f-c857-45c7-887d-7be65288cb75');
+    expect(consumeMock).toHaveBeenCalledWith('eb5d278f-c857-45c7-887d-7be65288cb75');
     expect(issueTokensMock).toHaveBeenCalledWith(USER_ID);
     expect(saveTokenMock).toHaveBeenCalledWith(
       '00000000-0000-4000-8000-000000000002',
@@ -129,23 +122,29 @@ describe('RefreshTokenService', () => {
     expect(result.refreshToken).not.toBe(oldToken);
   });
 
-  it('rejects a token that is not found in the database', async () => {
-    findActiveByJtiMock.mockResolvedValue(null);
+  it('rejects a token when consume returns false', async () => {
+    consumeMock.mockResolvedValue(false);
     const token = await createTestToken({ jti: 'eb5d278f-c857-45c7-887d-7be65288cb75' });
 
     await expect(service.refresh(token)).rejects.toBeInstanceOf(InvalidRefreshTokenError);
-    expect(revokeByJtiMock).not.toHaveBeenCalled();
     expect(issueTokensMock).not.toHaveBeenCalled();
   });
 
-  it('detects token theft when an already-revoked JTI is reused', async () => {
+  it('rejects a reused JTI — concurrent calls only permit one success', async () => {
     const token = await createTestToken({ jti: 'eb5d278f-c857-45c7-887d-7be65288cb75' });
+    let callCount = 0;
+    consumeMock.mockImplementation(() => {
+      callCount += 1;
+      return Promise.resolve(callCount === 1);
+    });
 
-    await service.refresh(token);
+    const results = await Promise.allSettled([service.refresh(token), service.refresh(token)]);
 
-    findActiveByJtiMock.mockResolvedValue(null);
-
-    await expect(service.refresh(token)).rejects.toBeInstanceOf(InvalidRefreshTokenError);
-    expect(verifyMock).toHaveBeenCalledTimes(2);
+    expect(consumeMock).toHaveBeenCalledTimes(2);
+    expect(results[0].status).toBe('fulfilled');
+    expect(results[1].status).toBe('rejected');
+    if (results[1].status === 'rejected') {
+      expect(results[1].reason).toBeInstanceOf(InvalidRefreshTokenError);
+    }
   });
 });

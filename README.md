@@ -152,7 +152,7 @@ TOKEN=$(curl -s -X POST http://localhost:3000/api/v1/auth/apple \
 ```
 
 Project endpoints require a Bearer access token obtained from Apple
-authentication:
+authentication or token refresh:
 
 ```http
 Authorization: Bearer <access-token>

@@ -5,19 +5,16 @@ import { PrismaRefreshTokenRepository } from '../src/infrastructure/database/pri
 
 const JTI = 'eb5d278f-c857-45c7-887d-7be65288cb75';
 const USER_ID = '8c53d31d-2788-48de-82a0-c4f219ca3701';
-const FUTURE_DATE = new Date('2027-01-01T00:00:00.000Z');
-const PAST_DATE = new Date('2020-01-01T00:00:00.000Z');
+const FUTURE_DATE = new Date(Date.now() + 86_400_000);
 
 function createRepository() {
   const create = vi.fn<(arguments_: unknown) => Promise<unknown>>();
-  const findFirst = vi
-    .fn<(arguments_: unknown) => Promise<{ userId: string; expiresAt: Date } | null>>()
-    .mockResolvedValue(null);
-  const updateMany = vi.fn<(arguments_: unknown) => Promise<unknown>>();
+  const updateMany = vi
+    .fn<(arguments_: unknown) => Promise<{ count: number }>>()
+    .mockResolvedValue({ count: 0 });
   const client = {
     refreshToken: {
       create,
-      findFirst,
       updateMany,
     },
   } as unknown as Pick<PrismaClient, 'refreshToken'>;
@@ -25,7 +22,6 @@ function createRepository() {
   return {
     repository: new PrismaRefreshTokenRepository(client),
     create,
-    findFirst,
     updateMany,
   };
 }
@@ -45,63 +41,47 @@ describe('PrismaRefreshTokenRepository', () => {
     });
   });
 
-  it('returns an active token by JTI', async () => {
-    const { repository, findFirst } = createRepository();
-    findFirst.mockResolvedValue({
-      userId: USER_ID,
-      expiresAt: FUTURE_DATE,
-    });
-
-    const result = await repository.findActiveByJti(JTI);
-
-    expect(findFirst).toHaveBeenCalledWith({
-      where: { jti: JTI, revokedAt: null },
-      select: { userId: true, expiresAt: true },
-    });
-    expect(result).toEqual({
-      userId: USER_ID,
-      expiresAt: FUTURE_DATE,
-    });
-  });
-
-  it('returns null for a revoked token', async () => {
-    const { repository, findFirst } = createRepository();
-    findFirst.mockResolvedValue(null);
-
-    const result = await repository.findActiveByJti(JTI);
-
-    expect(result).toBeNull();
-  });
-
-  it('returns null for an expired token', async () => {
-    const { repository, findFirst } = createRepository();
-    findFirst.mockResolvedValue({
-      userId: USER_ID,
-      expiresAt: PAST_DATE,
-    });
-
-    const result = await repository.findActiveByJti(JTI);
-
-    expect(result).toBeNull();
-  });
-
-  it('returns null for an unknown JTI', async () => {
-    const { repository, findFirst } = createRepository();
-    findFirst.mockResolvedValue(null);
-
-    const result = await repository.findActiveByJti('00000000-0000-0000-0000-000000000000');
-
-    expect(result).toBeNull();
-  });
-
-  it('revokes a non-revoked token by JTI', async () => {
+  it('returns true when consuming an active unrevoked token', async () => {
     const { repository, updateMany } = createRepository();
+    updateMany.mockResolvedValue({ count: 1 });
 
-    await repository.revokeByJti(JTI);
+    const result = await repository.consume(JTI);
 
     expect(updateMany).toHaveBeenCalledWith({
-      where: { jti: JTI, revokedAt: null },
+      where: {
+        jti: JTI,
+        revokedAt: null,
+        expiresAt: { gt: expect.any(Date) as Date },
+      },
       data: { revokedAt: expect.any(Date) as Date },
     });
+    expect(result).toBe(true);
+  });
+
+  it('returns false when consuming an already-revoked token', async () => {
+    const { repository, updateMany } = createRepository();
+    updateMany.mockResolvedValue({ count: 0 });
+
+    const result = await repository.consume(JTI);
+
+    expect(result).toBe(false);
+  });
+
+  it('returns false when consuming an expired token', async () => {
+    const { repository, updateMany } = createRepository();
+    updateMany.mockResolvedValue({ count: 0 });
+
+    const result = await repository.consume(JTI);
+
+    expect(result).toBe(false);
+  });
+
+  it('returns false for an unknown JTI', async () => {
+    const { repository, updateMany } = createRepository();
+    updateMany.mockResolvedValue({ count: 0 });
+
+    const result = await repository.consume('00000000-0000-0000-0000-000000000000');
+
+    expect(result).toBe(false);
   });
 });

@@ -109,6 +109,7 @@ export function createAuthRouter({
       try {
         const body = RefreshTokenResponseSchema.parse(result);
 
+        response.setHeader('Cache-Control', 'no-store');
         response.status(200).json(body);
       } catch {
         next(

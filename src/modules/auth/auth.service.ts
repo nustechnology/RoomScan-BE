@@ -73,12 +73,10 @@ export class RefreshTokenService {
   async refresh(rawToken: string): Promise<AuthTokenPair> {
     const { userId, jti } = await this.#tokenVerifier.verify(rawToken);
 
-    const stored = await this.#tokenRepository.findActiveByJti(jti);
-    if (stored === null) {
+    const consumed = await this.#tokenRepository.consume(jti);
+    if (!consumed) {
       throw new InvalidRefreshTokenError();
     }
-
-    await this.#tokenRepository.revokeByJti(jti);
 
     const tokens = await this.#tokenIssuer.issueTokens(userId);
 

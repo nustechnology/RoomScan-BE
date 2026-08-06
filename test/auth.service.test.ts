@@ -31,7 +31,7 @@ describe('AuthService', () => {
       appleIdentityVerifier: { verify },
       userRepository: { upsertAppleUser },
       tokenIssuer: { issueTokens },
-      tokenRepository: { saveToken, findActiveByJti: vi.fn(), revokeByJti: vi.fn() },
+      tokenRepository: { saveToken, consume: vi.fn() },
     });
 
     await expect(service.signInWithApple('identity-token')).resolves.toEqual({
@@ -67,7 +67,7 @@ describe('AuthService', () => {
       appleIdentityVerifier: { verify },
       userRepository: { upsertAppleUser },
       tokenIssuer: { issueTokens },
-      tokenRepository: { saveToken, findActiveByJti: vi.fn(), revokeByJti: vi.fn() },
+      tokenRepository: { saveToken, consume: vi.fn() },
     });
 
     await expect(service.signInWithApple('identity-token')).rejects.toBe(verificationError);
@@ -98,7 +98,7 @@ describe('AuthService', () => {
       appleIdentityVerifier: { verify },
       userRepository: { upsertAppleUser },
       tokenIssuer: { issueTokens },
-      tokenRepository: { saveToken, findActiveByJti: vi.fn(), revokeByJti: vi.fn() },
+      tokenRepository: { saveToken, consume: vi.fn() },
     });
 
     await service.signInWithApple('identity-token', 'client-nonce');
@@ -122,7 +122,7 @@ describe('AuthService', () => {
       appleIdentityVerifier: { verify },
       userRepository: { upsertAppleUser },
       tokenIssuer: { issueTokens },
-      tokenRepository: { saveToken, findActiveByJti: vi.fn(), revokeByJti: vi.fn() },
+      tokenRepository: { saveToken, consume: vi.fn() },
     });
 
     await expect(service.signInWithApple('identity-token')).rejects.toBe(repositoryError);
