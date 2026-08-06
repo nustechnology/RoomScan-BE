@@ -52,6 +52,7 @@ export interface RefreshTokenVerifier {
 export interface RefreshTokenRepository {
   saveToken(jti: string, userId: string, expiresAt: Date): Promise<void>;
   consume(jti: string): Promise<boolean>;
+  rotate(oldJti: string, newJti: string, userId: string, expiresAt: Date): Promise<boolean>;
 }
 
 export interface TokenRefreshService {

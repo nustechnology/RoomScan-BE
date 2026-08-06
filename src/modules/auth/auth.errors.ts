@@ -1,3 +1,5 @@
+import { AppError } from '../../common/errors/app-error.js';
+
 export class InvalidAppleIdentityTokenError extends Error {
   constructor() {
     super('Apple identity token is invalid');
@@ -12,9 +14,8 @@ export class AppleIdentityProviderUnavailableError extends Error {
   }
 }
 
-export class InvalidRefreshTokenError extends Error {
+export class InvalidRefreshTokenError extends AppError {
   constructor() {
-    super('Refresh token is invalid');
-    this.name = 'InvalidRefreshTokenError';
+    super({ statusCode: 401, code: 'INVALID_REFRESH_TOKEN', message: 'Refresh token is invalid' });
   }
 }

@@ -73,18 +73,17 @@ export class RefreshTokenService {
   async refresh(rawToken: string): Promise<AuthTokenPair> {
     const { userId, jti } = await this.#tokenVerifier.verify(rawToken);
 
-    const consumed = await this.#tokenRepository.consume(jti);
-    if (!consumed) {
-      throw new InvalidRefreshTokenError();
-    }
-
     const tokens = await this.#tokenIssuer.issueTokens(userId);
 
-    await this.#tokenRepository.saveToken(
+    const rotated = await this.#tokenRepository.rotate(
+      jti,
       tokens.refreshTokenJti,
       userId,
       tokens.refreshTokenExpiresAt,
     );
+    if (!rotated) {
+      throw new InvalidRefreshTokenError();
+    }
 
     return {
       accessToken: tokens.accessToken,

@@ -37,15 +37,13 @@ function createTestToken(options: {
 
 describe('RefreshTokenService', () => {
   let verifyMock = vi.fn<RefreshTokenVerifier['verify']>();
-  let saveTokenMock = vi.fn<RefreshTokenRepository['saveToken']>();
-  let consumeMock = vi.fn<RefreshTokenRepository['consume']>();
+  let rotateMock = vi.fn<RefreshTokenRepository['rotate']>();
   let issueTokensMock = vi.fn<AuthTokenIssuer['issueTokens']>();
   let service: RefreshTokenService;
 
   beforeEach(() => {
     verifyMock = vi.fn();
-    saveTokenMock = vi.fn();
-    consumeMock = vi.fn().mockResolvedValue(true);
+    rotateMock = vi.fn().mockResolvedValue(true);
     issueTokensMock = vi.fn().mockImplementation((userId: string): Promise<IssuedTokenPair> => {
       const encoder = new TextEncoder();
       const issuedAt = Math.floor(NOW.getTime() / 1000);
@@ -86,8 +84,9 @@ describe('RefreshTokenService', () => {
       }),
     };
     const tokenRepository: RefreshTokenRepository = {
-      saveToken: saveTokenMock,
-      consume: consumeMock,
+      saveToken: vi.fn(),
+      consume: vi.fn(),
+      rotate: rotateMock,
     };
     const tokenIssuer: AuthTokenIssuer = {
       issueTokens: issueTokensMock,
@@ -106,15 +105,15 @@ describe('RefreshTokenService', () => {
     const result = await service.refresh(oldToken);
 
     expect(verifyMock).toHaveBeenCalledWith(oldToken);
-    expect(consumeMock).toHaveBeenCalledWith('eb5d278f-c857-45c7-887d-7be65288cb75');
     expect(issueTokensMock).toHaveBeenCalledWith(USER_ID);
-    expect(saveTokenMock).toHaveBeenCalledWith(
+    expect(rotateMock).toHaveBeenCalledWith(
+      'eb5d278f-c857-45c7-887d-7be65288cb75',
       '00000000-0000-4000-8000-000000000002',
       USER_ID,
       expect.any(Date),
     );
-    const savedExpiresAt = saveTokenMock.mock.calls[0]?.[2] as Date;
-    expect(savedExpiresAt.getTime()).toBeGreaterThan(NOW.getTime());
+    const passedExpiresAt = rotateMock.mock.calls[0]?.[3] as Date;
+    expect(passedExpiresAt.getTime()).toBeGreaterThan(NOW.getTime());
 
     expect(result.accessToken).toEqual(expect.any(String));
     expect(result.refreshToken).toEqual(expect.any(String));
@@ -122,29 +121,29 @@ describe('RefreshTokenService', () => {
     expect(result.refreshToken).not.toBe(oldToken);
   });
 
-  it('rejects a token when consume returns false', async () => {
-    consumeMock.mockResolvedValue(false);
+  it('rejects a token when rotate returns false', async () => {
+    rotateMock.mockResolvedValue(false);
     const token = await createTestToken({ jti: 'eb5d278f-c857-45c7-887d-7be65288cb75' });
 
     await expect(service.refresh(token)).rejects.toBeInstanceOf(InvalidRefreshTokenError);
-    expect(issueTokensMock).not.toHaveBeenCalled();
+    expect(issueTokensMock).toHaveBeenCalled();
   });
 
   it('rejects a reused JTI — concurrent calls only permit one success', async () => {
     const token = await createTestToken({ jti: 'eb5d278f-c857-45c7-887d-7be65288cb75' });
     let callCount = 0;
-    consumeMock.mockImplementation(() => {
+    rotateMock.mockImplementation(() => {
       callCount += 1;
       return Promise.resolve(callCount === 1);
     });
 
     const results = await Promise.allSettled([service.refresh(token), service.refresh(token)]);
 
-    expect(consumeMock).toHaveBeenCalledTimes(2);
-    expect(results[0].status).toBe('fulfilled');
-    expect(results[1].status).toBe('rejected');
-    if (results[1].status === 'rejected') {
-      expect(results[1].reason).toBeInstanceOf(InvalidRefreshTokenError);
-    }
+    expect(rotateMock).toHaveBeenCalledTimes(2);
+    const fulfilled = results.filter((r) => r.status === 'fulfilled');
+    const rejected = results.filter((r) => r.status === 'rejected');
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect((rejected[0] as PromiseRejectedResult).reason).toBeInstanceOf(InvalidRefreshTokenError);
   });
 });
