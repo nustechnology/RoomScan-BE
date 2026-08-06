@@ -42,7 +42,10 @@ Yarn. If the `db` service is already healthy, leave it running across tasks;
 do not restart or recreate it as part of final verification.
 
 The local seed is idempotent and refuses to run unless
-`NODE_ENV=development`. With the shortcut enabled, use:
+`NODE_ENV=development`. It creates (or refreshes) the fixed local Apple user,
+then seeds a demo project owned by that user with a set of room scans that
+exercise a range of asset and sync states so the list and detail screens can be
+tried without manual setup. With the shortcut enabled, use:
 
 ```json
 {
@@ -112,8 +115,13 @@ a `users` foreign key with `ON DELETE RESTRICT`, a nullable soft-delete
 timestamp, 50/500-character storage bounds, and an index on
 `(ownerId, deletedAt, updatedAt, id)` for active owner listings. It also creates
 the `ProjectRole` enum and `project_accesses` table used for revocable Viewer
-access. Tests use Prisma delegate doubles; native migration and endpoint
-verification use the PostgreSQL `db` container.
+access. The `add_scans` migration creates the `SyncStatus` and `AssetStatus`
+enums and the `scans` table with a `projects` foreign key (`ON DELETE CASCADE`),
+a `users` creator foreign key (`ON DELETE RESTRICT`), 100/500/2048-character
+bounds, a composite unique `(projectId, clientMutationId)`, and indexes on
+`(projectId, deletedAt, createdAt, id)` and `createdById`. Tests use Prisma
+delegate doubles; native migration and endpoint verification use the PostgreSQL
+`db` container.
 
 ## Dependency and generated-file policy
 

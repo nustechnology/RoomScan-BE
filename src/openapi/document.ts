@@ -4,12 +4,14 @@ import { APP_NAME, APP_VERSION } from '../config/constants.js';
 import { authOpenApiRegistry } from '../modules/auth/auth.openapi.js';
 import { healthOpenApiRegistry } from '../modules/health/health.openapi.js';
 import { projectOpenApiRegistry } from '../modules/project/project.openapi.js';
+import { scanOpenApiRegistry } from '../modules/scan/scan.openapi.js';
 
 export function createOpenApiDocument(): ReturnType<OpenApiGeneratorV31['generateDocument']> {
   const generator = new OpenApiGeneratorV31([
     ...healthOpenApiRegistry.definitions,
     ...authOpenApiRegistry.definitions,
     ...projectOpenApiRegistry.definitions,
+    ...scanOpenApiRegistry.definitions,
   ]);
 
   return generator.generateDocument({
@@ -37,6 +39,10 @@ export function createOpenApiDocument(): ReturnType<OpenApiGeneratorV31['generat
       {
         name: 'Projects',
         description: 'Owner-managed projects with active Viewer detail access',
+      },
+      {
+        name: 'Scans',
+        description: 'Room scan metadata owned by a project',
       },
     ],
   });
