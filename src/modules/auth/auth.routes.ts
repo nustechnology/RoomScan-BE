@@ -5,19 +5,27 @@ import { validateRequest } from '../../common/middleware/validate-request.js';
 import {
   AppleIdentityProviderUnavailableError,
   InvalidAppleIdentityTokenError,
+  InvalidRefreshTokenError,
 } from './auth.errors.js';
 import {
   AppleSignInRequestSchema,
   AppleSignInResponseSchema,
+  RefreshTokenRequestSchema,
+  RefreshTokenResponseSchema,
   type AppleSignInRequest,
+  type RefreshTokenRequest,
 } from './auth.schemas.js';
-import type { AppleAuthService } from './auth.types.js';
+import type { AppleAuthService, TokenRefreshService } from './auth.types.js';
 
 export interface AuthRouterDependencies {
   authService: AppleAuthService;
+  refreshTokenService: TokenRefreshService;
 }
 
-export function createAuthRouter({ authService }: AuthRouterDependencies): Router {
+export function createAuthRouter({
+  authService,
+  refreshTokenService,
+}: AuthRouterDependencies): Router {
   const router = Router();
 
   router.post(
@@ -60,6 +68,48 @@ export function createAuthRouter({ authService }: AuthRouterDependencies): Route
       try {
         const body = AppleSignInResponseSchema.parse(result);
 
+        response.status(200).json(body);
+      } catch {
+        next(
+          new AppError({
+            statusCode: 500,
+            code: 'INTERNAL_SERVER_ERROR',
+            message: 'An unexpected error occurred',
+          }),
+        );
+      }
+    },
+  );
+
+  router.post(
+    '/auth/refresh',
+    validateRequest({ body: RefreshTokenRequestSchema }),
+    async (_request, response, next) => {
+      let result: Awaited<ReturnType<TokenRefreshService['refresh']>>;
+
+      try {
+        const { refreshToken } = (response.locals.validated as { body: RefreshTokenRequest }).body;
+        result = await refreshTokenService.refresh(refreshToken);
+      } catch (error) {
+        if (error instanceof InvalidRefreshTokenError) {
+          next(
+            new AppError({
+              statusCode: 401,
+              code: 'INVALID_REFRESH_TOKEN',
+              message: 'Refresh token is invalid',
+            }),
+          );
+          return;
+        }
+
+        next(error);
+        return;
+      }
+
+      try {
+        const body = RefreshTokenResponseSchema.parse(result);
+
+        response.setHeader('Cache-Control', 'no-store');
         response.status(200).json(body);
       } catch {
         next(

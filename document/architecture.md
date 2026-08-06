@@ -17,9 +17,10 @@ requirements are implemented.
 2. Helmet and CORS apply security and cross-origin policies.
 3. A general IP rate limiter protects `/api/v1` before request bodies are
    parsed, excluding liveness and readiness. The Apple authentication
-   limiter is mounted path-specifically at `/api/v1/auth/apple` at the
-   same stage, also before body parsing, so every attempt on that path
-   consumes the Apple quota regardless of parse outcome.
+   limiter is mounted path-specifically at `/api/v1/auth/apple` and the
+   token-refresh limiter at `/api/v1/auth/refresh`, both at the
+   same stage before body parsing, so every attempt on those paths
+   consumes the corresponding quota regardless of parse outcome.
 4. Compression and body parsers apply transport policies.
 5. Swagger or versioned API routers handle the request.
 6. Zod validates request/response data and supplies OpenAPI schemas.
@@ -63,9 +64,13 @@ Apple `sub` is the stable external identifier. Email is nullable and is never
 used to find or link a user. A supplied email updates the stored email and
 verification state; an absent email leaves existing values unchanged.
 
-The refresh JWT is issued for the mobile client but is not persisted or
-consumed by an endpoint yet. Application refresh-token rotation and revocation
-are outside the implemented scope.
+The refresh JWT is issued for the mobile client. `POST /api/v1/auth/refresh`
+consumes a valid refresh JWT, revokes it, and returns a new access+refresh pair.
+Rotation is stateful: each issued refresh JWT has a unique `jti` persisted in
+the `RefreshToken` model. The repository stores the `jti`, `userId`, and
+`expiresAt` on creation and sets `revokedAt` on rotation. A reused `jti` is
+rejected with `INVALID_REFRESH_TOKEN`. The refresh verifier accepts only
+HS256-signed tokens with `tokenType: "refresh"` and the refresh-token secret.
 
 Apple authorization-code exchange is not implemented: outside the explicitly
 enabled local sentinel, the endpoint accepts only Apple identity tokens, not
@@ -166,11 +171,12 @@ claim remain accepted only when the request also omits the nonce.
 
 ## Rate limiting
 
-The composition root creates independent general API and Apple authentication
-rate limiters and injects them into the application factory. The general policy
-allows 120 requests per 60 seconds for each client IP. Apple authentication has
-an additional policy allowing 20 attempts per 15 minutes. Every Apple attempt
-counts regardless of its outcome.
+The composition root creates independent general API, Apple authentication, and
+token-refresh rate limiters and injects them into the application factory. The
+general policy allows 120 requests per 60 seconds for each client IP. Apple
+authentication has an additional policy allowing 20 attempts per 15 minutes.
+Token refresh has an additional policy allowing 10 attempts per 15 minutes.
+Every Apple and refresh attempt counts regardless of its outcome.
 
 Liveness, readiness, Swagger and raw OpenAPI are exempt. Rejected requests use
 the standard error middleware and return 429 with `RateLimit`,
@@ -192,7 +198,7 @@ trusted IP/CIDR topology rather than trusting every proxy.
 The composition root creates one Prisma Client and injects it into the database
 health/lifecycle adapter, the Apple user repository, the current-user
 repository, the project repository, and the scan repository. It also creates the
-two rate-limit middleware instances, the access-token verifier, the project
+three rate-limit middleware instances, the access-token verifier, the project
 permission service, the project service, and the scan service once per process.
 Product modules never import the Prisma client directly. The unique provider
 identity constraint makes

@@ -11,7 +11,7 @@ import type {
 import { createRateLimiters, type RateLimitStores } from '../src/common/middleware/rate-limit.js';
 import { ErrorResponseSchema } from '../src/common/schemas/error.js';
 import type { AppConfig } from '../src/config/env.js';
-import type { AppleAuthService } from '../src/modules/auth/auth.types.js';
+import type { AppleAuthService, TokenRefreshService } from '../src/modules/auth/auth.types.js';
 import type { ProjectService } from '../src/modules/project/project.service.js';
 import type { ScanService } from '../src/modules/scan/scan.service.js';
 
@@ -26,6 +26,8 @@ const baseConfig: AppConfig = {
   apiRateLimitMaxRequests: 120,
   appleAuthRateLimitWindowSeconds: 900,
   appleAuthRateLimitMaxRequests: 20,
+  refreshAuthRateLimitWindowSeconds: 900,
+  refreshAuthRateLimitMaxRequests: 10,
   appleClientId: 'com.example.roomscan',
   accessTokenSecret: 'access-secret-that-is-at-least-32-characters',
   refreshTokenSecret: 'refresh-secret-that-is-at-least-32-characters',
@@ -52,6 +54,9 @@ function createTestApp(overrides: Partial<AppConfig> = {}, stores: RateLimitStor
   });
   const authService: AppleAuthService = {
     signInWithApple,
+  };
+  const refreshTokenService: TokenRefreshService = {
+    refresh: vi.fn(),
   };
   const accessTokenVerifier: AccessTokenVerifier = {
     verify: vi.fn().mockResolvedValue({ userId: 'eb5d278f-c857-45c7-887d-7be65288cb75' }),
@@ -85,6 +90,7 @@ function createTestApp(overrides: Partial<AppConfig> = {}, stores: RateLimitStor
     },
     logger,
     authService,
+    refreshTokenService,
     projectService,
     scanService,
     accessTokenVerifier,
