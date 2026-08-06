@@ -1,4 +1,4 @@
-import type { PrismaClient } from '../../generated/prisma/client.js';
+import { Prisma, type PrismaClient } from '../../generated/prisma/client.js';
 import { ProjectRole as PrismaProjectRole } from '../../generated/prisma/enums.js';
 import { ScanNotFoundError } from '../../modules/scan/scan.errors.js';
 import type {
@@ -116,21 +116,36 @@ export class PrismaScanRepository implements ScanRepository {
     this.#client = client;
   }
 
-  async create(projectId: string, createdById: string, data: ScanCreateInput): Promise<ScanRecord> {
+  async create(
+    projectId: string,
+    createdById: string,
+    data: ScanCreateInput,
+  ): Promise<{ record: ScanRecord; created: boolean }> {
     if (data.clientMutationId !== undefined) {
       const existing = await this.#client.scan.findFirst({
-        where: { clientMutationId: data.clientMutationId, project: { deletedAt: null } },
+        where: { projectId, clientMutationId: data.clientMutationId },
         select: { id: true, deletedAt: true },
       });
 
       if (existing !== null) {
-        return await this.#client.$transaction(async (transaction) => {
-          if (existing.deletedAt !== null) {
-            await transaction.scan.update({
-              where: { id: existing.id },
-              data: { deletedAt: null },
-            });
+        if (existing.deletedAt === null) {
+          const row = await this.#client.scan.findFirst({
+            where: { id: existing.id },
+            select: scanSelect,
+          });
+
+          if (row === null) {
+            throw new ScanNotFoundError();
           }
+
+          return { record: toScanRecord(row), created: false };
+        }
+
+        return await this.#client.$transaction(async (transaction) => {
+          await transaction.scan.update({
+            where: { id: existing.id },
+            data: { deletedAt: null, name: data.name, description: data.description },
+          });
 
           const row = await transaction.scan.findFirst({
             where: { id: existing.id },
@@ -141,32 +156,49 @@ export class PrismaScanRepository implements ScanRepository {
             throw new ScanNotFoundError();
           }
 
-          return toScanRecord(row);
+          return { record: toScanRecord(row), created: false };
         });
       }
     }
 
-    const row = await this.#client.scan.create({
-      data: {
-        projectId,
-        createdById,
-        name: data.name,
-        description: data.description,
-        ...(data.clientMutationId === undefined ? {} : { clientMutationId: data.clientMutationId }),
-      },
-      select: scanSelect,
-    });
+    try {
+      const row = await this.#client.scan.create({
+        data: {
+          projectId,
+          createdById,
+          name: data.name,
+          description: data.description,
+          ...(data.clientMutationId === undefined
+            ? {}
+            : { clientMutationId: data.clientMutationId }),
+        },
+        select: scanSelect,
+      });
 
-    return toScanRecord(row);
+      return { record: toScanRecord(row), created: true };
+    } catch (error) {
+      if (this.#isDuplicateMutationId(error) && data.clientMutationId !== undefined) {
+        const row = await this.#client.scan.findFirst({
+          where: { projectId, clientMutationId: data.clientMutationId },
+          select: scanSelect,
+        });
+
+        if (row !== null) {
+          return { record: toScanRecord(row), created: false };
+        }
+      }
+
+      throw error;
+    }
   }
 
-  async findByClientMutationId(clientMutationId: string): Promise<ScanRecord | null> {
-    const row = await this.#client.scan.findFirst({
-      where: { clientMutationId, project: { deletedAt: null } },
-      select: scanSelect,
-    });
-
-    return row === null ? null : toScanRecord(row);
+  #isDuplicateMutationId(error: unknown): error is Prisma.PrismaClientKnownRequestError {
+    return (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === 'P2002' &&
+      Array.isArray(error.meta?.target) &&
+      error.meta.target.some((field) => ['projectId', 'clientMutationId'].includes(field as string))
+    );
   }
 
   async listByProject(

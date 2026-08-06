@@ -118,7 +118,7 @@ the `ProjectRole` enum and `project_accesses` table used for revocable Viewer
 access. The `add_scans` migration creates the `SyncStatus` and `AssetStatus`
 enums and the `scans` table with a `projects` foreign key (`ON DELETE CASCADE`),
 a `users` creator foreign key (`ON DELETE RESTRICT`), 100/500/2048-character
-bounds, a unique `clientMutationId`, and indexes on
+bounds, a composite unique `(projectId, clientMutationId)`, and indexes on
 `(projectId, deletedAt, createdAt, id)` and `createdById`. Tests use Prisma
 delegate doubles; native migration and endpoint verification use the PostgreSQL
 `db` container.

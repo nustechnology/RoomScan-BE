@@ -74,16 +74,8 @@ export class ScanService {
       throw error;
     }
 
-    if (data.clientMutationId !== undefined) {
-      const existing = await this.#repository.findByClientMutationId(data.clientMutationId);
-
-      if (existing !== null && existing.deletedAt === null) {
-        return { scan: toResult(existing, 'OWNER'), created: false };
-      }
-    }
-
-    const record = await this.#repository.create(projectId, userId, data);
-    return { scan: toResult(record, 'OWNER'), created: true };
+    const { record, created } = await this.#repository.create(projectId, userId, data);
+    return { scan: toResult(record, 'OWNER'), created };
   }
 
   async list(userId: string, projectId: string, options: ScanListOptions): Promise<ScanListResult> {

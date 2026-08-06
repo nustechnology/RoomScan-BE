@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import type { PrismaClient } from '../src/generated/prisma/client.js';
+import { Prisma, type PrismaClient } from '../src/generated/prisma/client.js';
 import { PrismaScanRepository } from '../src/infrastructure/database/prisma-scan-repository.js';
 import { ScanNotFoundError } from '../src/modules/scan/scan.errors.js';
 
@@ -106,21 +106,30 @@ describe('PrismaScanRepository', () => {
       },
       select: scanSelect,
     });
-    expect(result.name).toBe('Living Room');
-    expect(result.projectId).toBe(PROJECT_ID);
+    expect(result.created).toBe(true);
+    expect(result.record.name).toBe('Living Room');
+    expect(result.record.projectId).toBe(PROJECT_ID);
   });
 
-  it('creates a scan with a clientMutationId', async () => {
+  it('creates a scan with a clientMutationId scoped to its project', async () => {
     const { client, scan } = createClient();
     scan.findFirst.mockResolvedValueOnce(null);
     const repository = new PrismaScanRepository(client);
 
-    await repository.create(PROJECT_ID, OWNER_ID, {
+    const result = await repository.create(PROJECT_ID, OWNER_ID, {
       name: 'Living Room',
       description: null,
       clientMutationId: 'mutation-abc',
     });
 
+    expect(scan.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          projectId: PROJECT_ID,
+          clientMutationId: 'mutation-abc',
+        },
+      }),
+    );
     expect(scan.create).toHaveBeenCalledWith({
       data: {
         projectId: PROJECT_ID,
@@ -131,9 +140,10 @@ describe('PrismaScanRepository', () => {
       },
       select: scanSelect,
     });
+    expect(result.created).toBe(true);
   });
 
-  it('returns an existing active scan when clientMutationId collides', async () => {
+  it('returns an existing active scan as not-created when clientMutationId collides in the project', async () => {
     const { client, scan } = createClient();
     const repository = new PrismaScanRepository(client);
 
@@ -145,52 +155,84 @@ describe('PrismaScanRepository', () => {
 
     expect(scan.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { clientMutationId: 'existing-mutation', project: { deletedAt: null } },
+        where: {
+          projectId: PROJECT_ID,
+          clientMutationId: 'existing-mutation',
+        },
       }),
     );
-    expect(result.name).toBe('Living Room');
-    expect(result.id).toBe(SCAN_ID);
+    expect(result.created).toBe(false);
+    expect(result.record.name).toBe('Living Room');
+    expect(result.record.id).toBe(SCAN_ID);
   });
 
-  it('restores a deleted scan when clientMutationId collides with a deleted row', async () => {
+  it('restores a deleted scan applying submitted fields and reports it as not-created', async () => {
     const { client, scan, transaction } = createClient();
-    scan.findFirst.mockResolvedValueOnce(
-      createScanRow({ deletedAt: new Date('2026-08-01T00:00:00.000Z') }),
+    scan.findFirst
+      .mockResolvedValueOnce(createScanRow({ deletedAt: new Date('2026-08-01T00:00:00.000Z') }))
+      .mockResolvedValueOnce(createScanRow({ name: 'Renamed Room' }));
+    const repository = new PrismaScanRepository(client);
+
+    const result = await repository.create(PROJECT_ID, OWNER_ID, {
+      name: 'Renamed Room',
+      description: 'Restored after soft delete',
+      clientMutationId: 'deleted-mutation',
+    });
+
+    expect(transaction).toHaveBeenCalledOnce();
+    expect(scan.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: SCAN_ID },
+        data: {
+          deletedAt: null,
+          name: 'Renamed Room',
+          description: 'Restored after soft delete',
+        },
+      }),
     );
+    expect(result.created).toBe(false);
+    expect(result.record.name).toBe('Renamed Room');
+  });
+
+  it('returns the existing scan when a concurrent duplicate insert raises P2002', async () => {
+    const { client, scan } = createClient();
+    const conflict = new Prisma.PrismaClientKnownRequestError('unique constraint', {
+      code: 'P2002',
+      clientVersion: 'test',
+      meta: { target: ['projectId', 'clientMutationId'] },
+    });
+    scan.findFirst.mockResolvedValueOnce(null);
+    scan.create.mockRejectedValueOnce(conflict);
     const repository = new PrismaScanRepository(client);
 
     const result = await repository.create(PROJECT_ID, OWNER_ID, {
       name: 'Living Room',
       description: null,
-      clientMutationId: 'deleted-mutation',
+      clientMutationId: 'mutation-abc',
     });
 
-    expect(transaction).toHaveBeenCalledOnce();
-    expect(result.name).toBe('Living Room');
-  });
-
-  it('finds an active scan by clientMutationId', async () => {
-    const { client, scan } = createClient();
-    const repository = new PrismaScanRepository(client);
-
-    const result = await repository.findByClientMutationId('existing-mutation');
-
+    expect(result.created).toBe(false);
     expect(scan.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { clientMutationId: 'existing-mutation', project: { deletedAt: null } },
+        where: { projectId: PROJECT_ID, clientMutationId: 'mutation-abc' },
       }),
     );
-    expect(result).not.toBeNull();
+    expect(result.record.id).toBe(SCAN_ID);
   });
 
-  it('returns null when no active scan matches clientMutationId', async () => {
+  it('rethrows non-duplicate errors from create', async () => {
     const { client, scan } = createClient();
     scan.findFirst.mockResolvedValueOnce(null);
+    scan.create.mockRejectedValueOnce(new Error('boom'));
     const repository = new PrismaScanRepository(client);
 
-    const result = await repository.findByClientMutationId('missing-mutation');
-
-    expect(result).toBeNull();
+    await expect(
+      repository.create(PROJECT_ID, OWNER_ID, {
+        name: 'Living Room',
+        description: null,
+        clientMutationId: 'mutation-abc',
+      }),
+    ).rejects.toThrow('boom');
   });
 
   it('lists active scans for a project with pagination and stable sorting', async () => {

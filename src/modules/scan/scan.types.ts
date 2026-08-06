@@ -83,8 +83,11 @@ export interface ScanListResult {
 }
 
 export interface ScanRepository {
-  create(projectId: string, createdById: string, data: ScanCreateInput): Promise<ScanRecord>;
-  findByClientMutationId(clientMutationId: string): Promise<ScanRecord | null>;
+  create(
+    projectId: string,
+    createdById: string,
+    data: ScanCreateInput,
+  ): Promise<{ record: ScanRecord; created: boolean }>;
   listByProject(
     projectId: string,
     options: ScanListOptions,

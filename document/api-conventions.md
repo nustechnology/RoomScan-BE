@@ -290,7 +290,7 @@ Validation rules:
   whitespace-only; duplicate names are allowed.
 - `description`: optional nullable string, maximum 500 characters.
 - `clientMutationId` on create: optional string, 1–128 characters; used for
-  idempotent create.
+  idempotent create and unique per project.
 - Create and update objects reject unknown fields; PATCH must contain at least
   one supported field; `"description": null` clears the stored description.
 - Clients cannot submit `id`, `projectId`, `createdById`, `createdAt`,
@@ -300,8 +300,13 @@ Authorization and deletion rules:
 
 - The Owner of the parent project has full scan control.
 - An active Viewer may only read scan list and detail.
-- Create with a reused active `clientMutationId` returns the existing scan with
-  `200` instead of creating a duplicate.
+- Create with a reused active `clientMutationId` in the same project returns the
+  existing scan with `200` instead of creating a duplicate.
+- Reusing a `clientMutationId` that matches a soft-deleted scan in the same
+  project restores that scan (clears its `deletedAt`), applies the submitted
+  `name` and `description`, and returns the restored scan with `200` (not
+  created) instead of inserting a new row. A `clientMutationId` is unique per
+  project, so the same value in a different project creates a new scan.
 - Delete sets `deletedAt` and touches the parent project `updatedAt` in one
   transaction.
 - Repeating delete as the same Owner returns `204`; other users receive the

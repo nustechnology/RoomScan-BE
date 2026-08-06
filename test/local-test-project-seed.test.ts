@@ -41,6 +41,7 @@ describe('seedLocalTestProject', () => {
       update: {
         name: LOCAL_TEST_PROJECT_NAME,
         description: 'Survey apartment for the local development demo',
+        deletedAt: null,
       },
     });
 
@@ -66,6 +67,7 @@ describe('seedLocalTestProject', () => {
           assetStatus: scan.assetStatus,
           syncStatus: scan.syncStatus,
           modelVersion: scan.modelVersion,
+          deletedAt: null,
         },
       });
     }

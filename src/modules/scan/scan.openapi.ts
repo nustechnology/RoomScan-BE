@@ -132,7 +132,8 @@ scanOpenApiRegistry.registerPath({
       },
     },
     200: {
-      description: 'An active scan already exists for the same clientMutationId',
+      description:
+        'A scan already exists for the same project and clientMutationId (active or restored)',
       headers: rateLimitHeaders,
       content: {
         'application/json': {

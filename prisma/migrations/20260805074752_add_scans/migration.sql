@@ -30,7 +30,7 @@ CREATE INDEX "scans_projectId_deletedAt_createdAt_id_idx" ON "scans"("projectId"
 CREATE INDEX "scans_createdById_idx" ON "scans"("createdById");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "scans_clientMutationId_key" ON "scans"("clientMutationId");
+CREATE UNIQUE INDEX "scans_projectId_clientMutationId_key" ON "scans"("projectId", "clientMutationId");
 
 -- AddForeignKey
 ALTER TABLE "scans" ADD CONSTRAINT "scans_projectId_fkey" FOREIGN KEY ("projectId") REFERENCES "projects"("id") ON DELETE CASCADE ON UPDATE CASCADE;

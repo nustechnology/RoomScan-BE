@@ -102,7 +102,7 @@ model Scan {
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
   creator User    @relation(fields: [createdById], references: [id], onDelete: Restrict)
 
-  @@unique([clientMutationId])
+  @@unique([projectId, clientMutationId])
   @@index([projectId, deletedAt, createdAt, id])
   @@index([createdById])
   @@map("scans")

@@ -38,10 +38,9 @@ function createRecord(overrides: Partial<ScanRecord> = {}): ScanRecord {
 
 function createRepository() {
   const mocks = {
-    create: vi.fn<ScanRepository['create']>().mockResolvedValue(createRecord()),
-    findByClientMutationId: vi
-      .fn<ScanRepository['findByClientMutationId']>()
-      .mockResolvedValue(null),
+    create: vi
+      .fn<ScanRepository['create']>()
+      .mockResolvedValue({ record: createRecord(), created: true }),
     listByProject: vi
       .fn<ScanRepository['listByProject']>()
       .mockResolvedValue({ items: [createRecord()], total: 1 }),
@@ -98,9 +97,12 @@ describe('ScanService', () => {
     ).rejects.toBeInstanceOf(ScanNotFoundError);
   });
 
-  it('returns an existing active scan for idempotent clientMutationId', async () => {
+  it('returns an existing scan as not-created for an idempotent clientMutationId', async () => {
     const { mocks, service } = createRepository();
-    mocks.findByClientMutationId.mockResolvedValueOnce(createRecord());
+    mocks.create.mockResolvedValueOnce({
+      record: createRecord({ clientMutationId: 'mutation-abc' }),
+      created: false,
+    });
 
     const result = await service.create(OWNER_ID, PROJECT_ID, {
       name: 'Living Room',
@@ -108,9 +110,30 @@ describe('ScanService', () => {
       clientMutationId: 'mutation-abc',
     });
 
-    expect(mocks.findByClientMutationId).toHaveBeenCalledWith('mutation-abc');
+    expect(mocks.create).toHaveBeenCalledWith(PROJECT_ID, OWNER_ID, {
+      name: 'Living Room',
+      description: null,
+      clientMutationId: 'mutation-abc',
+    });
     expect(result.created).toBe(false);
     expect(result.scan.id).toBe(SCAN_ID);
+  });
+
+  it('propagates a restored scan as not-created for a deleted clientMutationId', async () => {
+    const { mocks, service } = createRepository();
+    mocks.create.mockResolvedValueOnce({
+      record: createRecord({ clientMutationId: 'deleted-mutation', name: 'Restored' }),
+      created: false,
+    });
+
+    const result = await service.create(OWNER_ID, PROJECT_ID, {
+      name: 'Restored',
+      description: null,
+      clientMutationId: 'deleted-mutation',
+    });
+
+    expect(result.created).toBe(false);
+    expect(result.scan.name).toBe('Restored');
   });
 
   it('lists active scans for an Owner', async () => {

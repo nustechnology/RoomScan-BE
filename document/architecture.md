@@ -129,12 +129,20 @@ rules as the Project module. Every project-level permission failure is converted
 to `ScanNotFoundError`, so scan endpoints expose the same hidden 404 behavior as
 projects.
 
-`PrismaScanRepository` performs a case-insensitive idempotency check by
-`clientMutationId`, allow-listed sorting with a stable `id` tie-breaker, and
-offset pagination. An Owner update runs its guarded write and response read in
-one transaction. Deleting a scan marks `Scan.deletedAt` and touches the parent
-project `updatedAt` in the same transaction; a repeated delete by the same Owner
-is idempotent. Scan deletion does not cascade because Note and asset models are
+`PrismaScanRepository` performs the `clientMutationId` idempotency check at the
+database boundary scoped to the parent project, backed by the composite
+`@@unique([projectId, clientMutationId])` constraint, so the same value in a
+different project never collides. Creating a scan with a reused active
+`clientMutationId` returns the existing scan as not created; a reused value
+matching a soft-deleted scan restores it (clears `deletedAt`) while applying the
+submitted `name` and `description` and returns it as not created. A concurrent
+duplicate insert raises `P2002`, which the repository catches and resolves to
+the existing row instead of rethrowing. The repository also performs
+allow-listed sorting with a stable `id` tie-breaker and offset pagination. An
+Owner update runs its guarded write and response read in one transaction.
+Deleting a scan marks `Scan.deletedAt` and touches the parent project
+`updatedAt` in the same transaction; a repeated delete by the same Owner is
+idempotent. Scan deletion does not cascade because Note and asset models are
 not yet present; future note queries will filter on the scan `deletedAt`.
 
 The `Scan` model stores metadata only: name, description, thumbnail reference,

@@ -59,6 +59,7 @@ export async function seedLocalTestProject(client: SeedClient): Promise<void> {
       update: {
         name: LOCAL_TEST_PROJECT_NAME,
         description: 'Survey apartment for the local development demo',
+        deletedAt: null,
       },
     });
 
@@ -83,6 +84,7 @@ export async function seedLocalTestProject(client: SeedClient): Promise<void> {
           assetStatus: scan.assetStatus,
           syncStatus: scan.syncStatus,
           modelVersion: scan.modelVersion,
+          deletedAt: null,
         },
       });
     }
