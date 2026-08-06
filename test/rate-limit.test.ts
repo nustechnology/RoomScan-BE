@@ -13,6 +13,7 @@ import { ErrorResponseSchema } from '../src/common/schemas/error.js';
 import type { AppConfig } from '../src/config/env.js';
 import type { AppleAuthService } from '../src/modules/auth/auth.types.js';
 import type { ProjectService } from '../src/modules/project/project.service.js';
+import type { ScanService } from '../src/modules/scan/scan.service.js';
 
 const baseConfig: AppConfig = {
   nodeEnv: 'test',
@@ -68,6 +69,13 @@ function createTestApp(overrides: Partial<AppConfig> = {}, stores: RateLimitStor
     update: vi.fn(),
     delete: vi.fn(),
   } as unknown as ProjectService;
+  const scanService = {
+    create: vi.fn(),
+    list: vi.fn(),
+    getById: vi.fn(),
+    update: vi.fn(),
+    delete: vi.fn(),
+  } as unknown as ScanService;
   const rateLimiters = createRateLimiters(config, logger, stores);
   const app = createApp({
     config,
@@ -78,6 +86,7 @@ function createTestApp(overrides: Partial<AppConfig> = {}, stores: RateLimitStor
     logger,
     authService,
     projectService,
+    scanService,
     accessTokenVerifier,
     currentUserRepository,
     rateLimiters,

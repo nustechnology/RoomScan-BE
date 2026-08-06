@@ -27,6 +27,11 @@ const expectedProjectSelect = {
           revokedAt: null,
         },
       },
+      scans: {
+        where: {
+          deletedAt: null,
+        },
+      },
     },
   },
   createdAt: true,
@@ -45,6 +50,7 @@ function createRow() {
     },
     _count: {
       accesses: 2,
+      scans: 0,
     },
     createdAt: NOW,
     updatedAt: NOW,

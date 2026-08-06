@@ -21,6 +21,7 @@ import {
   ProjectResponseSchema,
 } from '../src/modules/project/project.schemas.js';
 import type { ProjectService } from '../src/modules/project/project.service.js';
+import type { ScanService } from '../src/modules/scan/scan.service.js';
 import type { ProjectResult, ProjectRole } from '../src/modules/project/project.types.js';
 
 const ACCESS_SECRET = 'access-secret-that-is-at-least-32-characters';
@@ -128,12 +129,20 @@ describe('Project HTTP endpoints', () => {
     update,
     delete: deleteProject,
   } as unknown as ProjectService;
+  const scanService = {
+    create: vi.fn(),
+    list: vi.fn(),
+    getById: vi.fn(),
+    update: vi.fn(),
+    delete: vi.fn(),
+  } as unknown as ScanService;
   const app = createApp({
     config,
     database,
     logger,
     authService,
     projectService,
+    scanService,
     accessTokenVerifier,
     currentUserRepository,
     rateLimiters,

@@ -30,6 +30,11 @@ const projectSelect = {
           revokedAt: null,
         },
       },
+      scans: {
+        where: {
+          deletedAt: null,
+        },
+      },
     },
   },
   createdAt: true,
@@ -47,6 +52,7 @@ interface ProjectRow {
   };
   _count: {
     accesses: number;
+    scans: number;
   };
   createdAt: Date;
   updatedAt: Date;
@@ -67,7 +73,7 @@ function toProjectRecord(row: ProjectRow): ProjectRecord {
     description: row.description,
     ownerId: row.ownerId,
     owner: row.owner,
-    scanCount: 0,
+    scanCount: row._count.scans,
     sharedCount: row._count.accesses,
     thumbnail: null,
     syncStatus: null,

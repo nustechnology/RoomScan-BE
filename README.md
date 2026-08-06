@@ -82,18 +82,23 @@ the local PostgreSQL data volume.
 
 ## HTTP endpoints
 
-| Method   | Path                          | Purpose                                        |
-| -------- | ----------------------------- | ---------------------------------------------- |
-| `GET`    | `/api/v1/health`              | Liveness; does not query PostgreSQL            |
-| `GET`    | `/api/v1/ready`               | Readiness; verifies PostgreSQL with `SELECT 1` |
-| `POST`   | `/api/v1/auth/apple`          | Authenticate with an Apple identity token      |
-| `POST`   | `/api/v1/projects`            | Create a project (Bearer token required)       |
-| `GET`    | `/api/v1/projects`            | List the authenticated user’s projects         |
-| `GET`    | `/api/v1/projects/:projectId` | Get a project as Owner or active Viewer        |
-| `PATCH`  | `/api/v1/projects/:projectId` | Update an owned project                        |
-| `DELETE` | `/api/v1/projects/:projectId` | Soft-delete an owned project                   |
-| `GET`    | `/api-doc`                    | Interactive Swagger UI                         |
-| `GET`    | `/api-doc.json`               | Generated OpenAPI 3.1 document                 |
+| Method   | Path                                | Purpose                                        |
+| -------- | ----------------------------------- | ---------------------------------------------- |
+| `GET`    | `/api/v1/health`                    | Liveness; does not query PostgreSQL            |
+| `GET`    | `/api/v1/ready`                     | Readiness; verifies PostgreSQL with `SELECT 1` |
+| `POST`   | `/api/v1/auth/apple`                | Authenticate with an Apple identity token      |
+| `POST`   | `/api/v1/projects`                  | Create a project (Bearer token required)       |
+| `GET`    | `/api/v1/projects`                  | List the authenticated user’s projects         |
+| `GET`    | `/api/v1/projects/:projectId`       | Get a project as Owner or active Viewer        |
+| `PATCH`  | `/api/v1/projects/:projectId`       | Update an owned project                        |
+| `DELETE` | `/api/v1/projects/:projectId`       | Soft-delete an owned project                   |
+| `POST`   | `/api/v1/projects/:projectId/scans` | Create scan metadata (Owner only)              |
+| `GET`    | `/api/v1/projects/:projectId/scans` | List scans; Owner or active Viewer             |
+| `GET`    | `/api/v1/scans/:scanId`             | Get scan detail; Owner or active Viewer        |
+| `PATCH`  | `/api/v1/scans/:scanId`             | Update scan name/description (Owner only)      |
+| `DELETE` | `/api/v1/scans/:scanId`             | Soft-delete a scan (Owner only)                |
+| `GET`    | `/api-doc`                          | Interactive Swagger UI                         |
+| `GET`    | `/api-doc.json`                     | Generated OpenAPI 3.1 document                 |
 
 Errors use a stable envelope:
 
@@ -130,8 +135,21 @@ For local `yarn dev`, set `NODE_ENV=development` and
 `LOCAL_TEST_AUTH_ENABLED=true`, then run `yarn seed:local`. Sending
 `{"identityToken":"roomscan-local-test-user"}` to the same Apple endpoint skips
 Apple verification for `local-test@roomscan.dev` and returns normally signed
-RoomScan tokens. The flag is rejected in test, staging, and production; the
+RoomScan tokens. The seed also creates a demo project owned by that local user
+with room scans spanning several asset and sync states, ready to list and
+inspect. The flag is rejected in test, staging, and production; the
 production-style Compose API therefore cannot expose this shortcut.
+
+To obtain an access token for the Swagger UI `Authorize` dialog and local API
+calls, request a token for the seeded local user and paste the returned
+`accessToken`:
+
+```bash
+TOKEN=$(curl -s -X POST http://localhost:3000/api/v1/auth/apple \
+  -H "Content-Type: application/json" \
+  -d '{"identityToken":"roomscan-local-test-user"}' \
+  | jq -r .accessToken) && echo "$TOKEN"
+```
 
 Project endpoints require a Bearer access token obtained from Apple
 authentication:
@@ -152,6 +170,19 @@ has full project control; an active Viewer can only use the canonical project
 detail endpoint. Deleted, revoked, missing, and inaccessible projects are
 hidden behind `404 PROJECT_NOT_FOUND`. Deletion is soft and idempotent for the
 same Owner.
+
+Scans are metadata records owned by a project. `POST` and `GET` at
+`/api/v1/projects/:projectId/scans` create and list scans; `GET`, `PATCH`, and
+`DELETE` at `/api/v1/scans/:scanId` read, rename, and soft-delete a scan. The
+project Owner has full scan control; an active Viewer may only read scan list
+and detail. Create accepts an optional `clientMutationId` for idempotency
+(returning the existing active scan with `200` on a repeat). A scan name is
+required (1–100 trimmed characters, not whitespace-only) and description is
+optional (≤500). Scan deletion is soft and idempotent and touches the parent
+project `updatedAt`. Missing, deleted, or inaccessible scans are hidden behind
+`404 SCAN_NOT_FOUND`, and their parent project behind `404 PROJECT_NOT_FOUND`.
+The metadata endpoints do not accept model files; `assetStatus` and `syncStatus`
+start at `NONE` and `PENDING` respectively until the upload flow writes them.
 
 For nonce-bound sign-in, the client generates a raw nonce, sends its lowercase
 hexadecimal SHA-256 digest to Apple, and sends the raw nonce in the request
@@ -198,23 +229,23 @@ the exact proxy hop count or trusted IP/CIDR list. Never set it to `true`.
 
 ## Project scripts
 
-| Command                             | Description                                              |
-| ----------------------------------- | -------------------------------------------------------- |
-| `yarn dev`                          | Run the API with TSX watch mode                          |
-| `yarn build`                        | Generate Prisma Client and compile production JavaScript |
-| `yarn start`                        | Run the compiled API                                     |
-| `yarn lint` / `yarn lint:fix`       | Check or fix lint errors                                 |
-| `yarn format` / `yarn format:check` | Write or verify Prettier formatting                      |
-| `yarn typecheck`                    | Run strict TypeScript checks without emitting            |
-| `yarn test`                         | Run Vitest in watch mode                                 |
-| `yarn test:run`                     | Run unit/API tests once                                  |
-| `yarn test:coverage`                | Run tests and enforce coverage thresholds                |
-| `yarn validate`                     | Run the complete local pre-commit quality gate           |
-| `yarn prisma:generate`              | Regenerate the ignored Prisma Client                     |
-| `yarn prisma:migrate:dev`           | Create/apply a development migration                     |
-| `yarn prisma:migrate:deploy`        | Apply committed migrations                               |
-| `yarn prisma:studio`                | Open Prisma Studio                                       |
-| `yarn seed:local`                   | Create or refresh the development-only login user        |
+| Command                             | Description                                                              |
+| ----------------------------------- | ------------------------------------------------------------------------ |
+| `yarn dev`                          | Run the API with TSX watch mode                                          |
+| `yarn build`                        | Generate Prisma Client and compile production JavaScript                 |
+| `yarn start`                        | Run the compiled API                                                     |
+| `yarn lint` / `yarn lint:fix`       | Check or fix lint errors                                                 |
+| `yarn format` / `yarn format:check` | Write or verify Prettier formatting                                      |
+| `yarn typecheck`                    | Run strict TypeScript checks without emitting                            |
+| `yarn test`                         | Run Vitest in watch mode                                                 |
+| `yarn test:run`                     | Run unit/API tests once                                                  |
+| `yarn test:coverage`                | Run tests and enforce coverage thresholds                                |
+| `yarn validate`                     | Run the complete local pre-commit quality gate                           |
+| `yarn prisma:generate`              | Regenerate the ignored Prisma Client                                     |
+| `yarn prisma:migrate:dev`           | Create/apply a development migration                                     |
+| `yarn prisma:migrate:deploy`        | Apply committed migrations                                               |
+| `yarn prisma:studio`                | Open Prisma Studio                                                       |
+| `yarn seed:local`                   | Create or refresh the development-only login user and demo project/scans |
 
 ## Quality gates
 

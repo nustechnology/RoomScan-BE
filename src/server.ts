@@ -10,10 +10,12 @@ import { createPrismaClient, PrismaDatabase } from './infrastructure/database/pr
 import { PrismaCurrentUserRepository } from './infrastructure/database/prisma-current-user-repository.js';
 import { PrismaAppleUserRepository } from './infrastructure/database/prisma-user-repository.js';
 import { PrismaProjectRepository } from './infrastructure/database/prisma-project-repository.js';
+import { PrismaScanRepository } from './infrastructure/database/prisma-scan-repository.js';
 import { createLogger } from './infrastructure/logging/logger.js';
 import { AuthService } from './modules/auth/auth.service.js';
 import { ProjectPermissionService } from './modules/project/project.permissions.js';
 import { ProjectService } from './modules/project/project.service.js';
+import { ScanService } from './modules/scan/scan.service.js';
 
 const config = loadConfig();
 const logger = createLogger(config);
@@ -22,6 +24,7 @@ const database = new PrismaDatabase(prismaClient);
 const userRepository = new PrismaAppleUserRepository(prismaClient);
 const currentUserRepository = new PrismaCurrentUserRepository(prismaClient);
 const projectRepository = new PrismaProjectRepository(prismaClient);
+const scanRepository = new PrismaScanRepository(prismaClient);
 const appleIdentityVerifier = new LocalTestAppleIdentityVerifier({
   delegate: new AppleIdentityTokenVerifier(config.appleClientId),
   enabled: config.nodeEnv === 'development' && config.localTestAuthEnabled,
@@ -45,6 +48,10 @@ const projectService = new ProjectService({
   repository: projectRepository,
   permissions: projectPermissions,
 });
+const scanService = new ScanService({
+  repository: scanRepository,
+  permissions: projectPermissions,
+});
 const rateLimiters = createRateLimiters(config, logger);
 const app = createApp({
   config,
@@ -52,6 +59,7 @@ const app = createApp({
   logger,
   authService,
   projectService,
+  scanService,
   accessTokenVerifier,
   currentUserRepository,
   rateLimiters,

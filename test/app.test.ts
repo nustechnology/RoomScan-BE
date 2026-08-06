@@ -23,6 +23,7 @@ import {
   ReadinessResponseSchema,
 } from '../src/modules/health/health.schemas.js';
 import type { ProjectService } from '../src/modules/project/project.service.js';
+import type { ScanService } from '../src/modules/scan/scan.service.js';
 
 const config: AppConfig = {
   nodeEnv: 'test',
@@ -74,6 +75,13 @@ describe('RoomScan HTTP application', () => {
     update: vi.fn(),
     delete: vi.fn(),
   } as unknown as ProjectService;
+  const scanService = {
+    create: vi.fn(),
+    list: vi.fn(),
+    getById: vi.fn(),
+    update: vi.fn(),
+    delete: vi.fn(),
+  } as unknown as ScanService;
 
   const app = createApp({
     config,
@@ -81,6 +89,7 @@ describe('RoomScan HTTP application', () => {
     logger,
     authService,
     projectService,
+    scanService,
     accessTokenVerifier,
     currentUserRepository,
     rateLimiters,
@@ -121,6 +130,7 @@ describe('RoomScan HTTP application', () => {
       logger,
       authService,
       projectService,
+      scanService,
       accessTokenVerifier,
       currentUserRepository,
       rateLimiters,
