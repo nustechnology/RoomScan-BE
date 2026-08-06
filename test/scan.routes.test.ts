@@ -19,6 +19,7 @@ import { ScanListResponseSchema, ScanResponseSchema } from '../src/modules/scan/
 import type { ScanService } from '../src/modules/scan/scan.service.js';
 import type { ScanResult } from '../src/modules/scan/scan.types.js';
 import type { ScanAssetService } from '../src/modules/scan-asset/scan-asset.service.js';
+import type { NoteService } from '../src/modules/note/note.service.js';
 import type { ProjectService } from '../src/modules/project/project.service.js';
 
 const ACCESS_SECRET = 'access-secret-that-is-at-least-32-characters';
@@ -147,6 +148,14 @@ describe('Scan HTTP endpoints', () => {
     getDownloadUrl: vi.fn(),
     failUpload: vi.fn(),
   } as unknown as ScanAssetService;
+  const noteService = {
+    create: vi.fn(),
+    list: vi.fn(),
+    getById: vi.fn(),
+    update: vi.fn(),
+    move: vi.fn(),
+    delete: vi.fn(),
+  } as unknown as NoteService;
   const app = createApp({
     config,
     database,
@@ -155,6 +164,7 @@ describe('Scan HTTP endpoints', () => {
     projectService,
     scanService,
     scanAssetService,
+    noteService,
     accessTokenVerifier,
     currentUserRepository,
     rateLimiters,

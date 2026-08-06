@@ -12,6 +12,7 @@ import { PrismaAppleUserRepository } from './infrastructure/database/prisma-user
 import { PrismaProjectRepository } from './infrastructure/database/prisma-project-repository.js';
 import { PrismaScanRepository } from './infrastructure/database/prisma-scan-repository.js';
 import { PrismaScanAssetRepository } from './infrastructure/database/prisma-scan-asset-repository.js';
+import { PrismaNoteRepository } from './infrastructure/database/prisma-note-repository.js';
 import { LocalStorageAdapter } from './infrastructure/storage/local-storage-adapter.js';
 import { createLogger } from './infrastructure/logging/logger.js';
 import { AuthService } from './modules/auth/auth.service.js';
@@ -19,6 +20,7 @@ import { ProjectPermissionService } from './modules/project/project.permissions.
 import { ProjectService } from './modules/project/project.service.js';
 import { ScanService } from './modules/scan/scan.service.js';
 import { ScanAssetService } from './modules/scan-asset/scan-asset.service.js';
+import { NoteService } from './modules/note/note.service.js';
 
 const config = loadConfig();
 const logger = createLogger(config);
@@ -29,6 +31,7 @@ const currentUserRepository = new PrismaCurrentUserRepository(prismaClient);
 const projectRepository = new PrismaProjectRepository(prismaClient);
 const scanRepository = new PrismaScanRepository(prismaClient);
 const scanAssetRepository = new PrismaScanAssetRepository(prismaClient);
+const noteRepository = new PrismaNoteRepository(prismaClient);
 const storageAdapter = new LocalStorageAdapter();
 const appleIdentityVerifier = new LocalTestAppleIdentityVerifier({
   delegate: new AppleIdentityTokenVerifier(config.appleClientId),
@@ -67,6 +70,10 @@ const scanAssetService = new ScanAssetService({
   maxModelSizeBytes: config.assetMaxModelSizeBytes,
   maxThumbnailSizeBytes: config.assetMaxThumbnailSizeBytes,
 });
+const noteService = new NoteService({
+  repository: noteRepository,
+  permissions: projectPermissions,
+});
 const rateLimiters = createRateLimiters(config, logger);
 const app = createApp({
   config,
@@ -76,6 +83,7 @@ const app = createApp({
   projectService,
   scanService,
   scanAssetService,
+  noteService,
   accessTokenVerifier,
   currentUserRepository,
   rateLimiters,

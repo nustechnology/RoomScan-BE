@@ -31,6 +31,11 @@ const scanSelect = {
   deletedAt: true,
   createdAt: true,
   updatedAt: true,
+  _count: {
+    select: {
+      notes: true,
+    },
+  },
 };
 
 function createScanRow(overrides: Record<string, unknown> = {}) {
@@ -53,6 +58,7 @@ function createScanRow(overrides: Record<string, unknown> = {}) {
     createdAt: NOW,
     updatedAt: NOW,
     project: { ownerId: OWNER_ID },
+    _count: { notes: 2 },
     ...overrides,
   };
 }

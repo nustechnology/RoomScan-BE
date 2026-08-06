@@ -11,6 +11,8 @@
   `GET`, `PATCH`, and `DELETE` at `/api/v1/scans/:scanId`.
 - Scan assets (model/thumbnail upload and download) live under `/api/v1/scans`,
   with upload-session completion and failure at `/api/v1/upload-sessions`.
+- Notes are `POST` and `GET` at `/api/v1/scans/:scanId/notes`, and `GET`,
+  `PATCH`, `PATCH/:position`, and `DELETE` at `/api/v1/notes/:noteId`.
 - Swagger UI remains at `/api-doc`; raw OpenAPI is `/api-doc.json`.
 - Resource paths use plural nouns and kebab-case when business modules arrive.
 
@@ -272,12 +274,12 @@ Scan response:
 }
 ```
 
-`creator.email` is nullable. `noteCount` is `0` until the Note persistence
-model is present. `assetStatus` uses `NONE | PENDING | UPLOADING | UPLOADED |
-FAILED` and starts `NONE` for a metadata-only scan; `syncStatus` uses `PENDING |
-SYNCING | SYNCED | FAILED | CONFLICT` and starts `PENDING`. The metadata
-endpoints never accept model-file data; the asset and sync status write path is
-the responsibility of the future upload module.
+`creator.email` is nullable. `noteCount` counts active notes attached to the
+scan. `assetStatus` uses `NONE | PENDING | UPLOADING | UPLOADED | FAILED` and
+starts `NONE` for a metadata-only scan; `syncStatus` uses `PENDING | SYNCING |
+SYNCED | FAILED | CONFLICT` and starts `PENDING`. The metadata endpoints never
+accept model-file data; the asset and sync status write path is the
+responsibility of the scan-asset module.
 
 The scan list supports page-based pagination and an allow-listed sort. `page`
 defaults to 1; `limit` defaults to 20 and may not exceed 100. `sort` defaults to
@@ -382,6 +384,100 @@ Error behavior:
 - `429 RATE_LIMIT_EXCEEDED`: API quota exceeded.
 - `500 INTERNAL_SERVER_ERROR`: unexpected failure without Prisma, SQL, or secret
   leakage.
+
+## Notes
+
+Every note endpoint requires a valid Bearer access token. Notes belong to
+exactly one scan; the project Owner creates, edits, moves, and deletes notes,
+and the Owner and active Viewers can list and read them. Deleted or
+inaccessible scans, projects, and notes are hidden behind `404`.
+
+| Method   | Endpoint                         | Result                                                   |
+| -------- | -------------------------------- | -------------------------------------------------------- |
+| `POST`   | `/api/v1/scans/:scanId/notes`    | Create a note on a scan; Owner only; return `201`        |
+| `GET`    | `/api/v1/scans/:scanId/notes`    | List notes for a scan; Owner or active Viewer; paginated |
+| `GET`    | `/api/v1/notes/:noteId`          | Get note detail; Owner or active Viewer                  |
+| `PATCH`  | `/api/v1/notes/:noteId`          | Update note content or color; Owner only                 |
+| `PATCH`  | `/api/v1/notes/:noteId/position` | Move a note to a new 3D position; Owner only             |
+| `DELETE` | `/api/v1/notes/:noteId`          | Delete a note; Owner only; return `204`                  |
+
+Note response:
+
+```json
+{
+  "id": "b1a2c3d4-e5f6-4890-abcd-ef1234567890",
+  "scanId": "f1e2d3c4-a5b6-7890-abcd-ef1234567890",
+  "content": "Cabinet hinge is loose",
+  "color": "YELLOW",
+  "position": { "x": 1.5, "y": -2, "z": 3.25 },
+  "orientation": { "x": 0, "y": 0, "z": 1 },
+  "modelVersion": "1",
+  "creator": {
+    "id": "eb5d278f-c857-45c7-887d-7be65288cb75",
+    "email": "owner@example.com"
+  },
+  "createdAt": "2026-07-29T10:00:00.000Z",
+  "updatedAt": "2026-07-29T10:00:00.000Z",
+  "permissions": {
+    "role": "OWNER",
+    "canView": true,
+    "canEdit": true,
+    "canDelete": true
+  }
+}
+```
+
+`position` is a required `{ x, y, z }` vector stored relative to the scan model,
+not the current camera angle. `orientation` is an optional `{ x, y, z }` vector.
+`modelVersion` is a string that must match the parent scan's model version;
+creating or moving a note with a different version returns `409`.
+
+The note list supports page-based pagination and an allow-listed sort. `page`
+defaults to 1; `limit` defaults to 20 and may not exceed 100. `sort` defaults to
+`updatedAt:desc`. Supported values are `updatedAt:desc`, `updatedAt:asc`,
+`createdAt:desc`, and `createdAt:asc`. Every order uses `id` as its final stable
+tie-breaker.
+
+Validation rules:
+
+- `scanId` and `noteId`: UUID.
+- `content` on create: required, trimmed Unicode string, 1–2000 characters, not
+  whitespace-only; on update it is optional with the same bounds.
+- `color`: one of `YELLOW`, `RED`, `BLUE`, `GREEN`, `ORANGE`, `PURPLE`.
+- `position`: object with numeric `x`, `y`, and `z`.
+- `orientation`: optional nullable object with numeric `x`, `y`, and `z`.
+- `modelVersion` on create and on move: required string, 1–64 characters, and
+  must equal the parent scan's current model version.
+- Create, update, and move objects reject unknown fields; update must contain at
+  least one supported field.
+- Clients cannot submit `id`, `scanId`, `createdById`, `createdAt`, or
+  `updatedAt`.
+
+Authorization and behavior rules:
+
+- The Owner of the parent project creates, edits, moves, and deletes notes.
+- An active Viewer may only read note list and detail.
+- Note content is never written to logs; unexpected failures return the standard
+  error envelope without echoing note text.
+- Creating, updating, moving, or deleting a note touches the parent scan and
+  project `updatedAt` in the same transaction.
+- A note cannot exist outside a scan. Deleting a scan or project makes its notes
+  inaccessible: scan endpoints filter notes on the non-deleted scan, and the
+  `notes` foreign key cascades when a scan row is physically removed.
+- Deleting a note is a physical delete that returns `204`.
+
+Error behavior:
+
+- `400 VALIDATION_ERROR`: invalid body, path parameters, or query parameters.
+- `401 UNAUTHORIZED`: missing/invalid access token or missing current user.
+- `404 SCAN_NOT_FOUND`: parent scan missing, deleted, or inaccessible.
+- `404 NOTE_NOT_FOUND`: note missing, deleted, or inaccessible through its
+  parent scan.
+- `409 MODEL_VERSION_MISMATCH`: submitted model version differs from the scan's
+  current model version.
+- `429 RATE_LIMIT_EXCEEDED`: API quota exceeded.
+- `500 INTERNAL_SERVER_ERROR`: unexpected failure without Prisma, SQL, note
+  content, or secret leakage.
 
 ## Health semantics
 

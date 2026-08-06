@@ -6,10 +6,10 @@ from injected dependencies. Keeping `app.listen` outside the app factory makes
 API tests deterministic and prevents them from opening network ports.
 
 The current product-facing scope contains health checks, Apple Sign-In
-authentication, Owner/Viewer project management, room-scan metadata, and scan
-asset upload/download. The Prisma schema owns the `User`, `Project`,
-`ProjectAccess`, `Scan`, and `ScanAsset` models; Invitation, Note, and asset
-behavior must not be inferred until their requirements are implemented.
+authentication, Owner/Viewer project management, room-scan metadata, scan asset
+upload/download, and text notes anchored to scan models. The Prisma schema owns
+the `User`, `Project`, `ProjectAccess`, `Scan`, `ScanAsset`, and `Note` models;
+Invitation behavior must not be inferred until its requirements are implemented.
 
 ## Request flow
 
@@ -142,13 +142,13 @@ allow-listed sorting with a stable `id` tie-breaker and offset pagination. An
 Owner update runs its guarded write and response read in one transaction.
 Deleting a scan marks `Scan.deletedAt` and touches the parent project
 `updatedAt` in the same transaction; a repeated delete by the same Owner is
-idempotent. Deleting a scan cascades to its `ScanAsset` rows because asset
-behavior is owned by the scan. Note cleanup is still not claimed because the
-Note model is not yet present.
+idempotent. Deleting a scan cascades to its `ScanAsset` and `Note` rows because
+asset and note behavior is owned by the scan.
 
 The `Scan` model stores metadata only: name, description, thumbnail reference,
-`assetStatus`, `syncStatus`, and `modelVersion`. Scan-asset upload and download
-live in the Scan Asset module below.
+`assetStatus`, `syncStatus`, and `modelVersion`, plus a real `noteCount` derived
+from the note rows through Prisma's `_count`. Scan-asset upload and download
+live in the Scan Asset module below, and notes in the Note module below.
 
 ## Scan Asset module
 
@@ -171,6 +171,33 @@ and the Owner or active Viewers list metadata and receive download URLs. All
 permission failures surface as hidden 404s, and revoked Viewers or deleted
 projects/scans cannot mint series of new signed URLs because the underlying
 access lookup runs on every request.
+
+## Note module
+
+The Note module manages text notes anchored to 3D positions inside a scan model.
+It depends on a `NoteRepository`, the shared `ProjectPermissionService`, and
+`ScanRepository`'s project lookup. Notes belong to exactly one scan
+(`onDelete: Cascade` from the scan) and record their creator
+(`onDelete: Restrict` to the user). The `Note` model stores `content`,
+`color` (a `NoteColor` preset), a required `{ x, y, z }` `position` stored
+relative to the model, an optional `{ x, y, z }` `orientation`, and the
+`modelVersion` the note was anchored against.
+
+`NoteService` converts project-level permission failures to hidden 404s scoped
+to the resource: scan-scoped endpoints return `SCAN_NOT_FOUND`, and note-scoped
+endpoints return `NOTE_NOT_FOUND`. Only the project Owner creates, edits, moves,
+and deletes notes; an active Viewer may list and read them. Creating or moving a
+note validates that its `modelVersion` equals the parent scan's current model
+version and rejects a mismatch with `409 MODEL_VERSION_MISMATCH`, so notes
+cannot be anchored to a stale model revision.
+
+`PrismaNoteRepository` filters every note lookup through a non-deleted scan and
+project, so deleting a scan or project makes its notes inaccessible. Note
+mutations run in one transaction that also touches the parent scan and project
+`updatedAt`, keeping latest-activity ordering in sync with note edits. Note
+content is never written to logs; the error envelope returns only stable codes
+and messages. The repository derives the scan's real `noteCount` from note rows
+so scan list and detail reflect the note total.
 
 ## Storage
 
@@ -224,15 +251,17 @@ trusted IP/CIDR topology rather than trusting every proxy.
 
 The composition root creates one Prisma Client and injects it into the database
 health/lifecycle adapter, the Apple user repository, the current-user
-repository, the project repository, the scan repository, and the scan-asset
-repository, plus the storage adapter. It also creates the two rate-limit
-middleware instances, the access-token verifier, the project permission
-service, the project service, the scan service, and the scan-asset service once
-per process. Product modules never import the Prisma client directly. The unique
-provider identity constraint makes
+repository, the project repository, the scan repository, the scan-asset
+repository, and the note repository, plus the storage adapter. It also creates
+the two rate-limit middleware instances, the access-token verifier, the project
+permission service, the project service, the scan service, the scan-asset
+service, and the note service once per process. Product modules never import the
+Prisma client directly. The unique provider identity constraint makes
 concurrent first-time Apple logins idempotent at the database boundary. The
 projects table has a foreign key to users with `onDelete: Restrict`; project
-access has unique `(projectId, userId)` membership and revocation state.
+access has unique `(projectId, userId)` membership and revocation state. Notes
+belong to a scan with `onDelete: Cascade` and to a creator with
+`onDelete: Restrict`.
 
 ## Lifecycle
 

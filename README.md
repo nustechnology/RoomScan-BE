@@ -102,6 +102,12 @@ the local PostgreSQL data volume.
 | `GET`    | `/api/v1/scans/:scanId/assets`                         | List scan asset metadata; Owner or active Viewer |
 | `GET`    | `/api/v1/scans/:scanId/assets/:assetType/download-url` | Signed download URL; Owner or active Viewer      |
 | `POST`   | `/api/v1/upload-sessions/:uploadSessionId/fail`        | Report an upload failure (Owner only)            |
+| `POST`   | `/api/v1/scans/:scanId/notes`                          | Create a note on a scan (Owner only)             |
+| `GET`    | `/api/v1/scans/:scanId/notes`                          | List notes; Owner or active Viewer               |
+| `GET`    | `/api/v1/notes/:noteId`                                | Get note detail; Owner or active Viewer          |
+| `PATCH`  | `/api/v1/notes/:noteId`                                | Update note content or color (Owner only)        |
+| `PATCH`  | `/api/v1/notes/:noteId/position`                       | Move a note to a new 3D position (Owner only)    |
+| `DELETE` | `/api/v1/notes/:noteId`                                | Delete a note (Owner only)                       |
 | `GET`    | `/api-doc`                                             | Interactive Swagger UI                           |
 | `GET`    | `/api-doc.json`                                        | Generated OpenAPI 3.1 document                   |
 
@@ -198,6 +204,16 @@ metadata and request short-lived signed download URLs
 (`GET /api/v1/scans/:scanId/assets/:assetType/download-url`); revoked Viewers
 and deleted projects/scans are denied. Object storage keys are never exposed in
 API responses.
+
+Notes are text annotations anchored to 3D positions inside a scan model. `POST`
+and `GET` at `/api/v1/scans/:scanId/notes` create and list notes; `GET`, `PATCH`,
+`PATCH /position`, and `DELETE` at `/api/v1/notes/:noteId` read, edit, move, and
+delete a note. The project Owner creates, edits, moves, and deletes notes; an
+active Viewer may only list and read them. Content is required on create (1–2000
+trimmed characters), color is a preset (`YELLOW`, `RED`, `BLUE`, `GREEN`,
+`ORANGE`, `PURPLE`), position is a `{ x, y, z }` vector, and `modelVersion` must
+match the scan's current model version (`409` otherwise). Note content is never
+written to logs. Deleting a scan or project makes its notes inaccessible.
 
 For nonce-bound sign-in, the client generates a raw nonce, sends its lowercase
 hexadecimal SHA-256 digest to Apple, and sends the raw nonce in the request

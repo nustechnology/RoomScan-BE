@@ -15,6 +15,7 @@ import type { AppleAuthService } from '../src/modules/auth/auth.types.js';
 import type { ProjectService } from '../src/modules/project/project.service.js';
 import type { ScanService } from '../src/modules/scan/scan.service.js';
 import type { ScanAssetService } from '../src/modules/scan-asset/scan-asset.service.js';
+import type { NoteService } from '../src/modules/note/note.service.js';
 
 const baseConfig: AppConfig = {
   nodeEnv: 'test',
@@ -92,6 +93,14 @@ function createTestApp(overrides: Partial<AppConfig> = {}, stores: RateLimitStor
     getDownloadUrl: vi.fn(),
     failUpload: vi.fn(),
   } as unknown as ScanAssetService;
+  const noteService = {
+    create: vi.fn(),
+    list: vi.fn(),
+    getById: vi.fn(),
+    update: vi.fn(),
+    move: vi.fn(),
+    delete: vi.fn(),
+  } as unknown as NoteService;
   const rateLimiters = createRateLimiters(config, logger, stores);
   const app = createApp({
     config,
@@ -104,6 +113,7 @@ function createTestApp(overrides: Partial<AppConfig> = {}, stores: RateLimitStor
     projectService,
     scanService,
     scanAssetService,
+    noteService,
     accessTokenVerifier,
     currentUserRepository,
     rateLimiters,

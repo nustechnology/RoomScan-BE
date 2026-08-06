@@ -122,7 +122,12 @@ bounds, a composite unique `(projectId, clientMutationId)`, and indexes on
 `(projectId, deletedAt, createdAt, id)` and `createdById`. The `add_scan_assets`
 migration creates the `AssetType` enum and the `scan_assets` table with a
 `scans` foreign key (`ON DELETE CASCADE`), a unique `(scanId, assetType)`
-constraint, a unique `idempotencyKey`, and an index on `(scanId, status)`.
+constraint, a unique `idempotencyKey`, and an index on `(scanId, status)`. The
+`add_notes` migration creates the `NoteColor` enum and the `notes` table with a
+`scans` foreign key (`ON DELETE CASCADE`), a `users` creator foreign key
+(`ON DELETE RESTRICT`), a `position`/`orientation` JSONB pair, a
+`modelVersion` column, and indexes on `(scanId, updatedAt, id)` and
+`createdById`.
 Tests use Prisma delegate doubles; native migration and endpoint verification
 use the PostgreSQL `db` container.
 
