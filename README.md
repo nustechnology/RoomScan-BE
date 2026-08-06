@@ -147,9 +147,10 @@ For local `yarn dev`, set `NODE_ENV=development` and
 `{"identityToken":"roomscan-local-test-user"}` to the same Apple endpoint skips
 Apple verification for `local-test@roomscan.dev` and returns normally signed
 RoomScan tokens. The seed also creates a demo project owned by that local user
-with room scans spanning several asset and sync states, ready to list and
-inspect. The flag is rejected in test, staging, and production; the
-production-style Compose API therefore cannot expose this shortcut.
+with room scans spanning several asset and sync states and text notes anchored
+to those scans, ready to list and inspect. The flag is rejected in test,
+staging, and production; the production-style Compose API therefore cannot
+expose this shortcut.
 
 To obtain an access token for the Swagger UI `Authorize` dialog and local API
 calls, request a token for the seeded local user and paste the returned
