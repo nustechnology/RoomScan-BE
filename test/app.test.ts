@@ -15,9 +15,13 @@ import type { DatabaseHealth } from '../src/infrastructure/database/database.js'
 import {
   AppleIdentityProviderUnavailableError,
   InvalidAppleIdentityTokenError,
+  InvalidRefreshTokenError,
 } from '../src/modules/auth/auth.errors.js';
-import { AppleSignInResponseSchema } from '../src/modules/auth/auth.schemas.js';
-import type { AppleAuthService } from '../src/modules/auth/auth.types.js';
+import {
+  AppleSignInResponseSchema,
+  RefreshTokenResponseSchema,
+} from '../src/modules/auth/auth.schemas.js';
+import type { AppleAuthService, TokenRefreshService } from '../src/modules/auth/auth.types.js';
 import {
   HealthResponseSchema,
   ReadinessResponseSchema,
@@ -35,6 +39,8 @@ const config: AppConfig = {
   apiRateLimitMaxRequests: 120,
   appleAuthRateLimitWindowSeconds: 900,
   appleAuthRateLimitMaxRequests: 500,
+  refreshAuthRateLimitWindowSeconds: 900,
+  refreshAuthRateLimitMaxRequests: 10,
   appleClientId: 'com.example.roomscan',
   accessTokenSecret: 'access-secret-that-is-at-least-32-characters',
   refreshTokenSecret: 'refresh-secret-that-is-at-least-32-characters',
@@ -58,6 +64,10 @@ describe('RoomScan HTTP application', () => {
   const authService: AppleAuthService = {
     signInWithApple,
   };
+  const refreshTokenMock = vi.fn<TokenRefreshService['refresh']>();
+  const refreshTokenService: TokenRefreshService = {
+    refresh: refreshTokenMock,
+  };
   const accessTokenVerifier: AccessTokenVerifier = {
     verify: vi.fn().mockResolvedValue({ userId: 'eb5d278f-c857-45c7-887d-7be65288cb75' }),
   };
@@ -80,6 +90,7 @@ describe('RoomScan HTTP application', () => {
     database,
     logger,
     authService,
+    refreshTokenService,
     projectService,
     accessTokenVerifier,
     currentUserRepository,
@@ -97,6 +108,10 @@ describe('RoomScan HTTP application', () => {
         email: 'user@example.com',
         provider: 'apple',
       },
+    });
+    refreshTokenMock.mockResolvedValue({
+      accessToken: 'roomscan-new-access-token',
+      refreshToken: 'roomscan-new-refresh-token',
     });
   });
 
@@ -120,6 +135,7 @@ describe('RoomScan HTTP application', () => {
       database,
       logger,
       authService,
+      refreshTokenService,
       projectService,
       accessTokenVerifier,
       currentUserRepository,
@@ -377,6 +393,66 @@ describe('RoomScan HTTP application', () => {
     const response = await request(app)
       .post('/api/v1/auth/apple')
       .send({ identityToken: 'valid-format-token' })
+      .expect(500);
+    const body = ErrorResponseSchema.parse(response.body as unknown);
+
+    expect(body.error).toEqual({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: 'An unexpected error occurred',
+    });
+    expect(JSON.stringify(body)).not.toContain('do-not-expose');
+  });
+
+  it('refreshes a valid refresh token and returns a new pair', async () => {
+    const response = await request(app)
+      .post('/api/v1/auth/refresh')
+      .set('x-request-id', 'refresh-request')
+      .send({ refreshToken: 'roomscan-refresh-token' })
+      .expect(200);
+    const body = RefreshTokenResponseSchema.parse(response.body as unknown);
+
+    expect(refreshTokenMock).toHaveBeenCalledWith('roomscan-refresh-token');
+    expect(body).toEqual({
+      accessToken: 'roomscan-new-access-token',
+      refreshToken: 'roomscan-new-refresh-token',
+    });
+    expect(response.headers['x-request-id']).toBe('refresh-request');
+    expect(response.headers.ratelimit).toContain('"api"');
+    expect(response.headers.ratelimit).toContain('"auth-refresh"');
+    expect(response.headers['ratelimit-policy']).toContain('"api"');
+    expect(response.headers['ratelimit-policy']).toContain('"auth-refresh"');
+  });
+
+  it('rejects a missing refresh token body', async () => {
+    const response = await request(app).post('/api/v1/auth/refresh').send({}).expect(400);
+    const body = ErrorResponseSchema.parse(response.body as unknown);
+
+    expect(body.error.code).toBe('VALIDATION_ERROR');
+    expect(refreshTokenMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects an invalid refresh token without exposing token details', async () => {
+    refreshTokenMock.mockRejectedValueOnce(new InvalidRefreshTokenError());
+
+    const response = await request(app)
+      .post('/api/v1/auth/refresh')
+      .send({ refreshToken: 'invalid-refresh-token' })
+      .expect(401);
+    const body = ErrorResponseSchema.parse(response.body as unknown);
+
+    expect(body.error).toEqual({
+      code: 'INVALID_REFRESH_TOKEN',
+      message: 'Refresh token is invalid',
+    });
+    expect(JSON.stringify(body)).not.toContain('invalid-refresh-token');
+  });
+
+  it('returns a safe internal error when token refresh fails unexpectedly', async () => {
+    refreshTokenMock.mockRejectedValueOnce(new Error('secret=do-not-expose'));
+
+    const response = await request(app)
+      .post('/api/v1/auth/refresh')
+      .send({ refreshToken: 'valid-format-token' })
       .expect(500);
     const body = ErrorResponseSchema.parse(response.body as unknown);
 

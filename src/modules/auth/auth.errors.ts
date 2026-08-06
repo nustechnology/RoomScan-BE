@@ -11,3 +11,10 @@ export class AppleIdentityProviderUnavailableError extends Error {
     this.name = 'AppleIdentityProviderUnavailableError';
   }
 }
+
+export class InvalidRefreshTokenError extends Error {
+  constructor() {
+    super('Refresh token is invalid');
+    this.name = 'InvalidRefreshTokenError';
+  }
+}

@@ -5,10 +5,11 @@ import type {
   AppleIdentityVerifier,
   AppleUserRepository,
   AuthTokenIssuer,
+  RefreshTokenRepository,
 } from '../src/modules/auth/auth.types.js';
 
 describe('AuthService', () => {
-  it('verifies the Apple identity, provisions the user and issues application tokens', async () => {
+  it('verifies the Apple identity, provisions the user, persists the refresh JTI and issues application tokens', async () => {
     const verify = vi.fn<AppleIdentityVerifier['verify']>().mockResolvedValue({
       providerId: 'apple-subject',
       email: 'user@example.com',
@@ -22,11 +23,15 @@ describe('AuthService', () => {
     const issueTokens = vi.fn<AuthTokenIssuer['issueTokens']>().mockResolvedValue({
       accessToken: 'access-token',
       refreshToken: 'refresh-token',
+      refreshTokenJti: 'eb5d278f-c857-45c7-887d-7be65288cb75',
+      refreshTokenExpiresAt: new Date('2026-08-05T10:00:00.000Z'),
     });
+    const saveToken = vi.fn<RefreshTokenRepository['saveToken']>();
     const service = new AuthService({
       appleIdentityVerifier: { verify },
       userRepository: { upsertAppleUser },
       tokenIssuer: { issueTokens },
+      tokenRepository: { saveToken, findActiveByJti: vi.fn(), revokeByJti: vi.fn() },
     });
 
     await expect(service.signInWithApple('identity-token')).resolves.toEqual({
@@ -45,6 +50,11 @@ describe('AuthService', () => {
       emailVerified: true,
     });
     expect(issueTokens).toHaveBeenCalledWith('eb5d278f-c857-45c7-887d-7be65288cb75');
+    expect(saveToken).toHaveBeenCalledWith(
+      'eb5d278f-c857-45c7-887d-7be65288cb75',
+      'eb5d278f-c857-45c7-887d-7be65288cb75',
+      new Date('2026-08-05T10:00:00.000Z'),
+    );
   });
 
   it('stops provisioning when Apple identity verification fails', async () => {
@@ -52,15 +62,18 @@ describe('AuthService', () => {
     const verify = vi.fn<AppleIdentityVerifier['verify']>().mockRejectedValue(verificationError);
     const upsertAppleUser = vi.fn<AppleUserRepository['upsertAppleUser']>();
     const issueTokens = vi.fn<AuthTokenIssuer['issueTokens']>();
+    const saveToken = vi.fn<RefreshTokenRepository['saveToken']>();
     const service = new AuthService({
       appleIdentityVerifier: { verify },
       userRepository: { upsertAppleUser },
       tokenIssuer: { issueTokens },
+      tokenRepository: { saveToken, findActiveByJti: vi.fn(), revokeByJti: vi.fn() },
     });
 
     await expect(service.signInWithApple('identity-token')).rejects.toBe(verificationError);
     expect(upsertAppleUser).not.toHaveBeenCalled();
     expect(issueTokens).not.toHaveBeenCalled();
+    expect(saveToken).not.toHaveBeenCalled();
   });
 
   it('threads a client nonce through to the identity verifier', async () => {
@@ -77,11 +90,15 @@ describe('AuthService', () => {
     const issueTokens = vi.fn<AuthTokenIssuer['issueTokens']>().mockResolvedValue({
       accessToken: 'access-token',
       refreshToken: 'refresh-token',
+      refreshTokenJti: 'eb5d278f-c857-45c7-887d-7be65288cb75',
+      refreshTokenExpiresAt: new Date('2026-08-05T10:00:00.000Z'),
     });
+    const saveToken = vi.fn<RefreshTokenRepository['saveToken']>();
     const service = new AuthService({
       appleIdentityVerifier: { verify },
       userRepository: { upsertAppleUser },
       tokenIssuer: { issueTokens },
+      tokenRepository: { saveToken, findActiveByJti: vi.fn(), revokeByJti: vi.fn() },
     });
 
     await service.signInWithApple('identity-token', 'client-nonce');
@@ -100,13 +117,16 @@ describe('AuthService', () => {
       .fn<AppleUserRepository['upsertAppleUser']>()
       .mockRejectedValue(repositoryError);
     const issueTokens = vi.fn<AuthTokenIssuer['issueTokens']>();
+    const saveToken = vi.fn<RefreshTokenRepository['saveToken']>();
     const service = new AuthService({
       appleIdentityVerifier: { verify },
       userRepository: { upsertAppleUser },
       tokenIssuer: { issueTokens },
+      tokenRepository: { saveToken, findActiveByJti: vi.fn(), revokeByJti: vi.fn() },
     });
 
     await expect(service.signInWithApple('identity-token')).rejects.toBe(repositoryError);
     expect(issueTokens).not.toHaveBeenCalled();
+    expect(saveToken).not.toHaveBeenCalled();
   });
 });

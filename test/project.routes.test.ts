@@ -14,7 +14,7 @@ import { ErrorResponseSchema } from '../src/common/schemas/error.js';
 import { TOKEN_AUDIENCE, TOKEN_ISSUER } from '../src/config/constants.js';
 import type { AppConfig } from '../src/config/env.js';
 import type { DatabaseHealth } from '../src/infrastructure/database/database.js';
-import type { AppleAuthService } from '../src/modules/auth/auth.types.js';
+import type { AppleAuthService, TokenRefreshService } from '../src/modules/auth/auth.types.js';
 import { ProjectNotFoundError } from '../src/modules/project/project.errors.js';
 import {
   ProjectListResponseSchema,
@@ -40,6 +40,8 @@ const config: AppConfig = {
   apiRateLimitMaxRequests: 120,
   appleAuthRateLimitWindowSeconds: 900,
   appleAuthRateLimitMaxRequests: 20,
+  refreshAuthRateLimitWindowSeconds: 900,
+  refreshAuthRateLimitMaxRequests: 10,
   appleClientId: 'com.example.roomscan',
   accessTokenSecret: ACCESS_SECRET,
   refreshTokenSecret: 'refresh-secret-that-is-at-least-32-characters',
@@ -96,6 +98,9 @@ describe('Project HTTP endpoints', () => {
   const authService: AppleAuthService = {
     signInWithApple: vi.fn(),
   };
+  const refreshTokenService: TokenRefreshService = {
+    refresh: vi.fn(),
+  };
   const accessTokenVerifier: AccessTokenVerifier = {
     verify: vi.fn(async (token: string) => {
       const { payload } = await jwtVerify(token, new TextEncoder().encode(ACCESS_SECRET), {
@@ -133,6 +138,7 @@ describe('Project HTTP endpoints', () => {
     database,
     logger,
     authService,
+    refreshTokenService,
     projectService,
     accessTokenVerifier,
     currentUserRepository,

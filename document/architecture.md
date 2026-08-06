@@ -62,9 +62,13 @@ Apple `sub` is the stable external identifier. Email is nullable and is never
 used to find or link a user. A supplied email updates the stored email and
 verification state; an absent email leaves existing values unchanged.
 
-The refresh JWT is issued for the mobile client but is not persisted or
-consumed by an endpoint yet. Application refresh-token rotation and revocation
-are outside the implemented scope.
+The refresh JWT is issued for the mobile client. `POST /api/v1/auth/refresh`
+consumes a valid refresh JWT, revokes it, and returns a new access+refresh pair.
+Rotation is stateful: each issued refresh JWT has a unique `jti` persisted in
+the `RefreshToken` model. The repository stores the `jti`, `userId`, and
+`expiresAt` on creation and sets `revokedAt` on rotation. A reused `jti` is
+rejected with `INVALID_REFRESH_TOKEN`. The refresh verifier accepts only
+HS256-signed tokens with `tokenType: "refresh"` and the refresh-token secret.
 
 Apple authorization-code exchange is not implemented: outside the explicitly
 enabled local sentinel, the endpoint accepts only Apple identity tokens, not
@@ -131,11 +135,12 @@ claim remain accepted only when the request also omits the nonce.
 
 ## Rate limiting
 
-The composition root creates independent general API and Apple authentication
-rate limiters and injects them into the application factory. The general policy
-allows 120 requests per 60 seconds for each client IP. Apple authentication has
-an additional policy allowing 20 attempts per 15 minutes. Every Apple attempt
-counts regardless of its outcome.
+The composition root creates independent general API, Apple authentication, and
+token-refresh rate limiters and injects them into the application factory. The
+general policy allows 120 requests per 60 seconds for each client IP. Apple
+authentication has an additional policy allowing 20 attempts per 15 minutes.
+Token refresh has an additional policy allowing 10 attempts per 15 minutes.
+Every Apple and refresh attempt counts regardless of its outcome.
 
 Liveness, readiness, Swagger and raw OpenAPI are exempt. Rejected requests use
 the standard error middleware and return 429 with `RateLimit`,

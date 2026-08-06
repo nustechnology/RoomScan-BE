@@ -5,6 +5,7 @@
 - Public application routes are versioned under `/api/v1`.
 - Liveness and readiness are `/api/v1/health` and `/api/v1/ready`.
 - Apple authentication is `POST /api/v1/auth/apple`.
+- Token refresh is `POST /api/v1/auth/refresh`.
 - Project management is `POST`, `GET`, `GET/:id`, `PATCH/:id`, and `DELETE/:id` at
   `/api/v1/projects`.
 - Swagger UI remains at `/api-doc`; raw OpenAPI is `/api-doc.json`.
@@ -53,6 +54,7 @@ Public API traffic has two process-local per-IP policies:
 
 - `/api/v1` allows 120 requests per 60 seconds.
 - `POST /api/v1/auth/apple` additionally allows 20 requests per 15 minutes.
+- `POST /api/v1/auth/refresh` additionally allows 10 requests per 15 minutes.
 
 `/api/v1/health`, `/api/v1/ready`, `/api-doc` and `/api-doc.json` are exempt.
 All Apple attempts count, including validation, credential and dependency
@@ -112,8 +114,7 @@ Malformed or unverifiable Apple tokens return 401 with
 `INVALID_APPLE_IDENTITY_TOKEN`. Apple JWKS fetch failures return 503 with
 `APPLE_IDENTITY_PROVIDER_UNAVAILABLE`. Exceeded API or Apple quotas return 429
 with `RATE_LIMIT_EXCEEDED`. These errors use generic client-facing messages.
-The endpoint does not exchange Apple authorization codes and does not provide
-an application refresh endpoint.
+The endpoint does not exchange Apple authorization codes.
 
 For local development only, `LOCAL_TEST_AUTH_ENABLED=true` with
 `NODE_ENV=development` permits the fixed identity token
@@ -122,6 +123,42 @@ verification, resolves the user provisioned by `yarn seed:local`, and otherwise
 uses the normal user upsert and RoomScan JWT issuance flow. Any other token
 still goes through Apple. Configuration rejects the flag in test, staging, and
 production, so this shortcut is not part of the deployed OpenAPI contract.
+
+## Refresh token rotation
+
+`POST /api/v1/auth/refresh` accepts a RoomScan refresh JWT and issues a new
+access+refresh pair. The old refresh token is revoked so each refresh JWT may
+only be used once.
+
+Request body:
+
+```json
+{ "refreshToken": "roomscan-refresh-jwt" }
+```
+
+Success `200`:
+
+```json
+{ "accessToken": "roomscan-access-jwt", "refreshToken": "roomscan-refresh-jwt" }
+```
+
+Errors:
+
+| Code                    | HTTP | Meaning                                                |
+| ----------------------- | ---- | ------------------------------------------------------ |
+| `INVALID_REFRESH_TOKEN` | 401  | Missing, expired, revoked, or otherwise invalid token  |
+| `RATE_LIMIT_EXCEEDED`   | 429  | Per-IP quota exceeded (10 req / 15 min)                |
+| `INTERNAL_SERVER_ERROR` | 500  | Unexpected failure without secret or database exposure |
+
+Rotation is stateful: each issued refresh JWT has a unique `jti` (JWT ID)
+persisted in the `refresh_tokens` table until it expires or is revoked. When an
+already-revoked `jti` is reused, the endpoint returns 401 with
+`INVALID_REFRESH_TOKEN`. The service is designed to support token-theft
+detection by revoking all sessions for a user when a stale `jti` is presented,
+though the current implementation only rejects the stale token.
+
+The same per-IP rate-limit headers (`RateLimit`, `RateLimit-Policy`, and
+`Retry-After` on 429) apply to this endpoint.
 
 ## Projects
 

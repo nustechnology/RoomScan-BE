@@ -4,14 +4,16 @@ import { createRateLimiters } from './common/middleware/rate-limit.js';
 import { loadConfig } from './config/env.js';
 import { AppleIdentityTokenVerifier } from './infrastructure/auth/apple-identity-verifier.js';
 import { JoseAccessTokenVerifier } from './infrastructure/auth/jose-access-token-verifier.js';
+import { JoseRefreshTokenVerifier } from './infrastructure/auth/jose-refresh-token-verifier.js';
 import { JoseAuthTokenIssuer } from './infrastructure/auth/jwt-token-issuer.js';
 import { LocalTestAppleIdentityVerifier } from './infrastructure/auth/local-test-apple-identity-verifier.js';
 import { createPrismaClient, PrismaDatabase } from './infrastructure/database/prisma.js';
 import { PrismaCurrentUserRepository } from './infrastructure/database/prisma-current-user-repository.js';
+import { PrismaRefreshTokenRepository } from './infrastructure/database/prisma-refresh-token-repository.js';
 import { PrismaAppleUserRepository } from './infrastructure/database/prisma-user-repository.js';
 import { PrismaProjectRepository } from './infrastructure/database/prisma-project-repository.js';
 import { createLogger } from './infrastructure/logging/logger.js';
-import { AuthService } from './modules/auth/auth.service.js';
+import { AuthService, RefreshTokenService } from './modules/auth/auth.service.js';
 import { ProjectPermissionService } from './modules/project/project.permissions.js';
 import { ProjectService } from './modules/project/project.service.js';
 
@@ -35,9 +37,19 @@ const tokenIssuer = new JoseAuthTokenIssuer({
 const accessTokenVerifier = new JoseAccessTokenVerifier({
   accessTokenSecret: config.accessTokenSecret,
 });
+const refreshTokenVerifier = new JoseRefreshTokenVerifier({
+  refreshTokenSecret: config.refreshTokenSecret,
+});
+const refreshTokenRepository = new PrismaRefreshTokenRepository(prismaClient);
 const authService = new AuthService({
   appleIdentityVerifier,
   userRepository,
+  tokenIssuer,
+  tokenRepository: refreshTokenRepository,
+});
+const refreshTokenService = new RefreshTokenService({
+  tokenVerifier: refreshTokenVerifier,
+  tokenRepository: refreshTokenRepository,
   tokenIssuer,
 });
 const projectPermissions = new ProjectPermissionService(projectRepository);
@@ -51,6 +63,7 @@ const app = createApp({
   database,
   logger,
   authService,
+  refreshTokenService,
   projectService,
   accessTokenVerifier,
   currentUserRepository,
