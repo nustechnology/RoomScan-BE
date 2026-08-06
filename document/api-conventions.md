@@ -9,6 +9,8 @@
   `/api/v1/projects`.
 - Scan metadata is `POST` and `GET` at `/api/v1/projects/:projectId/scans`, and
   `GET`, `PATCH`, and `DELETE` at `/api/v1/scans/:scanId`.
+- Scan assets (model/thumbnail upload and download) live under `/api/v1/scans`,
+  with upload-session completion and failure at `/api/v1/upload-sessions`.
 - Swagger UI remains at `/api-doc`; raw OpenAPI is `/api-doc.json`.
 - Resource paths use plural nouns and kebab-case when business modules arrive.
 
@@ -319,6 +321,64 @@ Error behavior:
 - `404 PROJECT_NOT_FOUND`: parent project missing, deleted, or inaccessible.
 - `404 SCAN_NOT_FOUND`: scan missing, deleted, or inaccessible through its
   parent project.
+- `429 RATE_LIMIT_EXCEEDED`: API quota exceeded.
+- `500 INTERNAL_SERVER_ERROR`: unexpected failure without Prisma, SQL, or secret
+  leakage.
+
+## Scan assets
+
+Every scan-asset endpoint requires a valid Bearer access token. A scan has at
+most one model asset and one thumbnail asset (keyed by `assetType`). The project
+Owner creates and completes uploads; the Owner and active Viewers can list
+metadata and request short-lived download URLs. Revoked Viewers and access to
+deleted projects/scans are hidden behind `404`.
+
+| Method | Endpoint                                               | Result                                                          |
+| ------ | ------------------------------------------------------ | --------------------------------------------------------------- |
+| `POST` | `/api/v1/scans/:scanId/assets/upload-sessions`         | Create an upload session; Owner only; `201` or idempotent `200` |
+| `POST` | `/api/v1/upload-sessions/:uploadSessionId/complete`    | Mark an upload session completed; Owner only; idempotent `200`  |
+| `GET`  | `/api/v1/scans/:scanId/assets`                         | List asset metadata; Owner or active Viewer                     |
+| `GET`  | `/api/v1/scans/:scanId/assets/:assetType/download-url` | Generate a signed download URL; Owner or active Viewer          |
+| `POST` | `/api/v1/upload-sessions/:uploadSessionId/fail`        | Report an upload failure; Owner only                            |
+
+Create-session request:
+
+- `assetType`: `MODEL` or `THUMBNAIL`.
+- `contentType`: must be in the allowed list for the asset type (models
+  `model/gltf-binary`, `model/gltf+json`, `application/octet-stream`,
+  `model/usd`, `model/usdz`; thumbnails `image/jpeg`, `image/png`).
+- `sizeBytes`: positive and within the configured maximum for the asset type.
+- `checksum` and `modelVersion`: required for `MODEL` assets.
+- `idempotencyKey`: optional; a repeated create with an active, unexpired
+  session returns the existing session with `200`.
+
+Asset metadata response fields: `assetId`, `scanId`, `assetType`, `status`, and
+for the download response `downloadUrl` plus `downloadUrlExpiresAt`. The target
+object key is a `storageKey` persisted internally but never returned to clients.
+
+Behavior and rules:
+
+- Create and complete are Owner-only; list and download are Owner or active
+  Viewer.
+- Completed uploads are idempotent: repeating `complete` returns the stored
+  asset without creating duplicates.
+- Completed model uploads mark the scan `assetStatus = UPLOADED` and
+  `syncStatus = SYNCED`; a reported failure marks the scan `FAILED`.
+- A download URL is only issued once an asset has status `UPLOADED`; otherwise
+  the API returns `409 ASSET_NOT_READY`.
+- Signed URLs are short-lived and expire per the configured TTLs.
+
+Error behavior:
+
+- `400 VALIDATION_ERROR`: invalid assetType, content type, size, checksum, or
+  model version.
+- `401 UNAUTHORIZED`: missing/invalid access token or missing current user.
+- `404 SCAN_NOT_FOUND`: parent scan/project missing, deleted, or inaccessible.
+- `404 ASSET_NOT_FOUND`: asset record missing or inaccessible.
+- `409 ASSET_NOT_READY`: asset has not been uploaded yet.
+- `409 UPLOAD_SESSION_EXPIRED`: upload session expired before completion.
+- `409 ASSET_UPLOAD_FAILED`: the store could not verify the uploaded object.
+- `503 STORAGE_UNAVAILABLE`: the storage provider is unavailable.
 - `429 RATE_LIMIT_EXCEEDED`: API quota exceeded.
 - `500 INTERNAL_SERVER_ERROR`: unexpected failure without Prisma, SQL, or secret
   leakage.

@@ -308,4 +308,14 @@ export class PrismaScanRepository implements ScanRepository {
       });
     });
   }
+
+  async updateAssetStatus(
+    scanId: string,
+    data: { assetStatus?: ScanRecord['assetStatus']; syncStatus?: ScanRecord['syncStatus'] },
+  ): Promise<void> {
+    await this.#client.scan.update({
+      where: { id: scanId },
+      data,
+    });
+  }
 }

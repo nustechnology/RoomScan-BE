@@ -24,6 +24,7 @@ import {
 } from '../src/modules/health/health.schemas.js';
 import type { ProjectService } from '../src/modules/project/project.service.js';
 import type { ScanService } from '../src/modules/scan/scan.service.js';
+import type { ScanAssetService } from '../src/modules/scan-asset/scan-asset.service.js';
 
 const config: AppConfig = {
   nodeEnv: 'test',
@@ -42,6 +43,14 @@ const config: AppConfig = {
   accessTokenTtlSeconds: 3600,
   refreshTokenTtlSeconds: 2_592_000,
   localTestAuthEnabled: false,
+  storageProvider: 'local',
+  storageBucket: '',
+  storageRegion: '',
+  storageEndpoint: '',
+  storageUploadUrlTtlSeconds: 900,
+  storageDownloadUrlTtlSeconds: 60,
+  assetMaxModelSizeBytes: 500_000_000,
+  assetMaxThumbnailSizeBytes: 10_000_000,
 };
 
 const clock = () => new Date('2026-07-23T07:00:00.000Z');
@@ -82,6 +91,13 @@ describe('RoomScan HTTP application', () => {
     update: vi.fn(),
     delete: vi.fn(),
   } as unknown as ScanService;
+  const scanAssetService = {
+    createUploadSession: vi.fn(),
+    completeUpload: vi.fn(),
+    listAssets: vi.fn(),
+    getDownloadUrl: vi.fn(),
+    failUpload: vi.fn(),
+  } as unknown as ScanAssetService;
 
   const app = createApp({
     config,
@@ -90,6 +106,7 @@ describe('RoomScan HTTP application', () => {
     authService,
     projectService,
     scanService,
+    scanAssetService,
     accessTokenVerifier,
     currentUserRepository,
     rateLimiters,
@@ -131,6 +148,7 @@ describe('RoomScan HTTP application', () => {
       authService,
       projectService,
       scanService,
+      scanAssetService,
       accessTokenVerifier,
       currentUserRepository,
       rateLimiters,

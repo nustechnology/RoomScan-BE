@@ -115,6 +115,14 @@ export const environmentSchema = z
     AUTH_ACCESS_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(3600),
     AUTH_REFRESH_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(2_592_000),
     LOCAL_TEST_AUTH_ENABLED: environmentBooleanSchema,
+    STORAGE_PROVIDER: z.string().trim().min(1).default('local'),
+    STORAGE_BUCKET: z.string().trim().default(''),
+    STORAGE_REGION: z.string().trim().default(''),
+    STORAGE_ENDPOINT: z.string().trim().default(''),
+    STORAGE_UPLOAD_URL_TTL_SECONDS: z.coerce.number().int().positive().default(900),
+    STORAGE_DOWNLOAD_URL_TTL_SECONDS: z.coerce.number().int().positive().default(60),
+    ASSET_MAX_MODEL_SIZE_BYTES: z.coerce.number().int().positive().default(500_000_000),
+    ASSET_MAX_THUMBNAIL_SIZE_BYTES: z.coerce.number().int().positive().default(10_000_000),
   })
   .superRefine((environment, context) => {
     if (environment.AUTH_REFRESH_TOKEN_TTL_SECONDS <= environment.AUTH_ACCESS_TOKEN_TTL_SECONDS) {
@@ -151,6 +159,14 @@ export interface AppConfig {
   accessTokenTtlSeconds: number;
   refreshTokenTtlSeconds: number;
   localTestAuthEnabled: boolean;
+  storageProvider: string;
+  storageBucket: string;
+  storageRegion: string;
+  storageEndpoint: string;
+  storageUploadUrlTtlSeconds: number;
+  storageDownloadUrlTtlSeconds: number;
+  assetMaxModelSizeBytes: number;
+  assetMaxThumbnailSizeBytes: number;
 }
 
 export function loadConfig(input: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -179,5 +195,13 @@ export function loadConfig(input: NodeJS.ProcessEnv = process.env): AppConfig {
     accessTokenTtlSeconds: environment.AUTH_ACCESS_TOKEN_TTL_SECONDS,
     refreshTokenTtlSeconds: environment.AUTH_REFRESH_TOKEN_TTL_SECONDS,
     localTestAuthEnabled: environment.LOCAL_TEST_AUTH_ENABLED,
+    storageProvider: environment.STORAGE_PROVIDER,
+    storageBucket: environment.STORAGE_BUCKET,
+    storageRegion: environment.STORAGE_REGION,
+    storageEndpoint: environment.STORAGE_ENDPOINT,
+    storageUploadUrlTtlSeconds: environment.STORAGE_UPLOAD_URL_TTL_SECONDS,
+    storageDownloadUrlTtlSeconds: environment.STORAGE_DOWNLOAD_URL_TTL_SECONDS,
+    assetMaxModelSizeBytes: environment.ASSET_MAX_MODEL_SIZE_BYTES,
+    assetMaxThumbnailSizeBytes: environment.ASSET_MAX_THUMBNAIL_SIZE_BYTES,
   };
 }

@@ -21,6 +21,14 @@ function makeConfig(logLevel: AppConfig['logLevel']): AppConfig {
     accessTokenTtlSeconds: 3600,
     refreshTokenTtlSeconds: 2_592_000,
     localTestAuthEnabled: false,
+    storageProvider: 'local',
+    storageBucket: '',
+    storageRegion: '',
+    storageEndpoint: '',
+    storageUploadUrlTtlSeconds: 900,
+    storageDownloadUrlTtlSeconds: 60,
+    assetMaxModelSizeBytes: 500_000_000,
+    assetMaxThumbnailSizeBytes: 10_000_000,
   };
 }
 

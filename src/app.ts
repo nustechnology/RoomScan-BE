@@ -25,6 +25,8 @@ import { createProjectRouter } from './modules/project/project.routes.js';
 import type { ProjectService } from './modules/project/project.service.js';
 import { createScanRouter } from './modules/scan/scan.routes.js';
 import type { ScanService } from './modules/scan/scan.service.js';
+import { createScanAssetRouter } from './modules/scan-asset/scan-asset.routes.js';
+import type { ScanAssetService } from './modules/scan-asset/scan-asset.service.js';
 import { createOpenApiDocument } from './openapi/document.js';
 
 export interface AppDependencies {
@@ -34,6 +36,7 @@ export interface AppDependencies {
   authService: AppleAuthService;
   projectService: ProjectService;
   scanService: ScanService;
+  scanAssetService: ScanAssetService;
   accessTokenVerifier: AccessTokenVerifier;
   currentUserRepository: CurrentUserRepository;
   rateLimiters: RateLimiters;
@@ -47,6 +50,7 @@ export function createApp({
   authService,
   projectService,
   scanService,
+  scanAssetService,
   accessTokenVerifier,
   currentUserRepository,
   rateLimiters,
@@ -130,6 +134,14 @@ export function createApp({
     API_PREFIX,
     createScanRouter({
       scanService,
+      accessTokenVerifier,
+      currentUserRepository,
+    }),
+  );
+  app.use(
+    API_PREFIX,
+    createScanAssetRouter({
+      scanAssetService,
       accessTokenVerifier,
       currentUserRepository,
     }),

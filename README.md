@@ -82,23 +82,28 @@ the local PostgreSQL data volume.
 
 ## HTTP endpoints
 
-| Method   | Path                                | Purpose                                        |
-| -------- | ----------------------------------- | ---------------------------------------------- |
-| `GET`    | `/api/v1/health`                    | Liveness; does not query PostgreSQL            |
-| `GET`    | `/api/v1/ready`                     | Readiness; verifies PostgreSQL with `SELECT 1` |
-| `POST`   | `/api/v1/auth/apple`                | Authenticate with an Apple identity token      |
-| `POST`   | `/api/v1/projects`                  | Create a project (Bearer token required)       |
-| `GET`    | `/api/v1/projects`                  | List the authenticated user’s projects         |
-| `GET`    | `/api/v1/projects/:projectId`       | Get a project as Owner or active Viewer        |
-| `PATCH`  | `/api/v1/projects/:projectId`       | Update an owned project                        |
-| `DELETE` | `/api/v1/projects/:projectId`       | Soft-delete an owned project                   |
-| `POST`   | `/api/v1/projects/:projectId/scans` | Create scan metadata (Owner only)              |
-| `GET`    | `/api/v1/projects/:projectId/scans` | List scans; Owner or active Viewer             |
-| `GET`    | `/api/v1/scans/:scanId`             | Get scan detail; Owner or active Viewer        |
-| `PATCH`  | `/api/v1/scans/:scanId`             | Update scan name/description (Owner only)      |
-| `DELETE` | `/api/v1/scans/:scanId`             | Soft-delete a scan (Owner only)                |
-| `GET`    | `/api-doc`                          | Interactive Swagger UI                         |
-| `GET`    | `/api-doc.json`                     | Generated OpenAPI 3.1 document                 |
+| Method   | Path                                                   | Purpose                                          |
+| -------- | ------------------------------------------------------ | ------------------------------------------------ |
+| `GET`    | `/api/v1/health`                                       | Liveness; does not query PostgreSQL              |
+| `GET`    | `/api/v1/ready`                                        | Readiness; verifies PostgreSQL with `SELECT 1`   |
+| `POST`   | `/api/v1/auth/apple`                                   | Authenticate with an Apple identity token        |
+| `POST`   | `/api/v1/projects`                                     | Create a project (Bearer token required)         |
+| `GET`    | `/api/v1/projects`                                     | List the authenticated user’s projects           |
+| `GET`    | `/api/v1/projects/:projectId`                          | Get a project as Owner or active Viewer          |
+| `PATCH`  | `/api/v1/projects/:projectId`                          | Update an owned project                          |
+| `DELETE` | `/api/v1/projects/:projectId`                          | Soft-delete an owned project                     |
+| `POST`   | `/api/v1/projects/:projectId/scans`                    | Create scan metadata (Owner only)                |
+| `GET`    | `/api/v1/projects/:projectId/scans`                    | List scans; Owner or active Viewer               |
+| `GET`    | `/api/v1/scans/:scanId`                                | Get scan detail; Owner or active Viewer          |
+| `PATCH`  | `/api/v1/scans/:scanId`                                | Update scan name/description (Owner only)        |
+| `DELETE` | `/api/v1/scans/:scanId`                                | Soft-delete a scan (Owner only)                  |
+| `POST`   | `/api/v1/scans/:scanId/assets/upload-sessions`         | Create an upload session (Owner only)            |
+| `POST`   | `/api/v1/upload-sessions/:uploadSessionId/complete`    | Mark an upload completed (Owner only)            |
+| `GET`    | `/api/v1/scans/:scanId/assets`                         | List scan asset metadata; Owner or active Viewer |
+| `GET`    | `/api/v1/scans/:scanId/assets/:assetType/download-url` | Signed download URL; Owner or active Viewer      |
+| `POST`   | `/api/v1/upload-sessions/:uploadSessionId/fail`        | Report an upload failure (Owner only)            |
+| `GET`    | `/api-doc`                                             | Interactive Swagger UI                           |
+| `GET`    | `/api-doc.json`                                        | Generated OpenAPI 3.1 document                   |
 
 Errors use a stable envelope:
 
@@ -184,6 +189,16 @@ project `updatedAt`. Missing, deleted, or inaccessible scans are hidden behind
 The metadata endpoints do not accept model files; `assetStatus` and `syncStatus`
 start at `NONE` and `PENDING` respectively until the upload flow writes them.
 
+Scan assets use minted signed URLs: the Owner creates an upload session
+(`POST /api/v1/scans/:scanId/assets/upload-sessions`), the client uploads to the
+returned URL, then marks it complete
+(`POST /api/v1/upload-sessions/:uploadSessionId/complete`). Completion is
+idempotent and marks the parent scan synced. Owner and active Viewers can list
+metadata and request short-lived signed download URLs
+(`GET /api/v1/scans/:scanId/assets/:assetType/download-url`); revoked Viewers
+and deleted projects/scans are denied. Object storage keys are never exposed in
+API responses.
+
 For nonce-bound sign-in, the client generates a raw nonce, sends its lowercase
 hexadecimal SHA-256 digest to Apple, and sends the raw nonce in the request
 above. If the identity token contains a `nonce` claim, the raw request nonce is
@@ -198,29 +213,41 @@ and `x-request-id`.
 
 ## Environment variables
 
-| Variable                               | Required | Default       | Description                                          |
-| -------------------------------------- | -------- | ------------- | ---------------------------------------------------- |
-| `NODE_ENV`                             | No       | `development` | `development`, `staging`, `test` or `production`     |
-| `PORT`                                 | No       | `3000`        | HTTP port inside the process                         |
-| `DATABASE_URL`                         | Yes      | —             | PostgreSQL connection string                         |
-| `LOG_LEVEL`                            | No       | `info`        | Pino log level                                       |
-| `CORS_ORIGIN`                          | No       | `*`           | `*` or comma-separated allowed origins               |
-| `TRUST_PROXY`                          | No       | disabled      | Trusted hop count or comma-separated proxy IPs/CIDRs |
-| `RATE_LIMIT_API_WINDOW_SECONDS`        | No       | `60`          | General API rate-limit window                        |
-| `RATE_LIMIT_API_MAX_REQUESTS`          | No       | `120`         | Requests per IP in the general API window            |
-| `RATE_LIMIT_APPLE_AUTH_WINDOW_SECONDS` | No       | `900`         | Apple sign-in rate-limit window                      |
-| `RATE_LIMIT_APPLE_AUTH_MAX_REQUESTS`   | No       | `20`          | Apple sign-in attempts per IP in its window          |
-| `APPLE_CLIENT_ID`                      | Yes      | —             | Native app bundle identifier used as Apple `aud`     |
-| `AUTH_ACCESS_TOKEN_SECRET`             | Yes      | —             | HS256 access-token secret, at least 32 characters    |
-| `AUTH_REFRESH_TOKEN_SECRET`            | Yes      | —             | HS256 refresh-token secret, at least 32 characters   |
-| `AUTH_ACCESS_TOKEN_TTL_SECONDS`        | No       | `3600`        | RoomScan access-token lifetime                       |
-| `AUTH_REFRESH_TOKEN_TTL_SECONDS`       | No       | `2592000`     | RoomScan refresh-token lifetime                      |
-| `LOCAL_TEST_AUTH_ENABLED`              | No       | `false`       | Enable the seeded login only in `development`        |
+| Variable                                                 | Required | Default       | Description                                          |
+| -------------------------------------------------------- | -------- | ------------- | ---------------------------------------------------- |
+| `NODE_ENV`                                               | No       | `development` | `development`, `staging`, `test` or `production`     |
+| `PORT`                                                   | No       | `3000`        | HTTP port inside the process                         |
+| `DATABASE_URL`                                           | Yes      | —             | PostgreSQL connection string                         |
+| `LOG_LEVEL`                                              | No       | `info`        | Pino log level                                       |
+| `CORS_ORIGIN`                                            | No       | `*`           | `*` or comma-separated allowed origins               |
+| `TRUST_PROXY`                                            | No       | disabled      | Trusted hop count or comma-separated proxy IPs/CIDRs |
+| `RATE_LIMIT_API_WINDOW_SECONDS`                          | No       | `60`          | General API rate-limit window                        |
+| `RATE_LIMIT_API_MAX_REQUESTS`                            | No       | `120`         | Requests per IP in the general API window            |
+| `RATE_LIMIT_APPLE_AUTH_WINDOW_SECONDS`                   | No       | `900`         | Apple sign-in rate-limit window                      |
+| `RATE_LIMIT_APPLE_AUTH_MAX_REQUESTS`                     | No       | `20`          | Apple sign-in attempts per IP in its window          |
+| `APPLE_CLIENT_ID`                                        | Yes      | —             | Native app bundle identifier used as Apple `aud`     |
+| `AUTH_ACCESS_TOKEN_SECRET`                               | Yes      | —             | HS256 access-token secret, at least 32 characters    |
+| `AUTH_REFRESH_TOKEN_SECRET`                              | Yes      | —             | HS256 refresh-token secret, at least 32 characters   |
+| `AUTH_ACCESS_TOKEN_TTL_SECONDS`                          | No       | `3600`        | RoomScan access-token lifetime                       |
+| `AUTH_REFRESH_TOKEN_TTL_SECONDS`                         | No       | `2592000`     | RoomScan refresh-token lifetime                      |
+| `LOCAL_TEST_AUTH_ENABLED`                                | No       | `false`       | Enable the seeded login only in `development`        |
+| `STORAGE_PROVIDER`                                       | No       | `local`       | Storage adapter; only `local` is wired currently     |
+| `STORAGE_BUCKET` / `STORAGE_REGION` / `STORAGE_ENDPOINT` | No       | ``            | Reserved for a production object-store adapter       |
+| `STORAGE_UPLOAD_URL_TTL_SECONDS`                         | No       | `900`         | Signed upload URL lifetime                           |
+| `STORAGE_DOWNLOAD_URL_TTL_SECONDS`                       | No       | `60`          | Signed download URL lifetime                         |
+| `ASSET_MAX_MODEL_SIZE_BYTES`                             | No       | `500000000`   | Maximum model asset size                             |
+| `ASSET_MAX_THUMBNAIL_SIZE_BYTES`                         | No       | `10000000`    | Maximum thumbnail asset size                         |
 
 The remaining PostgreSQL and `ROOMSCAN_PORT` values in `.env.example` configure
 Docker Compose. The refresh TTL must exceed the access TTL. Replace all
 authentication placeholders before deployment; never commit `.env` or real
 credentials.
+
+The default `STORAGE_PROVIDER=local` uses a fake in-process adapter that mints
+short-lived upload/download URLs for development and tests; it is not an object
+store, so uploaded bytes are not persisted. A production provider (S3-compatible,
+selected via `STORAGE_PROVIDER`) is a documented placeholder and is not yet
+implemented.
 
 Rate-limit counters are stored in the API process, reset on restart and are not
 shared by replicas. The current single-instance Compose topology needs no

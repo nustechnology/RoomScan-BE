@@ -6,10 +6,10 @@ from injected dependencies. Keeping `app.listen` outside the app factory makes
 API tests deterministic and prevents them from opening network ports.
 
 The current product-facing scope contains health checks, Apple Sign-In
-authentication, Owner/Viewer project management, and room-scan metadata. The
-Prisma schema owns the `User`, `Project`, `ProjectAccess`, and `Scan` models;
-Invitation, Note, and asset behavior must not be inferred until their
-requirements are implemented.
+authentication, Owner/Viewer project management, room-scan metadata, and scan
+asset upload/download. The Prisma schema owns the `User`, `Project`,
+`ProjectAccess`, `Scan`, and `ScanAsset` models; Invitation, Note, and asset
+behavior must not be inferred until their requirements are implemented.
 
 ## Request flow
 
@@ -142,13 +142,46 @@ allow-listed sorting with a stable `id` tie-breaker and offset pagination. An
 Owner update runs its guarded write and response read in one transaction.
 Deleting a scan marks `Scan.deletedAt` and touches the parent project
 `updatedAt` in the same transaction; a repeated delete by the same Owner is
-idempotent. Scan deletion does not cascade because Note and asset models are
-not yet present; future note queries will filter on the scan `deletedAt`.
+idempotent. Deleting a scan cascades to its `ScanAsset` rows because asset
+behavior is owned by the scan. Note cleanup is still not claimed because the
+Note model is not yet present.
 
 The `Scan` model stores metadata only: name, description, thumbnail reference,
-`assetStatus`, `syncStatus`, and `modelVersion`. The metadata endpoints never
-accept model-file bytes; the asset/sync write path belongs to a future upload
-module.
+`assetStatus`, `syncStatus`, and `modelVersion`. Scan-asset upload and download
+live in the Scan Asset module below.
+
+## Scan Asset module
+
+The Scan Asset module manages upload sessions and signed download URLs for a
+scan's model and thumbnail. It depends on a `ScanAssetRepository`, the shared
+`ProjectPermissionService` (via `ScanRepository.findProjectId`), a
+`StorageAdapter`, and the configured URL TTLs and size limits.
+
+`ScanAssetService` validates the content type and size for the requested
+`assetType`, creates or re-uses a single `ScanAsset` row per `(scan, assetType)`,
+and mints short-lived upload and download URLs through the storage adapter. An
+active, unexpired upload session is returned idempotently (`200`); otherwise a
+new session is started. Completion is idempotent and, when the provider can
+verify the object, marks the asset `UPLOADED` and updates the parent scan's
+`assetStatus`/`syncStatus`. Download URLs are only issued for `UPLOADED` assets,
+and storage object keys are never returned to clients.
+
+Permissions mirror the Scan module: the project Owner creates/completes uploads,
+and the Owner or active Viewers list metadata and receive download URLs. All
+permission failures surface as hidden 404s, and revoked Viewers or deleted
+projects/scans cannot mint series of new signed URLs because the underlying
+access lookup runs on every request.
+
+## Storage
+
+`src/infrastructure/storage` defines a narrow `StorageAdapter` interface
+(`buildObjectKey`, `createUploadUrl`, `createDownloadUrl`, `verifyObject`) and a
+`LocalStorageAdapter` fake used in every environment so far. It mints
+deterministic URLs with the requested expiry and cannot independently verify an
+upload, so completion is assumed valid. Production object-store adapters
+(bucket/region/endpoint) are placeholders not yet implemented; they would be
+selected by `STORAGE_PROVIDER` and injected at the composition root without
+changing module routes.
 
 ## Nonce binding
 
@@ -191,11 +224,12 @@ trusted IP/CIDR topology rather than trusting every proxy.
 
 The composition root creates one Prisma Client and injects it into the database
 health/lifecycle adapter, the Apple user repository, the current-user
-repository, the project repository, and the scan repository. It also creates the
-two rate-limit middleware instances, the access-token verifier, the project
-permission service, the project service, and the scan service once per process.
-Product modules never import the Prisma client directly. The unique provider
-identity constraint makes
+repository, the project repository, the scan repository, and the scan-asset
+repository, plus the storage adapter. It also creates the two rate-limit
+middleware instances, the access-token verifier, the project permission
+service, the project service, the scan service, and the scan-asset service once
+per process. Product modules never import the Prisma client directly. The unique
+provider identity constraint makes
 concurrent first-time Apple logins idempotent at the database boundary. The
 projects table has a foreign key to users with `onDelete: Restrict`; project
 access has unique `(projectId, userId)` membership and revocation state.
