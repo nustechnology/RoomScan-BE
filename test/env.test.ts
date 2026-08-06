@@ -29,6 +29,8 @@ describe('loadConfig', () => {
       apiRateLimitMaxRequests: 120,
       appleAuthRateLimitWindowSeconds: 900,
       appleAuthRateLimitMaxRequests: 20,
+      refreshAuthRateLimitWindowSeconds: 900,
+      refreshAuthRateLimitMaxRequests: 10,
       appleClientId: 'com.example.roomscan',
       accessTokenSecret: 'access-secret-that-is-at-least-32-characters',
       refreshTokenSecret: 'refresh-secret-that-is-at-least-32-characters',
