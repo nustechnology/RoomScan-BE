@@ -313,8 +313,8 @@ export class PrismaScanRepository implements ScanRepository {
     scanId: string,
     data: { assetStatus?: ScanRecord['assetStatus']; syncStatus?: ScanRecord['syncStatus'] },
   ): Promise<void> {
-    await this.#client.scan.update({
-      where: { id: scanId },
+    await this.#client.scan.updateMany({
+      where: { id: scanId, deletedAt: null },
       data,
     });
   }

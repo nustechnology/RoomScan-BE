@@ -330,7 +330,7 @@ Error behavior:
 Every scan-asset endpoint requires a valid Bearer access token. A scan has at
 most one model asset and one thumbnail asset (keyed by `assetType`). The project
 Owner creates and completes uploads; the Owner and active Viewers can list
-metadata and request short-lived download URLs. Revoked Viewers and access to
+metadata and request download URLs. Revoked Viewers and access to
 deleted projects/scans are hidden behind `404`.
 
 | Method | Endpoint                                               | Result                                                          |
@@ -338,7 +338,7 @@ deleted projects/scans are hidden behind `404`.
 | `POST` | `/api/v1/scans/:scanId/assets/upload-sessions`         | Create an upload session; Owner only; `201` or idempotent `200` |
 | `POST` | `/api/v1/upload-sessions/:uploadSessionId/complete`    | Mark an upload session completed; Owner only; idempotent `200`  |
 | `GET`  | `/api/v1/scans/:scanId/assets`                         | List asset metadata; Owner or active Viewer                     |
-| `GET`  | `/api/v1/scans/:scanId/assets/:assetType/download-url` | Generate a signed download URL; Owner or active Viewer          |
+| `GET`  | `/api/v1/scans/:scanId/assets/:assetType/download-url` | Generate a download URL; Owner or active Viewer                 |
 | `POST` | `/api/v1/upload-sessions/:uploadSessionId/fail`        | Report an upload failure; Owner only                            |
 
 Create-session request:
@@ -354,19 +354,26 @@ Create-session request:
 
 Asset metadata response fields: `assetId`, `scanId`, `assetType`, `status`, and
 for the download response `downloadUrl` plus `downloadUrlExpiresAt`. The target
-object key is a `storageKey` persisted internally but never returned to clients.
+object key is a `storageKey` persisted internally; the field is omitted from
+responses, though the local provider's URLs embed the object key path.
 
 Behavior and rules:
 
 - Create and complete are Owner-only; list and download are Owner or active
   Viewer.
 - Completed uploads are idempotent: repeating `complete` returns the stored
-  asset without creating duplicates.
+  asset without creating duplicates and, for a model, re-applies the parent scan
+  status update so a retry recovers from an earlier failed scan update.
 - Completed model uploads mark the scan `assetStatus = UPLOADED` and
-  `syncStatus = SYNCED`; a reported failure marks the scan `FAILED`.
+  `syncStatus = SYNCED`; a reported failure marks the scan `FAILED`. Thumbnail
+  completion leaves the scan status unchanged.
 - A download URL is only issued once an asset has status `UPLOADED`; otherwise
-  the API returns `409 ASSET_NOT_READY`.
-- Signed URLs are short-lived and expire per the configured TTLs.
+  the API returns `409 ASSET_NOT_READY`, and a missing asset record returns
+  `404 ASSET_NOT_FOUND`.
+- URLs carry the configured TTL as expiry metadata. The local provider mints
+  unsigned URLs and is restricted to non-production environments
+  (`NODE_ENV=production` rejects `STORAGE_PROVIDER=local`); expiry enforcement
+  for real assets requires a production object-store adapter.
 
 Error behavior:
 

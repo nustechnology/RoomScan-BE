@@ -8,8 +8,8 @@ API tests deterministic and prevents them from opening network ports.
 The current product-facing scope contains health checks, Apple Sign-In
 authentication, Owner/Viewer project management, room-scan metadata, and scan
 asset upload/download. The Prisma schema owns the `User`, `Project`,
-`ProjectAccess`, `Scan`, and `ScanAsset` models; Invitation, Note, and asset
-behavior must not be inferred until their requirements are implemented.
+`ProjectAccess`, `Scan`, and `ScanAsset` models; Invitation and Note behavior
+must not be inferred until their requirements are implemented.
 
 ## Request flow
 
@@ -152,36 +152,44 @@ live in the Scan Asset module below.
 
 ## Scan Asset module
 
-The Scan Asset module manages upload sessions and signed download URLs for a
+The Scan Asset module manages upload sessions and download URLs for a
 scan's model and thumbnail. It depends on a `ScanAssetRepository`, the shared
 `ProjectPermissionService` (via `ScanRepository.findProjectId`), a
 `StorageAdapter`, and the configured URL TTLs and size limits.
 
 `ScanAssetService` validates the content type and size for the requested
 `assetType`, creates or re-uses a single `ScanAsset` row per `(scan, assetType)`,
-and mints short-lived upload and download URLs through the storage adapter. An
-active, unexpired upload session is returned idempotently (`200`); otherwise a
-new session is started. Completion is idempotent and, when the provider can
-verify the object, marks the asset `UPLOADED` and updates the parent scan's
-`assetStatus`/`syncStatus`. Download URLs are only issued for `UPLOADED` assets,
-and storage object keys are never returned to clients.
+and mints upload and download URLs carrying the configured TTL metadata. The
+repository resolves a concurrent create for the same `(scan, assetType)` key to
+the existing row instead of surfacing the unique-constraint error. An active,
+unexpired upload session is returned idempotently (`200`), and refreshing an
+expired session also returns `200` rather than reporting a new creation.
+Completion is idempotent and, when the provider can verify the object, marks the
+asset `UPLOADED`. Successful `MODEL` completion also updates the parent scan's
+`assetStatus`/`syncStatus`, and retrying a completed upload re-applies that
+update so the scan recovers when the earlier scan update failed; thumbnail
+completion leaves the scan status unchanged. Download URLs are only issued for
+`UPLOADED` assets, and the raw `storageKey` field is omitted from responses.
 
 Permissions mirror the Scan module: the project Owner creates/completes uploads,
 and the Owner or active Viewers list metadata and receive download URLs. All
 permission failures surface as hidden 404s, and revoked Viewers or deleted
-projects/scans cannot mint series of new signed URLs because the underlying
+projects/scans cannot mint series of new download URLs because the underlying
 access lookup runs on every request.
 
 ## Storage
 
 `src/infrastructure/storage` defines a narrow `StorageAdapter` interface
 (`buildObjectKey`, `createUploadUrl`, `createDownloadUrl`, `verifyObject`) and a
-`LocalStorageAdapter` fake used in every environment so far. It mints
-deterministic URLs with the requested expiry and cannot independently verify an
-upload, so completion is assumed valid. Production object-store adapters
-(bucket/region/endpoint) are placeholders not yet implemented; they would be
-selected by `STORAGE_PROVIDER` and injected at the composition root without
-changing module routes.
+`LocalStorageAdapter` used outside production. The local adapter mints unsigned
+test URLs; the requested expiry is returned as TTL metadata only and is neither
+encoded into a capability nor enforced, and `verifyObject` always accepts
+completion because the adapter does not persist bytes. Configuration rejects
+`STORAGE_PROVIDER=local` when `NODE_ENV=production`, and the composition root
+fails closed for any provider other than `local`. Production object-store
+adapters (bucket/region/endpoint) are placeholders not yet implemented; they
+would be selected by `STORAGE_PROVIDER` and injected at the composition root
+without changing module routes.
 
 ## Nonce binding
 

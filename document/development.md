@@ -56,7 +56,9 @@ tried without manual setup. With the shortcut enabled, use:
 at `POST /api/v1/auth/apple`. The response contains normally signed RoomScan
 access and refresh JWTs for `local-test@roomscan.dev`. Other identity tokens
 continue through Apple verification. The production-style Compose API sets
-`NODE_ENV=production`, so it never enables this shortcut.
+`NODE_ENV=production`, so it never enables this shortcut and it also rejects
+`STORAGE_PROVIDER=local`; a non-local object-store provider must be configured
+before the API container starts.
 
 The default development rate limits use the in-process MemoryStore and require
 no additional service. `TRUST_PROXY` remains empty for direct local and Compose

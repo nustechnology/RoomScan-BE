@@ -29,6 +29,9 @@ const currentUserRepository = new PrismaCurrentUserRepository(prismaClient);
 const projectRepository = new PrismaProjectRepository(prismaClient);
 const scanRepository = new PrismaScanRepository(prismaClient);
 const scanAssetRepository = new PrismaScanAssetRepository(prismaClient);
+if (config.storageProvider !== 'local') {
+  throw new Error(`Unsupported STORAGE_PROVIDER: ${config.storageProvider}`);
+}
 const storageAdapter = new LocalStorageAdapter();
 const appleIdentityVerifier = new LocalTestAppleIdentityVerifier({
   delegate: new AppleIdentityTokenVerifier(config.appleClientId),

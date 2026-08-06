@@ -79,6 +79,25 @@ describe('loadConfig', () => {
     ).toThrow(ZodError);
   });
 
+  it('rejects the local storage provider in production', () => {
+    expect(() =>
+      loadConfig({
+        ...validEnvironment,
+        NODE_ENV: 'production',
+        STORAGE_PROVIDER: 'local',
+      }),
+    ).toThrow(/STORAGE_PROVIDER=local is not allowed when NODE_ENV=production/);
+  });
+
+  it('allows the local storage provider outside production', () => {
+    const config = loadConfig({
+      ...validEnvironment,
+      STORAGE_PROVIDER: 'local',
+    });
+
+    expect(config.storageProvider).toBe('local');
+  });
+
   it('accepts staging as NODE_ENV', () => {
     const config = loadConfig({
       ...validEnvironment,

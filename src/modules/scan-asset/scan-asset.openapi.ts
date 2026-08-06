@@ -131,6 +131,17 @@ const assetNotFoundResponse = {
   },
 };
 
+const downloadNotFoundResponse = {
+  description:
+    'The scan is missing, deleted, or inaccessible through its parent project, or the asset record is missing or inaccessible',
+  headers: rateLimitHeaders,
+  content: {
+    'application/json': {
+      schema: errorResponse,
+    },
+  },
+};
+
 const assetNotReadyResponse = {
   description: 'The asset has not been uploaded yet',
   headers: rateLimitHeaders,
@@ -266,14 +277,14 @@ scanAssetOpenApiRegistry.registerPath({
   method: 'get',
   path: '/api/v1/scans/{scanId}/assets/{assetType}/download-url',
   tags: ['Scan Assets'],
-  summary: 'Generate a signed download URL for a model or thumbnail asset',
+  summary: 'Generate a download URL for a model or thumbnail asset',
   security: [{ [bearerAuth]: [] }],
   request: {
     params: downloadUrlParams,
   },
   responses: {
     200: {
-      description: 'A signed download URL',
+      description: 'A download URL carrying the configured TTL expiry',
       headers: rateLimitHeaders,
       content: {
         'application/json': {
@@ -282,7 +293,7 @@ scanAssetOpenApiRegistry.registerPath({
       },
     },
     ...commonErrorResponses,
-    404: scanNotFoundResponse,
+    404: downloadNotFoundResponse,
     409: assetNotReadyResponse,
   },
 });

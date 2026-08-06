@@ -1,27 +1,32 @@
 import { z } from '../../openapi/zod.js';
+import { MODEL_CONTENT_TYPES, THUMBNAIL_CONTENT_TYPES } from './scan-asset.types.js';
 
-export const CreateUploadSessionBodySchema = z
+const modelUploadBranchSchema = z
   .object({
-    assetType: z.enum(['MODEL', 'THUMBNAIL']),
-    contentType: z.string().trim().min(1).max(128),
+    assetType: z.literal('MODEL'),
+    contentType: z.enum(MODEL_CONTENT_TYPES),
+    sizeBytes: z.number().int().positive(),
+    checksum: z.string().trim().min(1).max(128),
+    modelVersion: z.string().trim().min(1).max(64),
+    idempotencyKey: z.string().trim().min(1).max(128).optional(),
+  })
+  .strict();
+
+const thumbnailUploadBranchSchema = z
+  .object({
+    assetType: z.literal('THUMBNAIL'),
+    contentType: z.enum(THUMBNAIL_CONTENT_TYPES),
     sizeBytes: z.number().int().positive(),
     checksum: z.string().trim().min(1).max(128).optional(),
     modelVersion: z.string().trim().min(1).max(64).optional(),
     idempotencyKey: z.string().trim().min(1).max(128).optional(),
   })
-  .strict()
-  .superRefine((data, context) => {
-    if (
-      data.assetType === 'MODEL' &&
-      (data.checksum === undefined || data.modelVersion === undefined)
-    ) {
-      context.addIssue({
-        code: 'custom',
-        path: ['checksum'],
-        message: 'MODEL assets require checksum and modelVersion',
-      });
-    }
-  });
+  .strict();
+
+export const CreateUploadSessionBodySchema = z.discriminatedUnion('assetType', [
+  modelUploadBranchSchema,
+  thumbnailUploadBranchSchema,
+]);
 
 export const CompleteUploadBodySchema = z
   .object({

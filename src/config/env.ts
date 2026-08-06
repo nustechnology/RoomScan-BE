@@ -140,6 +140,14 @@ export const environmentSchema = z
         message: 'LOCAL_TEST_AUTH_ENABLED may only be enabled when NODE_ENV=development',
       });
     }
+
+    if (environment.NODE_ENV === 'production' && environment.STORAGE_PROVIDER === 'local') {
+      context.addIssue({
+        code: 'custom',
+        path: ['STORAGE_PROVIDER'],
+        message: 'STORAGE_PROVIDER=local is not allowed when NODE_ENV=production',
+      });
+    }
   });
 
 export interface AppConfig {

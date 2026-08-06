@@ -24,7 +24,6 @@ import {
 } from '../src/modules/scan-asset/scan-asset.schemas.js';
 import {
   AssetNotReadyError,
-  InvalidAssetRequestError,
   ScanAssetNotFoundError,
   StorageUnavailableError,
   UploadSessionExpiredError,
@@ -277,8 +276,6 @@ describe('Scan asset HTTP endpoints', () => {
     });
 
     it('rejects a disallowed content type for the asset type', async () => {
-      createUploadSession.mockRejectedValueOnce(new InvalidAssetRequestError());
-
       const response = await request(app)
         .post(`/api/v1/scans/${SCAN_ID}/assets/upload-sessions`)
         .set('Authorization', `Bearer ${tokenA}`)
@@ -429,6 +426,18 @@ describe('Scan asset HTTP endpoints', () => {
       const body = ErrorResponseSchema.parse(response.body as unknown);
 
       expect(body.error.code).toBe('ASSET_NOT_READY');
+    });
+
+    it('returns not-found when the asset record is missing', async () => {
+      getDownloadUrl.mockRejectedValueOnce(new ScanAssetNotFoundError());
+
+      const response = await request(app)
+        .get(`/api/v1/scans/${SCAN_ID}/assets/MODEL/download-url`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(404);
+      const body = ErrorResponseSchema.parse(response.body as unknown);
+
+      expect(body.error.code).toBe('ASSET_NOT_FOUND');
     });
 
     it('rejects an invalid asset type', async () => {

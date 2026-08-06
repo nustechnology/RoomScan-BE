@@ -1,4 +1,4 @@
-import type { PrismaClient } from '../../generated/prisma/client.js';
+import { Prisma, type PrismaClient } from '../../generated/prisma/client.js';
 import type {
   ScanAssetCreateData,
   ScanAssetRecord,
@@ -89,22 +89,46 @@ export class PrismaScanAssetRepository implements ScanAssetRepository {
   }
 
   async create(data: ScanAssetCreateData): Promise<ScanAssetRecord> {
-    const row = await this.#client.scanAsset.create({
-      data: {
-        scanId: data.scanId,
-        assetType: data.assetType,
-        status: 'PENDING',
-        contentType: data.contentType,
-        sizeBytes: data.sizeBytes,
-        checksum: data.checksum,
-        modelVersion: data.modelVersion,
-        storageKey: data.storageKey,
-        idempotencyKey: data.idempotencyKey,
-        uploadUrlExpiresAt: data.uploadUrlExpiresAt,
-      },
-      select: scanAssetSelect,
-    });
-    return toScanAssetRecord(row);
+    try {
+      const row = await this.#client.scanAsset.create({
+        data: {
+          scanId: data.scanId,
+          assetType: data.assetType,
+          status: 'PENDING',
+          contentType: data.contentType,
+          sizeBytes: data.sizeBytes,
+          checksum: data.checksum,
+          modelVersion: data.modelVersion,
+          storageKey: data.storageKey,
+          idempotencyKey: data.idempotencyKey,
+          uploadUrlExpiresAt: data.uploadUrlExpiresAt,
+        },
+        select: scanAssetSelect,
+      });
+      return toScanAssetRecord(row);
+    } catch (error) {
+      if (this.#isDuplicateAsset(error)) {
+        const existing = await this.#client.scanAsset.findUnique({
+          where: { scanId_assetType: { scanId: data.scanId, assetType: data.assetType } },
+          select: scanAssetSelect,
+        });
+
+        if (existing !== null) {
+          return toScanAssetRecord(existing);
+        }
+      }
+
+      throw error;
+    }
+  }
+
+  #isDuplicateAsset(error: unknown): error is Prisma.PrismaClientKnownRequestError {
+    return (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === 'P2002' &&
+      Array.isArray(error.meta?.target) &&
+      error.meta.target.some((field) => ['scanId', 'assetType'].includes(field as string))
+    );
   }
 
   async update(id: string, data: ScanAssetUpdateData): Promise<ScanAssetRecord> {
