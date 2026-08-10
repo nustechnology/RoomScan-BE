@@ -232,6 +232,21 @@ describe('ScanAssetService', () => {
     ).rejects.toBeInstanceOf(InvalidAssetRequestError);
   });
 
+  it('reports a storage outage when minting an upload URL', async () => {
+    const { service, createUploadUrl } = createHarness();
+    createUploadUrl.mockRejectedValueOnce(new Error('down'));
+
+    await expect(
+      service.createUploadSession(OWNER_ID, SCAN_ID, {
+        assetType: 'MODEL',
+        contentType: 'model/gltf-binary',
+        sizeBytes: 1024,
+        checksum: 'abc',
+        modelVersion: '1',
+      }),
+    ).rejects.toBeInstanceOf(StorageUnavailableError);
+  });
+
   it('rejects an oversized model asset', async () => {
     const { service } = createHarness();
 

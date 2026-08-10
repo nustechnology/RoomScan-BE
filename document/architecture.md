@@ -171,6 +171,8 @@ asset `UPLOADED`. Successful `MODEL` completion also updates the parent scan's
 update so the scan recovers when the earlier scan update failed; thumbnail
 completion leaves the scan status unchanged. Download URLs are only issued for
 `UPLOADED` assets, and the raw `storageKey` field is omitted from responses.
+Storage failures while minting upload or download URLs or while verifying an
+upload surface as `503 STORAGE_UNAVAILABLE`.
 
 Permissions mirror the Scan module: the project Owner creates/completes uploads,
 and the Owner or active Viewers list metadata and receive download URLs. All
@@ -181,16 +183,28 @@ access lookup runs on every request.
 ## Storage
 
 `src/infrastructure/storage` defines a narrow `StorageAdapter` interface
-(`buildObjectKey`, `createUploadUrl`, `createDownloadUrl`, `verifyObject`) and a
-`LocalStorageAdapter` used outside production. The local adapter mints unsigned
-test URLs; the requested expiry is returned as TTL metadata only and is neither
+(`buildObjectKey`, `createUploadUrl`, `createDownloadUrl`, `verifyObject`). The
+composition root selects the adapter from `STORAGE_PROVIDER`; module routes do
+not change when the provider changes.
+
+`LocalStorageAdapter` is used in development and tests. It mints unsigned test
+URLs; the requested expiry is returned as TTL metadata only and is neither
 encoded into a capability nor enforced, and `verifyObject` always accepts
 completion because the adapter does not persist bytes. Configuration rejects
-`STORAGE_PROVIDER=local` when `NODE_ENV=production`, and the composition root
-fails closed for any provider other than `local`. Production object-store
-adapters (bucket/region/endpoint) are placeholders not yet implemented; they
-would be selected by `STORAGE_PROVIDER` and injected at the composition root
-without changing module routes.
+`STORAGE_PROVIDER=local` when `NODE_ENV=production`.
+
+`MinioStorageAdapter` is the S3-compatible object-store provider. It is
+selected with `STORAGE_PROVIDER=minio`, which requires `STORAGE_BUCKET`,
+`STORAGE_ENDPOINT`, `STORAGE_ACCESS_KEY_ID` and `STORAGE_SECRET_ACCESS_KEY`.
+The endpoint is `host[:port]`; `STORAGE_USE_SSL` switches between HTTP and
+HTTPS. The adapter lazily creates the configured bucket on first use and caches
+the creation per process, mints presigned PUT and GET URLs whose expiry is
+enforced by MinIO, and verifies uploads with a head request (`statObject`);
+an object that does not exist resolves `verifyObject` to `false`, while other
+storage failures propagate and surface as `503 STORAGE_UNAVAILABLE`. The
+presigned PUT URL does not sign content-type or size constraints, so the
+client-reported content type and size are validated at the API boundary as
+documented in the Scan Asset module.
 
 ## Nonce binding
 

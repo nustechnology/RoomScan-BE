@@ -370,10 +370,11 @@ Behavior and rules:
 - A download URL is only issued once an asset has status `UPLOADED`; otherwise
   the API returns `409 ASSET_NOT_READY`, and a missing asset record returns
   `404 ASSET_NOT_FOUND`.
-- URLs carry the configured TTL as expiry metadata. The local provider mints
-  unsigned URLs and is restricted to non-production environments
-  (`NODE_ENV=production` rejects `STORAGE_PROVIDER=local`); expiry enforcement
-  for real assets requires a production object-store adapter.
+- URLs carry the configured TTL as expiry metadata. The `local` provider mints
+  unsigned URLs, does not persist bytes, and is restricted to non-production
+  environments (`NODE_ENV=production` rejects `STORAGE_PROVIDER=local`). The
+  `minio` provider mints presigned S3 URLs whose expiry is enforced by MinIO
+  and verifies uploaded objects before completion.
 
 Error behavior:
 

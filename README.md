@@ -64,18 +64,17 @@ cp .env.example .env
 docker compose up --build
 ```
 
-Compose starts PostgreSQL, runs `prisma migrate deploy` as a one-shot service,
-then starts the non-root production API container. This is an optional
+Compose starts PostgreSQL and MinIO, runs `prisma migrate deploy` as a one-shot
+service, then starts the non-root production API container. This is an optional
 production-style check, not the normal local development or agent handoff
 workflow.
 
 The API container runs with `NODE_ENV=production`, so it fails closed when
 `STORAGE_PROVIDER=local`: the startup validation rejects the default local
-adapter, and the API container will not start until a non-local
-`STORAGE_PROVIDER` is configured. Because no object-store provider is
-implemented yet, this stack currently validates the build, migrations, and the
-fail-closed storage guard; run the API natively with `yarn dev` for the
-development flow that uses the local adapter.
+adapter. The stack starts MinIO and wires the API to it
+(`STORAGE_PROVIDER=minio` by default), so the API container waits for a healthy
+object store before starting. For the development flow that uses the local
+adapter, run the API natively with `yarn dev`.
 
 Useful commands:
 
@@ -86,7 +85,7 @@ docker compose down
 ```
 
 Use `docker compose down --volumes` only when you intentionally want to delete
-the local PostgreSQL data volume.
+the local PostgreSQL and MinIO data volumes.
 
 ## HTTP endpoints
 
@@ -222,43 +221,46 @@ and `x-request-id`.
 
 ## Environment variables
 
-| Variable                                                 | Required | Default       | Description                                                               |
-| -------------------------------------------------------- | -------- | ------------- | ------------------------------------------------------------------------- |
-| `NODE_ENV`                                               | No       | `development` | `development`, `staging`, `test` or `production`                          |
-| `PORT`                                                   | No       | `3000`        | HTTP port inside the process                                              |
-| `DATABASE_URL`                                           | Yes      | —             | PostgreSQL connection string                                              |
-| `LOG_LEVEL`                                              | No       | `info`        | Pino log level                                                            |
-| `CORS_ORIGIN`                                            | No       | `*`           | `*` or comma-separated allowed origins                                    |
-| `TRUST_PROXY`                                            | No       | disabled      | Trusted hop count or comma-separated proxy IPs/CIDRs                      |
-| `RATE_LIMIT_API_WINDOW_SECONDS`                          | No       | `60`          | General API rate-limit window                                             |
-| `RATE_LIMIT_API_MAX_REQUESTS`                            | No       | `120`         | Requests per IP in the general API window                                 |
-| `RATE_LIMIT_APPLE_AUTH_WINDOW_SECONDS`                   | No       | `900`         | Apple sign-in rate-limit window                                           |
-| `RATE_LIMIT_APPLE_AUTH_MAX_REQUESTS`                     | No       | `20`          | Apple sign-in attempts per IP in its window                               |
-| `APPLE_CLIENT_ID`                                        | Yes      | —             | Native app bundle identifier used as Apple `aud`                          |
-| `AUTH_ACCESS_TOKEN_SECRET`                               | Yes      | —             | HS256 access-token secret, at least 32 characters                         |
-| `AUTH_REFRESH_TOKEN_SECRET`                              | Yes      | —             | HS256 refresh-token secret, at least 32 characters                        |
-| `AUTH_ACCESS_TOKEN_TTL_SECONDS`                          | No       | `3600`        | RoomScan access-token lifetime                                            |
-| `AUTH_REFRESH_TOKEN_TTL_SECONDS`                         | No       | `2592000`     | RoomScan refresh-token lifetime                                           |
-| `LOCAL_TEST_AUTH_ENABLED`                                | No       | `false`       | Enable the seeded login only in `development`                             |
-| `STORAGE_PROVIDER`                                       | No       | `local`       | Storage adapter; only `local` is wired and it is rejected in `production` |
-| `STORAGE_BUCKET` / `STORAGE_REGION` / `STORAGE_ENDPOINT` | No       | ``            | Reserved for a production object-store adapter                            |
-| `STORAGE_UPLOAD_URL_TTL_SECONDS`                         | No       | `900`         | Signed upload URL lifetime                                                |
-| `STORAGE_DOWNLOAD_URL_TTL_SECONDS`                       | No       | `60`          | Signed download URL lifetime                                              |
-| `ASSET_MAX_MODEL_SIZE_BYTES`                             | No       | `500000000`   | Maximum model asset size                                                  |
-| `ASSET_MAX_THUMBNAIL_SIZE_BYTES`                         | No       | `10000000`    | Maximum thumbnail asset size                                              |
+| Variable                                                 | Required | Default       | Description                                                         |
+| -------------------------------------------------------- | -------- | ------------- | ------------------------------------------------------------------- |
+| `NODE_ENV`                                               | No       | `development` | `development`, `staging`, `test` or `production`                    |
+| `PORT`                                                   | No       | `3000`        | HTTP port inside the process                                        |
+| `DATABASE_URL`                                           | Yes      | —             | PostgreSQL connection string                                        |
+| `LOG_LEVEL`                                              | No       | `info`        | Pino log level                                                      |
+| `CORS_ORIGIN`                                            | No       | `*`           | `*` or comma-separated allowed origins                              |
+| `TRUST_PROXY`                                            | No       | disabled      | Trusted hop count or comma-separated proxy IPs/CIDRs                |
+| `RATE_LIMIT_API_WINDOW_SECONDS`                          | No       | `60`          | General API rate-limit window                                       |
+| `RATE_LIMIT_API_MAX_REQUESTS`                            | No       | `120`         | Requests per IP in the general API window                           |
+| `RATE_LIMIT_APPLE_AUTH_WINDOW_SECONDS`                   | No       | `900`         | Apple sign-in rate-limit window                                     |
+| `RATE_LIMIT_APPLE_AUTH_MAX_REQUESTS`                     | No       | `20`          | Apple sign-in attempts per IP in its window                         |
+| `APPLE_CLIENT_ID`                                        | Yes      | —             | Native app bundle identifier used as Apple `aud`                    |
+| `AUTH_ACCESS_TOKEN_SECRET`                               | Yes      | —             | HS256 access-token secret, at least 32 characters                   |
+| `AUTH_REFRESH_TOKEN_SECRET`                              | Yes      | —             | HS256 refresh-token secret, at least 32 characters                  |
+| `AUTH_ACCESS_TOKEN_TTL_SECONDS`                          | No       | `3600`        | RoomScan access-token lifetime                                      |
+| `AUTH_REFRESH_TOKEN_TTL_SECONDS`                         | No       | `2592000`     | RoomScan refresh-token lifetime                                     |
+| `LOCAL_TEST_AUTH_ENABLED`                                | No       | `false`       | Enable the seeded login only in `development`                       |
+| `STORAGE_PROVIDER`                                       | No       | `local`       | Storage adapter: `local` (dev/test fake) or `minio` (S3-compatible) |
+| `STORAGE_BUCKET` / `STORAGE_REGION` / `STORAGE_ENDPOINT` | No       | ``            | MinIO bucket, region, and `host[:port]` endpoint                    |
+| `STORAGE_ACCESS_KEY_ID` / `STORAGE_SECRET_ACCESS_KEY`    | No       | ``            | MinIO credentials; required with `STORAGE_PROVIDER=minio`           |
+| `STORAGE_USE_SSL`                                        | No       | `false`       | Use HTTPS instead of HTTP for the MinIO endpoint                    |
+| `STORAGE_UPLOAD_URL_TTL_SECONDS`                         | No       | `900`         | Signed upload URL lifetime                                          |
+| `STORAGE_DOWNLOAD_URL_TTL_SECONDS`                       | No       | `60`          | Signed download URL lifetime                                        |
+| `ASSET_MAX_MODEL_SIZE_BYTES`                             | No       | `500000000`   | Maximum model asset size                                            |
+| `ASSET_MAX_THUMBNAIL_SIZE_BYTES`                         | No       | `10000000`    | Maximum thumbnail asset size                                        |
 
-The remaining PostgreSQL and `ROOMSCAN_PORT` values in `.env.example` configure
-Docker Compose. The refresh TTL must exceed the access TTL. Replace all
-authentication placeholders before deployment; never commit `.env` or real
+The remaining PostgreSQL, MinIO and `ROOMSCAN_PORT` values in `.env.example`
+configure Docker Compose. The refresh TTL must exceed the access TTL. Replace
+all authentication placeholders before deployment; never commit `.env` or real
 credentials.
 
 The default `STORAGE_PROVIDER=local` uses an unsigned in-process adapter for
 development and tests; it mints URLs whose TTL is metadata only (not encoded or
 enforced), does not persist uploaded bytes, and always accepts completion.
-Startup fails closed: `NODE_ENV=production` rejects `STORAGE_PROVIDER=local`,
-and the composition root rejects any provider other than `local`. A production
-provider (S3-compatible, selected via `STORAGE_PROVIDER`) is a documented
-placeholder and is not yet implemented.
+`STORAGE_PROVIDER=minio` selects the S3-compatible MinIO adapter, which lazily
+creates the configured bucket, mints presigned upload/download URLs enforced by
+MinIO, and verifies uploads before completion. Startup fails closed:
+`NODE_ENV=production` rejects `STORAGE_PROVIDER=local`, and `STORAGE_PROVIDER`
+must be `minio` with the bucket, endpoint, and credentials set.
 
 Rate-limit counters are stored in the API process, reset on restart and are not
 shared by replicas. The current single-instance Compose topology needs no

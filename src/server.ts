@@ -13,6 +13,8 @@ import { PrismaProjectRepository } from './infrastructure/database/prisma-projec
 import { PrismaScanRepository } from './infrastructure/database/prisma-scan-repository.js';
 import { PrismaScanAssetRepository } from './infrastructure/database/prisma-scan-asset-repository.js';
 import { LocalStorageAdapter } from './infrastructure/storage/local-storage-adapter.js';
+import { MinioStorageAdapter } from './infrastructure/storage/minio-storage-adapter.js';
+import type { StorageAdapter } from './infrastructure/storage/storage.types.js';
 import { createLogger } from './infrastructure/logging/logger.js';
 import { AuthService } from './modules/auth/auth.service.js';
 import { ProjectPermissionService } from './modules/project/project.permissions.js';
@@ -29,10 +31,20 @@ const currentUserRepository = new PrismaCurrentUserRepository(prismaClient);
 const projectRepository = new PrismaProjectRepository(prismaClient);
 const scanRepository = new PrismaScanRepository(prismaClient);
 const scanAssetRepository = new PrismaScanAssetRepository(prismaClient);
-if (config.storageProvider !== 'local') {
-  throw new Error(`Unsupported STORAGE_PROVIDER: ${config.storageProvider}`);
+function createStorageAdapter(): StorageAdapter {
+  if (config.storageProvider === 'minio') {
+    return new MinioStorageAdapter({
+      bucket: config.storageBucket,
+      endPoint: config.storageEndpoint,
+      accessKey: config.storageAccessKeyId,
+      secretKey: config.storageSecretAccessKey,
+      useSSL: config.storageUseSsl,
+      ...(config.storageRegion === '' ? {} : { region: config.storageRegion }),
+    });
+  }
+  return new LocalStorageAdapter();
 }
-const storageAdapter = new LocalStorageAdapter();
+const storageAdapter = createStorageAdapter();
 const appleIdentityVerifier = new LocalTestAppleIdentityVerifier({
   delegate: new AppleIdentityTokenVerifier(config.appleClientId),
   enabled: config.nodeEnv === 'development' && config.localTestAuthEnabled,

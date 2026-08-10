@@ -26,6 +26,7 @@ import type {
   StorageAdapter,
   StorageDownloadUrl,
   StorageUploadOptions,
+  StorageUploadUrl,
 } from '../../infrastructure/storage/storage.types.js';
 
 export interface ScanAssetServiceDependencies {
@@ -134,6 +135,17 @@ export class ScanAssetService {
     }
   }
 
+  async #mintUploadUrl(
+    objectKey: string,
+    options: StorageUploadOptions,
+  ): Promise<StorageUploadUrl> {
+    try {
+      return await this.#storage.createUploadUrl(objectKey, options);
+    } catch {
+      throw new StorageUnavailableError();
+    }
+  }
+
   async createUploadSession(
     userId: string,
     scanId: string,
@@ -164,7 +176,7 @@ export class ScanAssetService {
       const expiry = existing.uploadUrlExpiresAt;
 
       if (active && expiry !== null && expiry > now) {
-        const uploadUrl = await this.#storage.createUploadUrl(existing.storageKey, {
+        const uploadUrl = await this.#mintUploadUrl(existing.storageKey, {
           ...uploadOptions,
           expiresAt: expiry,
         });
@@ -190,7 +202,7 @@ export class ScanAssetService {
       if (data.checksum !== undefined) update.checksum = data.checksum;
       if (data.modelVersion !== undefined) update.modelVersion = data.modelVersion;
       const updated = await this.#repository.update(existing.id, update);
-      const uploadUrl = await this.#storage.createUploadUrl(objectKey, uploadOptions);
+      const uploadUrl = await this.#mintUploadUrl(objectKey, uploadOptions);
       return {
         uploadSessionId: updated.id,
         assetId: updated.id,
@@ -214,7 +226,7 @@ export class ScanAssetService {
       uploadUrlExpiresAt: uploadOptions.expiresAt,
     };
     const { record, created } = await this.#repository.create(createData);
-    const uploadUrl = await this.#storage.createUploadUrl(objectKey, uploadOptions);
+    const uploadUrl = await this.#mintUploadUrl(objectKey, uploadOptions);
     return {
       uploadSessionId: record.id,
       assetId: record.id,
