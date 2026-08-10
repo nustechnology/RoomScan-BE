@@ -49,10 +49,25 @@ model User {
 
   projects        Project[]
   projectAccesses ProjectAccess[]
+  refreshTokens   RefreshToken[]
   scans           Scan[]
 
   @@unique([provider, providerId])
   @@map("users")
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  jti       String    @unique @db.VarChar(36)
+  userId    String    @db.Uuid
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("refresh_tokens")
 }
 
 model Project {

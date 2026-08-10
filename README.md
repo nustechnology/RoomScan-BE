@@ -94,6 +94,7 @@ the local PostgreSQL and MinIO data volumes.
 | `GET`    | `/api/v1/health`                                       | Liveness; does not query PostgreSQL              |
 | `GET`    | `/api/v1/ready`                                        | Readiness; verifies PostgreSQL with `SELECT 1`   |
 | `POST`   | `/api/v1/auth/apple`                                   | Authenticate with an Apple identity token        |
+| `POST`   | `/api/v1/auth/refresh`                                 | Rotate a RoomScan refresh token                  |
 | `POST`   | `/api/v1/projects`                                     | Create a project (Bearer token required)         |
 | `GET`    | `/api/v1/projects`                                     | List the authenticated user’s projects           |
 | `GET`    | `/api/v1/projects/:projectId`                          | Get a project as Owner or active Viewer          |
@@ -140,8 +141,8 @@ Apple authentication accepts:
 The server verifies the token against Apple's public JWKS, identifies the user
 by Apple `sub`, creates the user when necessary and returns RoomScan access and
 refresh JWTs. Email is stored when present but is never an account identifier.
-The current API issues the refresh JWT but does not yet expose refresh, rotation
-or revocation endpoints.
+The companion `POST /api/v1/auth/refresh` endpoint rotates the refresh JWT and
+issues a new access+refresh pair with stateful JTI tracking.
 
 For local `yarn dev`, set `NODE_ENV=development` and
 `LOCAL_TEST_AUTH_ENABLED=true`, then run `yarn seed:local`. Sending
@@ -164,7 +165,7 @@ TOKEN=$(curl -s -X POST http://localhost:3000/api/v1/auth/apple \
 ```
 
 Project endpoints require a Bearer access token obtained from Apple
-authentication:
+authentication or token refresh:
 
 ```http
 Authorization: Bearer <access-token>
@@ -214,7 +215,8 @@ required and its digest must match. Legacy tokens without a nonce claim remain
 valid only when the request also omits `nonce`.
 
 API requests are limited by client IP. `/api/v1` permits 120 requests per
-minute, and Apple sign-in additionally permits 20 attempts per 15 minutes.
+minute, Apple sign-in additionally permits 20 attempts per 15 minutes, and
+token refresh additionally permits 10 attempts per 15 minutes.
 Health, readiness, Swagger and raw OpenAPI are exempt. Exceeded quotas return
 429 with `RATE_LIMIT_EXCEEDED`, `RateLimit`, `RateLimit-Policy`, `Retry-After`
 and `x-request-id`.
@@ -233,6 +235,8 @@ and `x-request-id`.
 | `RATE_LIMIT_API_MAX_REQUESTS`                            | No       | `120`         | Requests per IP in the general API window                           |
 | `RATE_LIMIT_APPLE_AUTH_WINDOW_SECONDS`                   | No       | `900`         | Apple sign-in rate-limit window                                     |
 | `RATE_LIMIT_APPLE_AUTH_MAX_REQUESTS`                     | No       | `20`          | Apple sign-in attempts per IP in its window                         |
+| `RATE_LIMIT_REFRESH_AUTH_WINDOW_SECONDS`                 | No       | `900`         | Token refresh rate-limit window                                     |
+| `RATE_LIMIT_REFRESH_AUTH_MAX_REQUESTS`                   | No       | `10`          | Token refresh attempts per IP in its window                         |
 | `APPLE_CLIENT_ID`                                        | Yes      | —             | Native app bundle identifier used as Apple `aud`                    |
 | `AUTH_ACCESS_TOKEN_SECRET`                               | Yes      | —             | HS256 access-token secret, at least 32 characters                   |
 | `AUTH_REFRESH_TOKEN_SECRET`                              | Yes      | —             | HS256 refresh-token secret, at least 32 characters                  |

@@ -23,8 +23,13 @@ export interface AuthTokenPair {
   refreshToken: string;
 }
 
+export interface IssuedTokenPair extends AuthTokenPair {
+  refreshTokenJti: string;
+  refreshTokenExpiresAt: Date;
+}
+
 export interface AuthTokenIssuer {
-  issueTokens(userId: string): Promise<AuthTokenPair>;
+  issueTokens(userId: string): Promise<IssuedTokenPair>;
 }
 
 export interface AppleAuthResult extends AuthTokenPair {
@@ -33,4 +38,23 @@ export interface AppleAuthResult extends AuthTokenPair {
 
 export interface AppleAuthService {
   signInWithApple(identityToken: string, nonce?: string): Promise<AppleAuthResult>;
+}
+
+export interface VerifiedRefreshToken {
+  userId: string;
+  jti: string;
+}
+
+export interface RefreshTokenVerifier {
+  verify(token: string): Promise<VerifiedRefreshToken>;
+}
+
+export interface RefreshTokenRepository {
+  saveToken(jti: string, userId: string, expiresAt: Date): Promise<void>;
+  consume(jti: string): Promise<boolean>;
+  rotate(oldJti: string, newJti: string, userId: string, expiresAt: Date): Promise<boolean>;
+}
+
+export interface TokenRefreshService {
+  refresh(refreshToken: string): Promise<AuthTokenPair>;
 }

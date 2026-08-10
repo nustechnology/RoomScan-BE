@@ -29,3 +29,17 @@ export const AppleSignInResponseSchema = z.object({
 
 export type AppleSignInRequest = z.infer<typeof AppleSignInRequestSchema>;
 export type AppleSignInResponse = z.infer<typeof AppleSignInResponseSchema>;
+
+export const RefreshTokenRequestSchema = z
+  .object({
+    refreshToken: z.string().trim().min(1).max(16_384),
+  })
+  .strict();
+
+export const RefreshTokenResponseSchema = z.object({
+  accessToken: z.string().min(1),
+  refreshToken: z.string().min(1),
+});
+
+export type RefreshTokenRequest = z.infer<typeof RefreshTokenRequestSchema>;
+export type RefreshTokenResponse = z.infer<typeof RefreshTokenResponseSchema>;

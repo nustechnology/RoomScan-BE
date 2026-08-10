@@ -109,6 +109,8 @@ export const environmentSchema = z
     RATE_LIMIT_API_MAX_REQUESTS: rateLimitMaxRequestsSchema.default(120),
     RATE_LIMIT_APPLE_AUTH_WINDOW_SECONDS: rateLimitWindowSecondsSchema.default(900),
     RATE_LIMIT_APPLE_AUTH_MAX_REQUESTS: rateLimitMaxRequestsSchema.default(20),
+    RATE_LIMIT_REFRESH_AUTH_WINDOW_SECONDS: rateLimitWindowSecondsSchema.default(900),
+    RATE_LIMIT_REFRESH_AUTH_MAX_REQUESTS: rateLimitMaxRequestsSchema.default(10),
     APPLE_CLIENT_ID: z.string().trim().min(1).max(255),
     AUTH_ACCESS_TOKEN_SECRET: z.string().min(32),
     AUTH_REFRESH_TOKEN_SECRET: z.string().min(32),
@@ -182,6 +184,8 @@ export interface AppConfig {
   apiRateLimitMaxRequests: number;
   appleAuthRateLimitWindowSeconds: number;
   appleAuthRateLimitMaxRequests: number;
+  refreshAuthRateLimitWindowSeconds: number;
+  refreshAuthRateLimitMaxRequests: number;
   appleClientId: string;
   accessTokenSecret: string;
   refreshTokenSecret: string;
@@ -221,6 +225,8 @@ export function loadConfig(input: NodeJS.ProcessEnv = process.env): AppConfig {
     apiRateLimitMaxRequests: environment.RATE_LIMIT_API_MAX_REQUESTS,
     appleAuthRateLimitWindowSeconds: environment.RATE_LIMIT_APPLE_AUTH_WINDOW_SECONDS,
     appleAuthRateLimitMaxRequests: environment.RATE_LIMIT_APPLE_AUTH_MAX_REQUESTS,
+    refreshAuthRateLimitWindowSeconds: environment.RATE_LIMIT_REFRESH_AUTH_WINDOW_SECONDS,
+    refreshAuthRateLimitMaxRequests: environment.RATE_LIMIT_REFRESH_AUTH_MAX_REQUESTS,
     appleClientId: environment.APPLE_CLIENT_ID,
     accessTokenSecret: environment.AUTH_ACCESS_TOKEN_SECRET,
     refreshTokenSecret: environment.AUTH_REFRESH_TOKEN_SECRET,

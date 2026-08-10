@@ -1,7 +1,12 @@
 import { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
 
 import { ErrorResponseSchema } from '../../common/schemas/error.js';
-import { AppleSignInRequestSchema, AppleSignInResponseSchema } from './auth.schemas.js';
+import {
+  AppleSignInRequestSchema,
+  AppleSignInResponseSchema,
+  RefreshTokenRequestSchema,
+  RefreshTokenResponseSchema,
+} from './auth.schemas.js';
 
 export const authOpenApiRegistry = new OpenAPIRegistry();
 
@@ -12,6 +17,14 @@ const appleSignInRequest = authOpenApiRegistry.register(
 const appleSignInResponse = authOpenApiRegistry.register(
   'AppleSignInResponse',
   AppleSignInResponseSchema,
+);
+const refreshTokenRequest = authOpenApiRegistry.register(
+  'RefreshTokenRequest',
+  RefreshTokenRequestSchema,
+);
+const refreshTokenResponse = authOpenApiRegistry.register(
+  'RefreshTokenResponse',
+  RefreshTokenResponseSchema,
 );
 const authErrorResponse = authOpenApiRegistry.register('AuthErrorResponse', ErrorResponseSchema);
 
@@ -104,6 +117,79 @@ authOpenApiRegistry.registerPath({
           },
         },
       },
+      content: {
+        'application/json': {
+          schema: authErrorResponse,
+        },
+      },
+    },
+  },
+});
+
+authOpenApiRegistry.registerPath({
+  method: 'post',
+  path: '/api/v1/auth/refresh',
+  tags: ['Auth'],
+  summary: 'Refresh an access token using a valid refresh token',
+  request: {
+    body: {
+      required: true,
+      content: {
+        'application/json': {
+          schema: refreshTokenRequest,
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: 'A new access and refresh token pair was issued',
+      headers: rateLimitHeaders,
+      content: {
+        'application/json': {
+          schema: refreshTokenResponse,
+        },
+      },
+    },
+    400: {
+      description: 'The request body is invalid',
+      headers: rateLimitHeaders,
+      content: {
+        'application/json': {
+          schema: authErrorResponse,
+        },
+      },
+    },
+    401: {
+      description: 'The refresh token is missing, expired, revoked, or otherwise invalid',
+      headers: rateLimitHeaders,
+      content: {
+        'application/json': {
+          schema: authErrorResponse,
+        },
+      },
+    },
+    429: {
+      description: 'The client exceeded the refresh-token rate limit',
+      headers: {
+        ...rateLimitHeaders,
+        'Retry-After': {
+          description: 'Seconds until the client may retry',
+          schema: {
+            type: 'integer',
+            minimum: 0,
+          },
+        },
+      },
+      content: {
+        'application/json': {
+          schema: authErrorResponse,
+        },
+      },
+    },
+    500: {
+      description: 'An internal server error occurred',
+      headers: rateLimitHeaders,
       content: {
         'application/json': {
           schema: authErrorResponse,

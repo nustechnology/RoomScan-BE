@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { SignJWT } from 'jose';
 
 import { TOKEN_AUDIENCE, TOKEN_ISSUER } from '../../config/constants.js';
-import type { AuthTokenIssuer, AuthTokenPair } from '../../modules/auth/auth.types.js';
+import type { AuthTokenIssuer, IssuedTokenPair } from '../../modules/auth/auth.types.js';
 
 export interface JoseAuthTokenIssuerOptions {
   accessTokenSecret: string;
@@ -36,8 +36,10 @@ export class JoseAuthTokenIssuer implements AuthTokenIssuer {
     this.#clock = clock;
   }
 
-  async issueTokens(userId: string): Promise<AuthTokenPair> {
+  async issueTokens(userId: string): Promise<IssuedTokenPair> {
     const issuedAt = Math.floor(this.#clock().getTime() / 1000);
+    const refreshTokenJti = randomUUID();
+    const refreshTokenExpiresAt = new Date((issuedAt + this.#refreshTokenTtlSeconds) * 1000);
     const [accessToken, refreshToken] = await Promise.all([
       this.#signToken(
         userId,
@@ -52,12 +54,15 @@ export class JoseAuthTokenIssuer implements AuthTokenIssuer {
         this.#refreshTokenSecret,
         issuedAt,
         this.#refreshTokenTtlSeconds,
+        refreshTokenJti,
       ),
     ]);
 
     return {
       accessToken,
       refreshToken,
+      refreshTokenJti,
+      refreshTokenExpiresAt,
     };
   }
 
@@ -67,13 +72,14 @@ export class JoseAuthTokenIssuer implements AuthTokenIssuer {
     secret: Uint8Array,
     issuedAt: number,
     ttlSeconds: number,
+    overrideJti?: string,
   ): Promise<string> {
     return new SignJWT({ tokenType })
       .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
       .setSubject(userId)
       .setIssuer(TOKEN_ISSUER)
       .setAudience(TOKEN_AUDIENCE)
-      .setJti(randomUUID())
+      .setJti(overrideJti ?? randomUUID())
       .setIssuedAt(issuedAt)
       .setExpirationTime(issuedAt + ttlSeconds)
       .sign(secret);
