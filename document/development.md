@@ -138,7 +138,12 @@ constraint, a unique `idempotencyKey`, and an index on `(scanId, status)`. The
 `scans` foreign key (`ON DELETE CASCADE`), a `users` creator foreign key
 (`ON DELETE RESTRICT`), a `position`/`orientation` JSONB pair, a
 `modelVersion` column, and indexes on `(scanId, updatedAt, id)` and
-`createdById`.
+`createdById`. The `add_invitations` migration creates the `InvitationStatus`
+enum and the `invitations` table (unique `tokenHash`, `status`, `expiresAt`,
+`sentAt`, `revokedAt`, project and creator foreign keys), and extends
+`project_accesses` with `invitationId`, `acceptedAt`, and `declinedAt` columns
+so each recipient's acceptance or decline is recorded on the same row that
+grants access.
 Tests use Prisma delegate doubles; native migration and endpoint verification
 use the PostgreSQL `db` container.
 

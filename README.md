@@ -91,35 +91,42 @@ the local PostgreSQL and MinIO data volumes.
 
 ## HTTP endpoints
 
-| Method   | Path                                                   | Purpose                                          |
-| -------- | ------------------------------------------------------ | ------------------------------------------------ |
-| `GET`    | `/api/v1/health`                                       | Liveness; does not query PostgreSQL              |
-| `GET`    | `/api/v1/ready`                                        | Readiness; verifies PostgreSQL with `SELECT 1`   |
-| `POST`   | `/api/v1/auth/apple`                                   | Authenticate with an Apple identity token        |
-| `POST`   | `/api/v1/auth/refresh`                                 | Rotate a RoomScan refresh token                  |
-| `POST`   | `/api/v1/projects`                                     | Create a project (Bearer token required)         |
-| `GET`    | `/api/v1/projects`                                     | List the authenticated user’s projects           |
-| `GET`    | `/api/v1/projects/:projectId`                          | Get a project as Owner or active Viewer          |
-| `PATCH`  | `/api/v1/projects/:projectId`                          | Update an owned project                          |
-| `DELETE` | `/api/v1/projects/:projectId`                          | Soft-delete an owned project                     |
-| `POST`   | `/api/v1/projects/:projectId/scans`                    | Create scan metadata (Owner only)                |
-| `GET`    | `/api/v1/projects/:projectId/scans`                    | List scans; Owner or active Viewer               |
-| `GET`    | `/api/v1/scans/:scanId`                                | Get scan detail; Owner or active Viewer          |
-| `PATCH`  | `/api/v1/scans/:scanId`                                | Update scan name/description (Owner only)        |
-| `DELETE` | `/api/v1/scans/:scanId`                                | Soft-delete a scan (Owner only)                  |
-| `POST`   | `/api/v1/scans/:scanId/assets/upload-sessions`         | Create an upload session (Owner only)            |
-| `POST`   | `/api/v1/upload-sessions/:uploadSessionId/complete`    | Mark an upload completed (Owner only)            |
-| `GET`    | `/api/v1/scans/:scanId/assets`                         | List scan asset metadata; Owner or active Viewer |
-| `GET`    | `/api/v1/scans/:scanId/assets/:assetType/download-url` | Download URL; Owner or active Viewer             |
-| `POST`   | `/api/v1/upload-sessions/:uploadSessionId/fail`        | Report an upload failure (Owner only)            |
-| `POST`   | `/api/v1/scans/:scanId/notes`                          | Create a note on a scan (Owner only)             |
-| `GET`    | `/api/v1/scans/:scanId/notes`                          | List notes; Owner or active Viewer               |
-| `GET`    | `/api/v1/notes/:noteId`                                | Get note detail; Owner or active Viewer          |
-| `PATCH`  | `/api/v1/notes/:noteId`                                | Update note content or color (Owner only)        |
-| `PATCH`  | `/api/v1/notes/:noteId/position`                       | Move a note to a new 3D position (Owner only)    |
-| `DELETE` | `/api/v1/notes/:noteId`                                | Delete a note (Owner only)                       |
-| `GET`    | `/api-doc`                                             | Interactive Swagger UI                           |
-| `GET`    | `/api-doc.json`                                        | Generated OpenAPI 3.1 document                   |
+| Method   | Path                                                   | Purpose                                                    |
+| -------- | ------------------------------------------------------ | ---------------------------------------------------------- |
+| `GET`    | `/api/v1/health`                                       | Liveness; does not query PostgreSQL                        |
+| `GET`    | `/api/v1/ready`                                        | Readiness; verifies PostgreSQL with `SELECT 1`             |
+| `POST`   | `/api/v1/auth/apple`                                   | Authenticate with an Apple identity token                  |
+| `POST`   | `/api/v1/auth/refresh`                                 | Rotate a RoomScan refresh token                            |
+| `POST`   | `/api/v1/projects`                                     | Create a project (Bearer token required)                   |
+| `GET`    | `/api/v1/projects`                                     | List the authenticated user’s projects                     |
+| `GET`    | `/api/v1/projects/:projectId`                          | Get a project as Owner or active Viewer                    |
+| `PATCH`  | `/api/v1/projects/:projectId`                          | Update an owned project                                    |
+| `DELETE` | `/api/v1/projects/:projectId`                          | Soft-delete an owned project                               |
+| `POST`   | `/api/v1/projects/:projectId/scans`                    | Create scan metadata (Owner only)                          |
+| `GET`    | `/api/v1/projects/:projectId/scans`                    | List scans; Owner or active Viewer                         |
+| `GET`    | `/api/v1/scans/:scanId`                                | Get scan detail; Owner or active Viewer                    |
+| `PATCH`  | `/api/v1/scans/:scanId`                                | Update scan name/description (Owner only)                  |
+| `DELETE` | `/api/v1/scans/:scanId`                                | Soft-delete a scan (Owner only)                            |
+| `POST`   | `/api/v1/scans/:scanId/assets/upload-sessions`         | Create an upload session (Owner only)                      |
+| `POST`   | `/api/v1/upload-sessions/:uploadSessionId/complete`    | Mark an upload completed (Owner only)                      |
+| `GET`    | `/api/v1/scans/:scanId/assets`                         | List scan asset metadata; Owner or active Viewer           |
+| `GET`    | `/api/v1/scans/:scanId/assets/:assetType/download-url` | Download URL; Owner or active Viewer                       |
+| `POST`   | `/api/v1/upload-sessions/:uploadSessionId/fail`        | Report an upload failure (Owner only)                      |
+| `POST`   | `/api/v1/scans/:scanId/notes`                          | Create a note on a scan (Owner only)                       |
+| `GET`    | `/api/v1/scans/:scanId/notes`                          | List notes; Owner or active Viewer                         |
+| `GET`    | `/api/v1/notes/:noteId`                                | Get note detail; Owner or active Viewer                    |
+| `PATCH`  | `/api/v1/notes/:noteId`                                | Update note content or color (Owner only)                  |
+| `PATCH`  | `/api/v1/notes/:noteId/position`                       | Move a note to a new 3D position (Owner only)              |
+| `DELETE` | `/api/v1/notes/:noteId`                                | Delete a note (Owner only)                                 |
+| `POST`   | `/api/v1/projects/:projectId/invitations`              | Create an invitation link (Owner only)                     |
+| `GET`    | `/api/v1/invitations/:token`                           | Preview an invitation (anonymous or optional Bearer)       |
+| `POST`   | `/api/v1/invitations/:token/accept`                    | Accept an invitation and gain Viewer access                |
+| `POST`   | `/api/v1/invitations/:token/decline`                   | Decline an invitation                                      |
+| `DELETE` | `/api/v1/invitations/:invitationId`                    | Revoke a pending invitation (Owner only)                   |
+| `GET`    | `/api/v1/projects/:projectId/shares`                   | List pending invitations and accepted Viewers (Owner only) |
+| `DELETE` | `/api/v1/projects/:projectId/shares/:userId`           | Revoke Viewer access (Owner only)                          |
+| `GET`    | `/api-doc`                                             | Interactive Swagger UI                                     |
+| `GET`    | `/api-doc.json`                                        | Generated OpenAPI 3.1 document                             |
 
 Errors use a stable envelope:
 
@@ -242,6 +249,19 @@ trimmed characters), color is a preset (`YELLOW`, `RED`, `BLUE`, `GREEN`,
 match the scan's current model version (`409` otherwise). Note content is never
 written to logs. Deleting a scan or project makes its notes inaccessible.
 
+Projects are shared through expiring invitation links. The Owner creates a link
+(`POST /api/v1/projects/:projectId/invitations`, optionally with
+`expiresInSeconds`) only after the project has at least one scan with an
+uploaded model, and receives an `invitationUrl` whose raw token is random and
+never stored (only its SHA-256 hash is). Recipients can preview the link without
+signing in, then accept to gain Viewer access or decline; the link remains
+usable by other recipients until revoked or expired. The Owner can list pending
+links and active Viewers (`GET /api/v1/projects/:projectId/shares`), revoke a
+pending link, and revoke a Viewer's access
+(`DELETE /api/v1/projects/:projectId/shares/:userId`). Revoked Viewers lose
+project, scan, note, and asset-download access immediately. Share management is
+Owner-only (`403 NOT_OWNER` for others).
+
 For nonce-bound sign-in, the client generates a raw nonce, sends its lowercase
 hexadecimal SHA-256 digest to Apple, and sends the raw nonce in the request
 above. If the identity token contains a `nonce` claim, the raw request nonce is
@@ -257,35 +277,37 @@ and `x-request-id`.
 
 ## Environment variables
 
-| Variable                                                 | Required | Default       | Description                                                         |
-| -------------------------------------------------------- | -------- | ------------- | ------------------------------------------------------------------- |
-| `NODE_ENV`                                               | No       | `development` | `development`, `staging`, `test` or `production`                    |
-| `PORT`                                                   | No       | `3000`        | HTTP port inside the process                                        |
-| `DATABASE_URL`                                           | Yes      | —             | PostgreSQL connection string                                        |
-| `LOG_LEVEL`                                              | No       | `info`        | Pino log level                                                      |
-| `CORS_ORIGIN`                                            | No       | `*`           | `*` or comma-separated allowed origins                              |
-| `TRUST_PROXY`                                            | No       | disabled      | Trusted hop count or comma-separated proxy IPs/CIDRs                |
-| `RATE_LIMIT_API_WINDOW_SECONDS`                          | No       | `60`          | General API rate-limit window                                       |
-| `RATE_LIMIT_API_MAX_REQUESTS`                            | No       | `120`         | Requests per IP in the general API window                           |
-| `RATE_LIMIT_APPLE_AUTH_WINDOW_SECONDS`                   | No       | `900`         | Apple sign-in rate-limit window                                     |
-| `RATE_LIMIT_APPLE_AUTH_MAX_REQUESTS`                     | No       | `20`          | Apple sign-in attempts per IP in its window                         |
-| `RATE_LIMIT_REFRESH_AUTH_WINDOW_SECONDS`                 | No       | `900`         | Token refresh rate-limit window                                     |
-| `RATE_LIMIT_REFRESH_AUTH_MAX_REQUESTS`                   | No       | `10`          | Token refresh attempts per IP in its window                         |
-| `APPLE_CLIENT_ID`                                        | Yes      | —             | Native app bundle identifier used as Apple `aud`                    |
-| `AUTH_ACCESS_TOKEN_SECRET`                               | Yes      | —             | HS256 access-token secret, at least 32 characters                   |
-| `AUTH_REFRESH_TOKEN_SECRET`                              | Yes      | —             | HS256 refresh-token secret, at least 32 characters                  |
-| `AUTH_ACCESS_TOKEN_TTL_SECONDS`                          | No       | `3600`        | RoomScan access-token lifetime                                      |
-| `AUTH_REFRESH_TOKEN_TTL_SECONDS`                         | No       | `2592000`     | RoomScan refresh-token lifetime                                     |
-| `LOCAL_TEST_AUTH_ENABLED`                                | No       | `false`       | Enable the seeded login only in `development`                       |
-| `STORAGE_PROVIDER`                                       | No       | `local`       | Storage adapter: `local` (dev/test fake) or `minio` (S3-compatible) |
-| `STORAGE_BUCKET` / `STORAGE_REGION` / `STORAGE_ENDPOINT` | No       | ``            | MinIO bucket, region, and `host[:port]` endpoint                    |
-| `STORAGE_ACCESS_KEY_ID` / `STORAGE_SECRET_ACCESS_KEY`    | No       | ``            | MinIO credentials; required with `STORAGE_PROVIDER=minio`           |
-| `STORAGE_USE_SSL`                                        | No       | `false`       | Use HTTPS instead of HTTP for the MinIO endpoint                    |
-| `STORAGE_UPLOAD_URL_TTL_SECONDS`                         | No       | `900`         | Signed upload URL lifetime                                          |
-| `STORAGE_DOWNLOAD_URL_TTL_SECONDS`                       | No       | `60`          | Signed download URL lifetime                                        |
-| `ASSET_MIN_MODEL_SIZE_BYTES`                             | No       | `10000000`    | Minimum model scan-file size (10 MB)                                |
-| `ASSET_MAX_MODEL_SIZE_BYTES`                             | No       | `100000000`   | Maximum model scan-file size (100 MB)                               |
-| `ASSET_MAX_THUMBNAIL_SIZE_BYTES`                         | No       | `10000000`    | Maximum thumbnail asset size                                        |
+| Variable                                                 | Required | Default                 | Description                                                         |
+| -------------------------------------------------------- | -------- | ----------------------- | ------------------------------------------------------------------- |
+| `NODE_ENV`                                               | No       | `development`           | `development`, `staging`, `test` or `production`                    |
+| `PORT`                                                   | No       | `3000`                  | HTTP port inside the process                                        |
+| `DATABASE_URL`                                           | Yes      | —                       | PostgreSQL connection string                                        |
+| `LOG_LEVEL`                                              | No       | `info`                  | Pino log level                                                      |
+| `CORS_ORIGIN`                                            | No       | `*`                     | `*` or comma-separated allowed origins                              |
+| `TRUST_PROXY`                                            | No       | disabled                | Trusted hop count or comma-separated proxy IPs/CIDRs                |
+| `RATE_LIMIT_API_WINDOW_SECONDS`                          | No       | `60`                    | General API rate-limit window                                       |
+| `RATE_LIMIT_API_MAX_REQUESTS`                            | No       | `120`                   | Requests per IP in the general API window                           |
+| `RATE_LIMIT_APPLE_AUTH_WINDOW_SECONDS`                   | No       | `900`                   | Apple sign-in rate-limit window                                     |
+| `RATE_LIMIT_APPLE_AUTH_MAX_REQUESTS`                     | No       | `20`                    | Apple sign-in attempts per IP in its window                         |
+| `RATE_LIMIT_REFRESH_AUTH_WINDOW_SECONDS`                 | No       | `900`                   | Token refresh rate-limit window                                     |
+| `RATE_LIMIT_REFRESH_AUTH_MAX_REQUESTS`                   | No       | `10`                    | Token refresh attempts per IP in its window                         |
+| `APPLE_CLIENT_ID`                                        | Yes      | —                       | Native app bundle identifier used as Apple `aud`                    |
+| `AUTH_ACCESS_TOKEN_SECRET`                               | Yes      | —                       | HS256 access-token secret, at least 32 characters                   |
+| `AUTH_REFRESH_TOKEN_SECRET`                              | Yes      | —                       | HS256 refresh-token secret, at least 32 characters                  |
+| `AUTH_ACCESS_TOKEN_TTL_SECONDS`                          | No       | `3600`                  | RoomScan access-token lifetime                                      |
+| `AUTH_REFRESH_TOKEN_TTL_SECONDS`                         | No       | `2592000`               | RoomScan refresh-token lifetime                                     |
+| `LOCAL_TEST_AUTH_ENABLED`                                | No       | `false`                 | Enable the seeded login only in `development`                       |
+| `STORAGE_PROVIDER`                                       | No       | `local`                 | Storage adapter: `local` (dev/test fake) or `minio` (S3-compatible) |
+| `STORAGE_BUCKET` / `STORAGE_REGION` / `STORAGE_ENDPOINT` | No       | ``                      | MinIO bucket, region, and `host[:port]` endpoint                    |
+| `STORAGE_ACCESS_KEY_ID` / `STORAGE_SECRET_ACCESS_KEY`    | No       | ``                      | MinIO credentials; required with `STORAGE_PROVIDER=minio`           |
+| `STORAGE_USE_SSL`                                        | No       | `false`                 | Use HTTPS instead of HTTP for the MinIO endpoint                    |
+| `STORAGE_UPLOAD_URL_TTL_SECONDS`                         | No       | `900`                   | Signed upload URL lifetime                                          |
+| `STORAGE_DOWNLOAD_URL_TTL_SECONDS`                       | No       | `60`                    | Signed download URL lifetime                                        |
+| `ASSET_MIN_MODEL_SIZE_BYTES`                             | No       | `10000000`              | Minimum model scan-file size (10 MB)                                |
+| `ASSET_MAX_MODEL_SIZE_BYTES`                             | No       | `100000000`             | Maximum model scan-file size (100 MB)                               |
+| `ASSET_MAX_THUMBNAIL_SIZE_BYTES`                         | No       | `10000000`              | Maximum thumbnail asset size                                        |
+| `INVITATION_TTL_SECONDS`                                 | No       | `604800`                | Default invitation-link lifetime (7 days)                           |
+| `INVITATION_BASE_URL`                                    | No       | `http://localhost:3000` | Client-facing base used to build `invitationUrl` links              |
 
 The remaining PostgreSQL, MinIO and `ROOMSCAN_PORT` values in `.env.example`
 configure Docker Compose. The refresh TTL must exceed the access TTL. Replace

@@ -7,10 +7,10 @@ API tests deterministic and prevents them from opening network ports.
 
 The current product-facing scope contains health checks, Apple Sign-In
 authentication with refresh-token rotation, Owner/Viewer project management,
-room-scan metadata, scan asset upload/download, and text notes anchored to scan
-models. The Prisma schema owns the `User`, `RefreshToken`, `Project`,
-`ProjectAccess`, `Scan`, `ScanAsset`, and `Note` models; Invitation behavior
-must not be inferred until its requirements are implemented.
+room-scan metadata, scan asset upload/download, text notes anchored to scan
+models, and project sharing through expiring invitation links. The Prisma
+schema owns the `User`, `RefreshToken`, `Project`, `ProjectAccess`, `Scan`,
+`ScanAsset`, `Note`, and `Invitation` models.
 
 ## Request flow
 
@@ -93,6 +93,13 @@ otherwise invalid tokens—and valid tokens whose subject no longer exists—are
 rejected with `401 UNAUTHORIZED`. Handlers read the authenticated user ID
 through `getUserId(request)`.
 
+An `optionalAuthenticate` variant uses the same verification but never rejects:
+a request without an `Authorization` header, or with a malformed or invalid
+token, proceeds anonymously without `request.locals`, while a valid token loads
+the current user as usual. The invitation preview endpoint uses it so the
+landing page works for anonymous recipients and still reports whether the
+current user already has access when a valid token is supplied.
+
 ## Project module
 
 The Project module provides authenticated project creation, owned-project
@@ -119,9 +126,9 @@ turn an already-applied update into a not-found response.
 
 Deletion marks `Project.deletedAt` and revokes active `ProjectAccess` records in
 one database transaction. A repeated deletion by the same Owner is idempotent.
-Physical cleanup remains outside this module. Invitation, Note, thumbnail,
-sync-state, and asset cleanup are not claimed here because their persistence
-models are not yet present on this branch.
+Physical cleanup remains outside this module. Note, thumbnail, sync-state, and
+asset cleanup are not claimed here because their persistence models are not yet
+present on this branch; invitation cleanup is owned by the Share module below.
 
 The owner relation uses `onDelete: Restrict` to prevent accidental project loss
 when a user is deleted. Project names are not unique per owner.
@@ -226,6 +233,48 @@ to logs; the error envelope returns only stable codes and messages. The
 repository derives the scan's real `noteCount` from note rows so scan list and
 detail reflect the note total.
 
+## Share module
+
+The Share module implements project sharing through expiring invitation links. It
+depends on a `ShareRepository` (an `InvitationRepository`-style interface that
+also manages Viewer access records), a `clock`, the configured invitation TTL
+(`INVITATION_TTL_SECONDS`), and the client-facing base URL
+(`INVITATION_BASE_URL`). Share management (create, list, revoke) is Owner-only;
+a non-owner receives `403 NOT_OWNER`, while a missing or deleted project returns
+`404 PROJECT_NOT_FOUND`.
+
+An `Invitation` row is a link record: `tokenHash` (SHA-256 of the raw token;
+the raw token is never stored), `status` (`PENDING` or `REVOKED`), `expiresAt`,
+`sentAt`, and `revokedAt`. The raw token is 32 random bytes encoded as base64url
+and the `invitationUrl` returned to the owner is
+`{INVITATION_BASE_URL}/invitations/{rawToken}`. Links are multi-recipient: any
+number of distinct users may accept the same link, each receiving their own
+Viewer access, and an accepted project can be listed by the current user on a
+planned shared-with-me endpoint.
+
+Per-recipient outcomes live on `ProjectAccess`: an accepted recipient has an
+active row (`revokedAt` null, `acceptedAt` set, `invitationId` set); a declining
+recipient creates an inactive row with `declinedAt` and `revokedAt` set. The
+`@@unique([projectId, userId])` constraint guarantees at most one access row per
+project per user, so accepting can never create a duplicate. A user with an
+active access row cannot accept or decline again (`409 ACCESS_ALREADY_EXISTS`),
+a user who declined a link cannot later accept it (`409 INVITATION_DECLINED`),
+and the project Owner cannot accept or decline (`409
+CANNOT_ACCEPT_OWN_INVITATION`). Revoked (`409 INVITATION_REVOKED`) or expired
+(`409 INVITATION_EXPIRED`) links cannot be accepted or declined; expired links
+also cannot be revoked (`409 INVITATION_EXPIRED`), while revoking an already
+revoked link is idempotent.
+
+Preview (`GET /invitations/:token`) requires no authentication and returns the
+link status (`PENDING`, `EXPIRED`, or `REVOKED`) plus a safe project summary;
+when a valid Bearer token is supplied it additionally reports `hasAccess`. A
+project is only shareable once it has at least one non-deleted scan with an
+uploaded model (`assetStatus = UPLOADED`); otherwise creating an invitation
+returns `409 PROJECT_NOT_SHAREABLE`. Revoking a Viewer simply sets `revokedAt`;
+downstream enforcement that revoked Viewers lose project, scan, note, and asset
+download access is inherited from the shared `ProjectPermissionService` access
+lookup, which filters on active (`revokedAt: null`) access on every request.
+
 ## Storage
 
 `src/infrastructure/storage` defines a narrow `StorageAdapter` interface
@@ -301,17 +350,21 @@ trusted IP/CIDR topology rather than trusting every proxy.
 The composition root creates one Prisma Client and injects it into the database
 health/lifecycle adapter, the Apple user repository, the current-user
 repository, the project repository, the scan repository, the scan-asset
-repository, the refresh-token repository, and the note repository, plus the
-storage adapter. It also creates the three rate-limit middleware instances, the
-access-token and refresh-token verifiers, the project permission service, the
-project service, the scan service, the scan-asset service, the refresh-token
-service, and the note service once per process. Product modules never import the
-Prisma client directly. The unique provider identity constraint makes
-concurrent first-time Apple logins idempotent at the database boundary. The
-projects table has a foreign key to users with `onDelete: Restrict`; project
-access has unique `(projectId, userId)` membership and revocation state. Notes
-belong to a scan with `onDelete: Cascade` and to a creator with
-`onDelete: Restrict`.
+repository, the refresh-token repository, the note repository, and the share
+repository, plus the storage adapter. It also creates the three rate-limit
+middleware instances, the access-token and refresh-token verifiers, the project
+permission service, the project service, the scan service, the scan-asset
+service, the refresh-token service, the note service, and the share service once
+per process. Product modules never import the Prisma client directly. The unique
+provider identity constraint makes concurrent first-time Apple logins idempotent
+at the database boundary. The projects table has a foreign key to users with
+`onDelete: Restrict`; project access has unique `(projectId, userId)` membership
+and revocation state plus optional invitation acceptance/decline timestamps.
+Notes belong to a scan with `onDelete: Cascade` and to a creator with
+`onDelete: Restrict`. Invitations belong to a project with `onDelete: Cascade`
+and to a creator with `onDelete: Restrict`; their `tokenHash` is unique and the
+access rows referencing them use `onDelete: SetNull` so revoking an invitation
+never orphans Viewer access.
 
 ## Lifecycle
 

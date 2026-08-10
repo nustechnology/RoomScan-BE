@@ -30,6 +30,7 @@ import type { ProjectService } from '../src/modules/project/project.service.js';
 import type { ScanService } from '../src/modules/scan/scan.service.js';
 import type { ScanAssetService } from '../src/modules/scan-asset/scan-asset.service.js';
 import type { NoteService } from '../src/modules/note/note.service.js';
+import type { ShareService } from '../src/modules/share/share.service.js';
 
 const config: AppConfig = {
   nodeEnv: 'test',
@@ -62,6 +63,8 @@ const config: AppConfig = {
   assetMinModelSizeBytes: 10_000_000,
   assetMaxModelSizeBytes: 500_000_000,
   assetMaxThumbnailSizeBytes: 10_000_000,
+  invitationTtlSeconds: 604_800,
+  invitationBaseUrl: 'http://localhost:3000',
 };
 
 const clock = () => new Date('2026-07-23T07:00:00.000Z');
@@ -121,6 +124,15 @@ describe('RoomScan HTTP application', () => {
     move: vi.fn(),
     delete: vi.fn(),
   } as unknown as NoteService;
+  const shareService = {
+    createInvitation: vi.fn(),
+    previewInvitation: vi.fn(),
+    acceptInvitation: vi.fn(),
+    declineInvitation: vi.fn(),
+    revokeInvitation: vi.fn(),
+    listShares: vi.fn(),
+    revokeViewer: vi.fn(),
+  } as unknown as ShareService;
 
   const app = createApp({
     config,
@@ -132,6 +144,7 @@ describe('RoomScan HTTP application', () => {
     scanService,
     scanAssetService,
     noteService,
+    shareService,
     accessTokenVerifier,
     currentUserRepository,
     rateLimiters,
@@ -180,6 +193,7 @@ describe('RoomScan HTTP application', () => {
       scanService,
       scanAssetService,
       noteService,
+      shareService,
       accessTokenVerifier,
       currentUserRepository,
       rateLimiters,

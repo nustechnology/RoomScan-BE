@@ -16,6 +16,7 @@ import type { ProjectService } from '../src/modules/project/project.service.js';
 import type { ScanService } from '../src/modules/scan/scan.service.js';
 import type { ScanAssetService } from '../src/modules/scan-asset/scan-asset.service.js';
 import type { NoteService } from '../src/modules/note/note.service.js';
+import type { ShareService } from '../src/modules/share/share.service.js';
 
 const baseConfig: AppConfig = {
   nodeEnv: 'test',
@@ -48,6 +49,8 @@ const baseConfig: AppConfig = {
   assetMinModelSizeBytes: 10_000_000,
   assetMaxModelSizeBytes: 500_000_000,
   assetMaxThumbnailSizeBytes: 10_000_000,
+  invitationTtlSeconds: 604_800,
+  invitationBaseUrl: 'http://localhost:3000',
 };
 
 function createTestApp(overrides: Partial<AppConfig> = {}, stores: RateLimitStores = {}) {
@@ -110,6 +113,15 @@ function createTestApp(overrides: Partial<AppConfig> = {}, stores: RateLimitStor
     move: vi.fn(),
     delete: vi.fn(),
   } as unknown as NoteService;
+  const shareService = {
+    createInvitation: vi.fn(),
+    previewInvitation: vi.fn(),
+    acceptInvitation: vi.fn(),
+    declineInvitation: vi.fn(),
+    revokeInvitation: vi.fn(),
+    listShares: vi.fn(),
+    revokeViewer: vi.fn(),
+  } as unknown as ShareService;
   const rateLimiters = createRateLimiters(config, logger, stores);
   const app = createApp({
     config,
@@ -124,6 +136,7 @@ function createTestApp(overrides: Partial<AppConfig> = {}, stores: RateLimitStor
     scanService,
     scanAssetService,
     noteService,
+    shareService,
     accessTokenVerifier,
     currentUserRepository,
     rateLimiters,

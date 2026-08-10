@@ -49,6 +49,8 @@ describe('loadConfig', () => {
       assetMinModelSizeBytes: 10_000_000,
       assetMaxModelSizeBytes: 100_000_000,
       assetMaxThumbnailSizeBytes: 10_000_000,
+      invitationTtlSeconds: 604_800,
+      invitationBaseUrl: 'http://localhost:3000',
     });
   });
 
@@ -324,4 +326,28 @@ describe('loadConfig', () => {
       }),
     ).toThrow(/greater than ASSET_MIN_MODEL_SIZE_BYTES/);
   });
+
+  it('parses the configured invitation settings', () => {
+    const config = loadConfig({
+      ...validEnvironment,
+      INVITATION_TTL_SECONDS: '1209600',
+      INVITATION_BASE_URL: 'https://invite.roomscan.dev/',
+    });
+
+    expect(config.invitationTtlSeconds).toBe(1_209_600);
+    expect(config.invitationBaseUrl).toBe('https://invite.roomscan.dev');
+  });
+
+  it.each(['', 'not-a-url', '0', '-1', '1.5'])(
+    'rejects an invalid invitation TTL or base URL value: %s',
+    (value) => {
+      expect(() =>
+        loadConfig({
+          ...validEnvironment,
+          INVITATION_TTL_SECONDS: value,
+          INVITATION_BASE_URL: value,
+        }),
+      ).toThrow(ZodError);
+    },
+  );
 });

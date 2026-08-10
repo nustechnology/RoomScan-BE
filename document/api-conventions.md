@@ -15,6 +15,13 @@
 - Notes are `POST` and `GET` at `/api/v1/scans/:scanId/notes`, and `GET`,
   `PATCH`, and `DELETE` at `/api/v1/notes/:noteId`, with the move operation at
   `PATCH /api/v1/notes/:noteId/position`.
+- Sharing creates and revokes invitation links at
+  `POST /api/v1/projects/:projectId/invitations` and
+  `DELETE /api/v1/invitations/:invitationId`; recipients preview, accept, and
+  decline at `GET`, `POST`, and `POST` under `/api/v1/invitations/:token`; and
+  share management lists and revokes Viewer access at
+  `GET /api/v1/projects/:projectId/shares` and
+  `DELETE /api/v1/projects/:projectId/shares/:userId`.
 - Swagger UI remains at `/api-doc`; raw OpenAPI is `/api-doc.json`.
 - Resource paths use plural nouns and kebab-case when business modules arrive.
 
@@ -606,6 +613,195 @@ Error behavior:
 - `429 RATE_LIMIT_EXCEEDED`: API quota exceeded.
 - `500 INTERNAL_SERVER_ERROR`: unexpected failure without Prisma, SQL, note
   content, or secret leakage.
+
+## Sharing and invitations
+
+Projects are shared through expiring invitation links. An owner creates a link
+for a project and shares the resulting URL; any number of distinct users may
+accept it, each receiving Viewer access, or decline it for themselves. Links are
+multi-recipient and remain `PENDING` until revoked or expired. The raw token is
+an opaque, random base64url string of 32 bytes; only its SHA-256 hash is stored,
+so a leaked database never exposes a usable link. A project is shareable only
+when it has at least one non-deleted scan with an uploaded model
+(`assetStatus = UPLOADED`).
+
+| Method   | Endpoint                                     | Result                                                    |
+| -------- | -------------------------------------------- | --------------------------------------------------------- |
+| `POST`   | `/api/v1/projects/:projectId/invitations`    | Create an invitation link; Owner only; return `201`       |
+| `GET`    | `/api/v1/invitations/:token`                 | Preview an invitation; anonymous or optional Bearer       |
+| `POST`   | `/api/v1/invitations/:token/accept`          | Accept and gain Viewer access; return `200`               |
+| `POST`   | `/api/v1/invitations/:token/decline`         | Decline for the current user; return `200`                |
+| `DELETE` | `/api/v1/invitations/:invitationId`          | Revoke a pending invitation; Owner only; return `200`     |
+| `GET`    | `/api/v1/projects/:projectId/shares`         | List pending invitations and accepted Viewers; Owner only |
+| `DELETE` | `/api/v1/projects/:projectId/shares/:userId` | Revoke Viewer access; Owner only; return `200`            |
+
+Create invitation body:
+
+```json
+{ "expiresInSeconds": 604800 }
+```
+
+`expiresInSeconds` is optional; it defaults to the configured
+`INVITATION_TTL_SECONDS` and must be between 60 and 2,592,000 (30 days).
+Create response `201`:
+
+```json
+{
+  "invitationId": "b1a2c3d4-e5f6-4890-abcd-ef1234567890",
+  "invitationUrl": "https://invite.roomscan.dev/invitations/AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-ab",
+  "expiresAt": "2026-08-05T10:00:00.000Z",
+  "status": "PENDING"
+}
+```
+
+`invitationUrl` is `{INVITATION_BASE_URL}/invitations/{rawToken}`.
+
+Preview `200` (anonymous; `hasAccess` is present only when a valid Bearer token
+is supplied and reports whether that user already has active access):
+
+```json
+{
+  "project": {
+    "id": "a1b2c3d4-e5f6-4890-abcd-ef1234567890",
+    "name": "District 2 Apartment",
+    "description": null,
+    "thumbnail": null
+  },
+  "status": "PENDING",
+  "sentAt": "2026-07-29T10:00:00.000Z",
+  "expiresAt": "2026-08-05T10:00:00.000Z",
+  "hasAccess": false
+}
+```
+
+`status` is `PENDING`, `EXPIRED`, or `REVOKED`.
+
+Accept `200`:
+
+```json
+{
+  "project": {
+    "id": "a1b2c3d4-e5f6-4890-abcd-ef1234567890",
+    "name": "District 2 Apartment",
+    "description": null,
+    "thumbnail": null,
+    "owner": {
+      "id": "eb5d278f-c857-45c7-887d-7be65288cb75",
+      "email": "owner@example.com"
+    }
+  },
+  "access": {
+    "role": "VIEWER",
+    "status": "ACTIVE",
+    "grantedAt": "2026-07-29T10:00:00.000Z"
+  }
+}
+```
+
+Decline `200`:
+
+```json
+{
+  "invitationId": "b1a2c3d4-e5f6-4890-abcd-ef1234567890",
+  "status": "DECLINED",
+  "declinedAt": "2026-07-29T10:00:00.000Z"
+}
+```
+
+Revoke invitation `200`:
+
+```json
+{
+  "invitationId": "b1a2c3d4-e5f6-4890-abcd-ef1234567890",
+  "status": "REVOKED",
+  "revokedAt": "2026-07-29T10:00:00.000Z"
+}
+```
+
+List shares `200`:
+
+```json
+{
+  "pendingInvitations": [
+    {
+      "invitationId": "b1a2c3d4-e5f6-4890-abcd-ef1234567890",
+      "status": "PENDING",
+      "sentAt": "2026-07-29T10:00:00.000Z",
+      "expiresAt": "2026-08-05T10:00:00.000Z"
+    }
+  ],
+  "viewers": [
+    {
+      "userId": "f1a2b3c4-d5e6-7890-abcd-ef1234567890",
+      "recipientUser": {
+        "id": "f1a2b3c4-d5e6-7890-abcd-ef1234567890",
+        "email": "recipient@example.com"
+      },
+      "grantedAt": "2026-07-29T10:00:00.000Z"
+    }
+  ]
+}
+```
+
+`pendingInvitations` includes every `PENDING` link (labelled `EXPIRED` once past
+`expiresAt`) so the owner can still revoke stale links. `viewers` lists active
+(`revokedAt` null) Viewer access records with the recipient and the date access
+was granted.
+
+Revoke Viewer access `200`:
+
+```json
+{
+  "projectId": "a1b2c3d4-e5f6-4890-abcd-ef1234567890",
+  "userId": "f1a2b3c4-d5e6-7890-abcd-ef1234567890",
+  "revokedAt": "2026-07-29T10:00:00.000Z"
+}
+```
+
+Validation rules:
+
+- `projectId`, `userId`, `invitationId`: UUID.
+- `token`: exactly 43 characters from the base64url alphabet; anything else is
+  malformed.
+- `expiresInSeconds`: optional integer, 60 to 2,592,000; unknown fields are
+  rejected.
+
+Business rules:
+
+- Only the project Owner creates invitations and manages shares; a non-owner
+  receives `403 NOT_OWNER`. Viewers cannot share a project again.
+- Invitation links grant Viewer role only.
+- A project is shareable only after it has at least one uploaded scan model.
+- An invitation can be revoked before acceptance; revocation is idempotent.
+- Expired and revoked invitations cannot be accepted or declined.
+- Accepting must not create duplicate Viewer access: at most one access record
+  exists per `(project, user)`.
+- The project Owner cannot accept or decline their own invitation.
+- A user who already has active access cannot accept or decline again; a user
+  who declined a link cannot later accept the same link.
+- Revoking a Viewer removes project, scan, note, and asset download access
+  immediately because every module's permission lookup ignores
+  `revokedAt`-non-null access.
+
+Error behavior:
+
+- `400 VALIDATION_ERROR`: malformed token, invalid body, or invalid path/query.
+- `401 UNAUTHORIZED`: missing/invalid access token where authentication is
+  required (accept, decline, and all Owner-only endpoints).
+- `403 NOT_OWNER`: a non-owner attempts share management.
+- `404 PROJECT_NOT_FOUND`: project missing, deleted, or inaccessible.
+- `404 INVITATION_NOT_FOUND`: unknown token or invitation, or the invitation's
+  project was deleted.
+- `404 ACCESS_NOT_FOUND`: no access record exists for the user being unshared.
+- `409 INVITATION_EXPIRED`: the link is past its expiry.
+- `409 INVITATION_REVOKED`: the link was revoked.
+- `409 INVITATION_DECLINED`: the user already declined this link.
+- `409 ACCESS_ALREADY_EXISTS`: the user already has active access.
+- `409 CANNOT_ACCEPT_OWN_INVITATION`: the project Owner acts on their own link.
+- `409 PROJECT_NOT_SHAREABLE`: the project has no uploaded scan model yet.
+- `429 RATE_LIMIT_EXCEEDED`: API quota exceeded.
+- `500 INTERNAL_SERVER_ERROR`: unexpected failure without Prisma, SQL, token, or
+  secret leakage.
 
 ## Health semantics
 

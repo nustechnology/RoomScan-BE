@@ -129,6 +129,14 @@ export const environmentSchema = z
     ASSET_MIN_MODEL_SIZE_BYTES: z.coerce.number().int().positive().default(10_000_000),
     ASSET_MAX_MODEL_SIZE_BYTES: z.coerce.number().int().positive().default(100_000_000),
     ASSET_MAX_THUMBNAIL_SIZE_BYTES: z.coerce.number().int().positive().default(10_000_000),
+    INVITATION_TTL_SECONDS: z.coerce.number().int().positive().default(604_800),
+    INVITATION_BASE_URL: z
+      .string()
+      .trim()
+      .min(1)
+      .url()
+      .default('http://localhost:3000')
+      .transform((value) => value.replace(/\/+$/, '')),
   })
   .superRefine((environment, context) => {
     if (environment.AUTH_REFRESH_TOKEN_TTL_SECONDS <= environment.AUTH_ACCESS_TOKEN_TTL_SECONDS) {
@@ -213,6 +221,8 @@ export interface AppConfig {
   assetMinModelSizeBytes: number;
   assetMaxModelSizeBytes: number;
   assetMaxThumbnailSizeBytes: number;
+  invitationTtlSeconds: number;
+  invitationBaseUrl: string;
 }
 
 export function loadConfig(input: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -255,5 +265,7 @@ export function loadConfig(input: NodeJS.ProcessEnv = process.env): AppConfig {
     assetMinModelSizeBytes: environment.ASSET_MIN_MODEL_SIZE_BYTES,
     assetMaxModelSizeBytes: environment.ASSET_MAX_MODEL_SIZE_BYTES,
     assetMaxThumbnailSizeBytes: environment.ASSET_MAX_THUMBNAIL_SIZE_BYTES,
+    invitationTtlSeconds: environment.INVITATION_TTL_SECONDS,
+    invitationBaseUrl: environment.INVITATION_BASE_URL,
   };
 }

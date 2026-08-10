@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { Prisma, type PrismaClient } from '../src/generated/prisma/client.js';
-import { LOCAL_TEST_USER_ID } from '../src/config/constants.js';
+import { LOCAL_TEST_USER_ID, LOCAL_TEST_VIEWER_ID } from '../src/config/constants.js';
 import {
+  LOCAL_TEST_INVITATION_ID,
   LOCAL_TEST_NOTES,
   LOCAL_TEST_PROJECT_ID,
   LOCAL_TEST_PROJECT_NAME,
@@ -15,24 +16,31 @@ describe('seedLocalTestProject', () => {
     const projectUpsert = vi.fn().mockResolvedValue({});
     const scanUpsert = vi.fn().mockResolvedValue({});
     const noteUpsert = vi.fn().mockResolvedValue({});
+    const projectAccessUpsert = vi.fn().mockResolvedValue({});
+    const invitationUpsert = vi.fn().mockResolvedValue({});
     const transaction = vi.fn(async (operation: unknown) => {
       return (
         operation as (tx: {
           project: { upsert: typeof projectUpsert };
           scan: { upsert: typeof scanUpsert };
           note: { upsert: typeof noteUpsert };
+          projectAccess: { upsert: typeof projectAccessUpsert };
+          invitation: { upsert: typeof invitationUpsert };
         }) => Promise<unknown>
       )({
         project: { upsert: projectUpsert },
         scan: { upsert: scanUpsert },
         note: { upsert: noteUpsert },
+        projectAccess: { upsert: projectAccessUpsert },
+        invitation: { upsert: invitationUpsert },
       });
     });
     const client = {
       $transaction: transaction,
     } as unknown as Pick<PrismaClient, '$transaction'>;
 
-    await expect(seedLocalTestProject(client)).resolves.toBeUndefined();
+    const { invitationUrl } = await seedLocalTestProject(client);
+    expect(invitationUrl).toContain('http://localhost:3000/invitations/');
 
     expect(projectUpsert).toHaveBeenCalledWith({
       where: { id: LOCAL_TEST_PROJECT_ID },
@@ -100,6 +108,65 @@ describe('seedLocalTestProject', () => {
         },
       });
     }
+
+    expect(projectAccessUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          projectId_userId: {
+            projectId: LOCAL_TEST_PROJECT_ID,
+            userId: LOCAL_TEST_VIEWER_ID,
+          },
+        },
+      }),
+    );
+    const accessCreate = (
+      projectAccessUpsert.mock.calls[0]?.[0] as {
+        create: {
+          projectId: string;
+          userId: string;
+          role: string;
+          acceptedAt: Date;
+          declinedAt: null;
+          revokedAt: null;
+        };
+      }
+    ).create;
+    expect(accessCreate).toMatchObject({
+      projectId: LOCAL_TEST_PROJECT_ID,
+      userId: LOCAL_TEST_VIEWER_ID,
+      role: 'VIEWER',
+      declinedAt: null,
+      revokedAt: null,
+    });
+    expect(accessCreate.acceptedAt).toBeInstanceOf(Date);
+
+    expect(invitationUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: LOCAL_TEST_INVITATION_ID },
+      }),
+    );
+    const invitationCreate = (
+      invitationUpsert.mock.calls[0]?.[0] as {
+        create: {
+          id: string;
+          projectId: string;
+          createdById: string;
+          tokenHash: string;
+          status: string;
+          expiresAt: Date;
+          sentAt: Date;
+        };
+      }
+    ).create;
+    expect(invitationCreate).toMatchObject({
+      id: LOCAL_TEST_INVITATION_ID,
+      projectId: LOCAL_TEST_PROJECT_ID,
+      createdById: LOCAL_TEST_USER_ID,
+      status: 'PENDING',
+    });
+    expect(invitationCreate.tokenHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(invitationCreate.expiresAt).toBeInstanceOf(Date);
+    expect(invitationCreate.sentAt).toBeInstanceOf(Date);
 
     expect(transaction).toHaveBeenCalledOnce();
   });

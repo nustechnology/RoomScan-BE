@@ -15,6 +15,7 @@ import { PrismaProjectRepository } from './infrastructure/database/prisma-projec
 import { PrismaScanRepository } from './infrastructure/database/prisma-scan-repository.js';
 import { PrismaScanAssetRepository } from './infrastructure/database/prisma-scan-asset-repository.js';
 import { PrismaNoteRepository } from './infrastructure/database/prisma-note-repository.js';
+import { PrismaShareRepository } from './infrastructure/database/prisma-share-repository.js';
 import { LocalStorageAdapter } from './infrastructure/storage/local-storage-adapter.js';
 import { MinioStorageAdapter } from './infrastructure/storage/minio-storage-adapter.js';
 import type { StorageAdapter } from './infrastructure/storage/storage.types.js';
@@ -25,6 +26,7 @@ import { ProjectService } from './modules/project/project.service.js';
 import { ScanService } from './modules/scan/scan.service.js';
 import { ScanAssetService } from './modules/scan-asset/scan-asset.service.js';
 import { NoteService } from './modules/note/note.service.js';
+import { ShareService } from './modules/share/share.service.js';
 
 const config = loadConfig();
 const logger = createLogger(config);
@@ -36,6 +38,7 @@ const projectRepository = new PrismaProjectRepository(prismaClient);
 const scanRepository = new PrismaScanRepository(prismaClient);
 const scanAssetRepository = new PrismaScanAssetRepository(prismaClient);
 const noteRepository = new PrismaNoteRepository(prismaClient);
+const shareRepository = new PrismaShareRepository(prismaClient);
 function createStorageAdapter(): StorageAdapter {
   if (config.storageProvider === 'minio') {
     return new MinioStorageAdapter({
@@ -102,6 +105,11 @@ const noteService = new NoteService({
   repository: noteRepository,
   permissions: projectPermissions,
 });
+const shareService = new ShareService({
+  repository: shareRepository,
+  invitationTtlSeconds: config.invitationTtlSeconds,
+  invitationBaseUrl: config.invitationBaseUrl,
+});
 const rateLimiters = createRateLimiters(config, logger);
 const app = createApp({
   config,
@@ -113,6 +121,7 @@ const app = createApp({
   scanService,
   scanAssetService,
   noteService,
+  shareService,
   accessTokenVerifier,
   currentUserRepository,
   rateLimiters,

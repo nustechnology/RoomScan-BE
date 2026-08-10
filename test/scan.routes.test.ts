@@ -24,6 +24,7 @@ import type { ScanService } from '../src/modules/scan/scan.service.js';
 import type { ScanResult } from '../src/modules/scan/scan.types.js';
 import type { ScanAssetService } from '../src/modules/scan-asset/scan-asset.service.js';
 import type { NoteService } from '../src/modules/note/note.service.js';
+import type { ShareService } from '../src/modules/share/share.service.js';
 import type { ProjectService } from '../src/modules/project/project.service.js';
 
 const ACCESS_SECRET = 'access-secret-that-is-at-least-32-characters';
@@ -64,6 +65,8 @@ const config: AppConfig = {
   assetMinModelSizeBytes: 10_000_000,
   assetMaxModelSizeBytes: 500_000_000,
   assetMaxThumbnailSizeBytes: 10_000_000,
+  invitationTtlSeconds: 604_800,
+  invitationBaseUrl: 'http://localhost:3000',
 };
 
 function scanResult(overrides: Partial<ScanResult> = {}): ScanResult {
@@ -167,6 +170,15 @@ describe('Scan HTTP endpoints', () => {
     move: vi.fn(),
     delete: vi.fn(),
   } as unknown as NoteService;
+  const shareService = {
+    createInvitation: vi.fn(),
+    previewInvitation: vi.fn(),
+    acceptInvitation: vi.fn(),
+    declineInvitation: vi.fn(),
+    revokeInvitation: vi.fn(),
+    listShares: vi.fn(),
+    revokeViewer: vi.fn(),
+  } as unknown as ShareService;
   const app = createApp({
     config,
     database,
@@ -177,6 +189,7 @@ describe('Scan HTTP endpoints', () => {
     scanService,
     scanAssetService,
     noteService,
+    shareService,
     accessTokenVerifier,
     currentUserRepository,
     rateLimiters,

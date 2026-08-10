@@ -5,8 +5,13 @@ import {
   LOCAL_TEST_APPLE_PROVIDER_ID,
   LOCAL_TEST_USER_EMAIL,
   LOCAL_TEST_USER_ID,
+  LOCAL_TEST_VIEWER_EMAIL,
+  LOCAL_TEST_VIEWER_ID,
 } from '../src/config/constants.js';
-import { seedLocalTestUser } from '../src/infrastructure/database/local-test-user-seed.js';
+import {
+  seedLocalTestUser,
+  seedLocalTestViewer,
+} from '../src/infrastructure/database/local-test-user-seed.js';
 
 describe('seedLocalTestUser', () => {
   it('idempotently creates or refreshes the fixed local Apple user', async () => {
@@ -38,6 +43,44 @@ describe('seedLocalTestUser', () => {
       },
       update: {
         email: LOCAL_TEST_USER_EMAIL,
+        emailVerified: true,
+      },
+      select: {
+        id: true,
+        email: true,
+      },
+    });
+  });
+
+  it('idempotently creates or refreshes the fixed local demo viewer', async () => {
+    const upsert = vi.fn().mockResolvedValue({
+      id: LOCAL_TEST_VIEWER_ID,
+      email: LOCAL_TEST_VIEWER_EMAIL,
+    });
+    const client = {
+      user: { upsert },
+    } as unknown as Pick<PrismaClient, 'user'>;
+
+    await expect(seedLocalTestViewer(client)).resolves.toEqual({
+      id: LOCAL_TEST_VIEWER_ID,
+      email: LOCAL_TEST_VIEWER_EMAIL,
+    });
+    expect(upsert).toHaveBeenCalledWith({
+      where: {
+        provider_providerId: {
+          provider: 'APPLE',
+          providerId: `${LOCAL_TEST_VIEWER_ID}-viewer`,
+        },
+      },
+      create: {
+        id: LOCAL_TEST_VIEWER_ID,
+        provider: 'APPLE',
+        providerId: `${LOCAL_TEST_VIEWER_ID}-viewer`,
+        email: LOCAL_TEST_VIEWER_EMAIL,
+        emailVerified: true,
+      },
+      update: {
+        email: LOCAL_TEST_VIEWER_EMAIL,
         emailVerified: true,
       },
       select: {

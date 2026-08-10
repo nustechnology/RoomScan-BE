@@ -35,6 +35,8 @@ function makeConfig(logLevel: AppConfig['logLevel']): AppConfig {
     assetMinModelSizeBytes: 10_000_000,
     assetMaxModelSizeBytes: 500_000_000,
     assetMaxThumbnailSizeBytes: 10_000_000,
+    invitationTtlSeconds: 604_800,
+    invitationBaseUrl: 'http://localhost:3000',
   };
 }
 
