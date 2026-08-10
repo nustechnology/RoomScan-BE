@@ -418,7 +418,9 @@ Behavior and rules:
   unsigned URLs, does not persist bytes, and is restricted to non-production
   environments (`NODE_ENV=production` rejects `STORAGE_PROVIDER=local`). The
   `minio` provider mints presigned S3 URLs whose expiry is enforced by MinIO
-  and verifies uploaded objects before completion.
+  and, before completion, verifies that the uploaded object exists and that its
+  stored size and content type exactly match the session's declared
+  `contentType` and `sizeBytes`.
 
 Error behavior:
 
@@ -429,7 +431,8 @@ Error behavior:
 - `404 ASSET_NOT_FOUND`: asset record missing or inaccessible.
 - `409 ASSET_NOT_READY`: asset has not been uploaded yet.
 - `409 UPLOAD_SESSION_EXPIRED`: upload session expired before completion.
-- `409 ASSET_UPLOAD_FAILED`: the store could not verify the uploaded object.
+- `409 ASSET_UPLOAD_FAILED`: the uploaded object is missing or its stored size
+  or content type does not match the session.
 - `503 STORAGE_UNAVAILABLE`: the storage provider is unavailable.
 - `429 RATE_LIMIT_EXCEEDED`: API quota exceeded.
 - `500 INTERNAL_SERVER_ERROR`: unexpected failure without Prisma, SQL, or secret

@@ -39,6 +39,11 @@ describe('LocalStorageAdapter', () => {
   it('cannot verify objects independently and assumes the upload is valid', async () => {
     const adapter = new LocalStorageAdapter();
 
-    await expect(adapter.verifyObject('scans/scan-1/model')).resolves.toBe(true);
+    await expect(
+      adapter.verifyObject('scans/scan-1/model', {
+        contentType: 'model/gltf-binary',
+        sizeBytes: 1024,
+      }),
+    ).resolves.toBe(true);
   });
 });

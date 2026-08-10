@@ -260,12 +260,16 @@ describe('ScanAssetService', () => {
   });
 
   it('completes an upload and marks the model synced', async () => {
-    const { service, update, updateAssetStatus } = createHarness();
+    const { service, update, updateAssetStatus, verifyObject } = createHarness();
     update.mockResolvedValueOnce(createAssetRecord({ status: 'UPLOADED', uploadedAt: NOW }));
 
     const result = await service.completeUpload(OWNER_ID, ASSET_ID, {});
 
     expect(result.status).toBe('UPLOADED');
+    expect(verifyObject).toHaveBeenCalledWith(`scans/${SCAN_ID}/model`, {
+      contentType: 'model/gltf-binary',
+      sizeBytes: 1024,
+    });
     expect(updateAssetStatus).toHaveBeenCalledWith(SCAN_ID, {
       assetStatus: 'UPLOADED',
       syncStatus: 'SYNCED',

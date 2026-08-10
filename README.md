@@ -73,8 +73,10 @@ The API container runs with `NODE_ENV=production`, so it fails closed when
 `STORAGE_PROVIDER=local`: the startup validation rejects the default local
 adapter. The stack starts MinIO and wires the API to it
 (`STORAGE_PROVIDER=minio` by default), so the API container waits for a healthy
-object store before starting. For the development flow that uses the local
-adapter, run the API natively with `yarn dev`.
+object store before starting. The MinIO service requires `MINIO_ROOT_USER` and
+`MINIO_ROOT_PASSWORD` from `.env` (no fallback values), and publishes its API
+and console ports on the loopback interface only. For the development flow that
+uses the local adapter, run the API natively with `yarn dev`.
 
 Useful commands:
 
@@ -262,9 +264,11 @@ development and tests; it mints URLs whose TTL is metadata only (not encoded or
 enforced), does not persist uploaded bytes, and always accepts completion.
 `STORAGE_PROVIDER=minio` selects the S3-compatible MinIO adapter, which lazily
 creates the configured bucket, mints presigned upload/download URLs enforced by
-MinIO, and verifies uploads before completion. Startup fails closed:
-`NODE_ENV=production` rejects `STORAGE_PROVIDER=local`, and `STORAGE_PROVIDER`
-must be `minio` with the bucket, endpoint, and credentials set.
+MinIO, and before completion verifies that the uploaded object's size and
+content type exactly match the values declared when the upload session was
+created. Startup fails closed: `NODE_ENV=production` rejects
+`STORAGE_PROVIDER=local`, and `STORAGE_PROVIDER` must be `minio` with the
+bucket, endpoint, and credentials set.
 
 Rate-limit counters are stored in the API process, reset on restart and are not
 shared by replicas. The current single-instance Compose topology needs no

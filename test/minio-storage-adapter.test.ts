@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from 'vitest';
 import type { Client as MinioClient } from 'minio';
 import { MinioStorageAdapter } from '../src/infrastructure/storage/minio-storage-adapter.js';
 
+const EXPECTED = { contentType: 'model/gltf-binary', sizeBytes: 1024 };
+
 function createClient() {
   const bucketExists = vi.fn<MinioClient['bucketExists']>().mockResolvedValue(true);
   const makeBucket = vi.fn<MinioClient['makeBucket']>().mockResolvedValue(undefined);
@@ -12,7 +14,9 @@ function createClient() {
   const presignedGetObject = vi
     .fn<MinioClient['presignedGetObject']>()
     .mockResolvedValue('http://minio/bucket/scans/scan-1/model?X-Amz-Expires=60');
-  const statObject = vi.fn<MinioClient['statObject']>().mockResolvedValue({} as never);
+  const statObject = vi
+    .fn<MinioClient['statObject']>()
+    .mockResolvedValue({ size: 1024, metaData: { 'content-type': 'model/gltf-binary' } } as never);
 
   const client = {
     bucketExists,
@@ -67,7 +71,7 @@ describe('MinioStorageAdapter', () => {
     const { client, makeBucket } = createClient();
     const adapter = createAdapter(client);
 
-    await adapter.verifyObject('scans/scan-1/model');
+    await adapter.verifyObject('scans/scan-1/model', EXPECTED);
 
     expect(makeBucket).not.toHaveBeenCalled();
   });
@@ -128,11 +132,33 @@ describe('MinioStorageAdapter', () => {
     );
   });
 
-  it('accepts an upload when the object exists', async () => {
+  it('accepts an upload when size and content type match the session', async () => {
     const { client } = createClient();
     const adapter = createAdapter(client);
 
-    await expect(adapter.verifyObject('scans/scan-1/model')).resolves.toBe(true);
+    await expect(adapter.verifyObject('scans/scan-1/model', EXPECTED)).resolves.toBe(true);
+  });
+
+  it('rejects an upload whose size does not match the session', async () => {
+    const { client, statObject } = createClient();
+    statObject.mockResolvedValueOnce({
+      size: 2048,
+      metaData: { 'content-type': 'model/gltf-binary' },
+    } as never);
+    const adapter = createAdapter(client);
+
+    await expect(adapter.verifyObject('scans/scan-1/model', EXPECTED)).resolves.toBe(false);
+  });
+
+  it('rejects an upload whose content type does not match the session', async () => {
+    const { client, statObject } = createClient();
+    statObject.mockResolvedValueOnce({
+      size: 1024,
+      metaData: { 'content-type': 'application/octet-stream' },
+    } as never);
+    const adapter = createAdapter(client);
+
+    await expect(adapter.verifyObject('scans/scan-1/model', EXPECTED)).resolves.toBe(false);
   });
 
   it('rejects an upload when the object is missing', async () => {
@@ -142,7 +168,7 @@ describe('MinioStorageAdapter', () => {
     );
     const adapter = createAdapter(client);
 
-    await expect(adapter.verifyObject('scans/scan-1/model')).resolves.toBe(false);
+    await expect(adapter.verifyObject('scans/scan-1/model', EXPECTED)).resolves.toBe(false);
   });
 
   it('propagates storage errors instead of hiding them as missing objects', async () => {
@@ -150,6 +176,8 @@ describe('MinioStorageAdapter', () => {
     statObject.mockRejectedValueOnce(new Error('connection refused'));
     const adapter = createAdapter(client);
 
-    await expect(adapter.verifyObject('scans/scan-1/model')).rejects.toThrow('connection refused');
+    await expect(adapter.verifyObject('scans/scan-1/model', EXPECTED)).rejects.toThrow(
+      'connection refused',
+    );
   });
 });

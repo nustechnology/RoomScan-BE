@@ -39,13 +39,14 @@ the new contract merely to make code and documentation agree.
 Docker supplies PostgreSQL (and optionally MinIO) in the standard local
 workflow. The default `STORAGE_PROVIDER=local` needs no extra service, so
 MinIO is not part of the routine setup. To exercise the real presigned-URL
-provider instead, run `docker compose up minio -d`, set
-`STORAGE_PROVIDER=minio` with the matching `STORAGE_BUCKET`,
-`STORAGE_ENDPOINT`, `STORAGE_ACCESS_KEY_ID` and `STORAGE_SECRET_ACCESS_KEY`
-values from `.env.example`, and start the API. Run Prisma
-commands, seeds, the API, validation, tests, coverage and builds natively with
-Yarn. If the `db` service is already healthy, leave it running across tasks;
-do not restart or recreate it as part of final verification.
+provider instead, run `docker compose up minio -d` (the MinIO service requires
+`MINIO_ROOT_USER` and `MINIO_ROOT_PASSWORD` from `.env`; its API and console
+ports publish on the loopback interface), set `STORAGE_PROVIDER=minio` with the
+matching `STORAGE_BUCKET`, `STORAGE_ENDPOINT`, `STORAGE_ACCESS_KEY_ID` and
+`STORAGE_SECRET_ACCESS_KEY` values from `.env.example`, and start the API. Run
+Prisma commands, seeds, the API, validation, tests, coverage and builds
+natively with Yarn. If the `db` service is already healthy, leave it running
+across tasks; do not restart or recreate it as part of final verification.
 
 The local seed is idempotent and refuses to run unless
 `NODE_ENV=development`. It creates (or refreshes) the fixed local Apple user,

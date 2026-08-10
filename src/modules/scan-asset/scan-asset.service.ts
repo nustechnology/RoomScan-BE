@@ -266,7 +266,10 @@ export class ScanAssetService {
 
     let verified: boolean;
     try {
-      verified = await this.#storage.verifyObject(asset.storageKey);
+      verified = await this.#storage.verifyObject(asset.storageKey, {
+        contentType: asset.contentType,
+        sizeBytes: asset.sizeBytes,
+      });
     } catch {
       throw new StorageUnavailableError();
     }

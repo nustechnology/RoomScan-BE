@@ -172,13 +172,16 @@ duplicate request is reported as not created and returns `200`. An active,
 unexpired upload session is returned idempotently (`200`), and refreshing an
 expired session also returns `200` rather than reporting a new creation.
 Completion is idempotent and, when the provider can verify the object, marks the
-asset `UPLOADED`. Successful `MODEL` completion also updates the parent scan's
-`assetStatus`/`syncStatus`, and retrying a completed upload re-applies that
-update so the scan recovers when the earlier scan update failed; thumbnail
-completion leaves the scan status unchanged. Download URLs are only issued for
-`UPLOADED` assets, and the raw `storageKey` field is omitted from responses.
-Storage failures while minting upload or download URLs or while verifying an
-upload surface as `503 STORAGE_UNAVAILABLE`.
+asset `UPLOADED`. The provider verifies that the uploaded object exists and that
+its stored size and content type exactly match the persisted session's
+`contentType` and `sizeBytes`; a missing or mismatched object marks the asset
+`FAILED` and surfaces `409 ASSET_UPLOAD_FAILED`. Successful `MODEL` completion
+also updates the parent scan's `assetStatus`/`syncStatus`, and retrying a
+completed upload re-applies that update so the scan recovers when the earlier
+scan update failed; thumbnail completion leaves the scan status unchanged.
+Download URLs are only issued for `UPLOADED` assets, and the raw `storageKey`
+field is omitted from responses. Storage failures while minting upload or
+download URLs or while verifying an upload surface as `503 STORAGE_UNAVAILABLE`.
 
 Permissions mirror the Scan module: the project Owner creates/completes uploads,
 and the Owner or active Viewers list metadata and receive download URLs. All
@@ -205,12 +208,13 @@ selected with `STORAGE_PROVIDER=minio`, which requires `STORAGE_BUCKET`,
 The endpoint is `host[:port]`; `STORAGE_USE_SSL` switches between HTTP and
 HTTPS. The adapter lazily creates the configured bucket on first use and caches
 the creation per process, mints presigned PUT and GET URLs whose expiry is
-enforced by MinIO, and verifies uploads with a head request (`statObject`);
-an object that does not exist resolves `verifyObject` to `false`, while other
-storage failures propagate and surface as `503 STORAGE_UNAVAILABLE`. The
-presigned PUT URL does not sign content-type or size constraints, so the
-client-reported content type and size are validated at the API boundary as
-documented in the Scan Asset module.
+enforced by MinIO, and verifies uploads with a head request (`statObject`):
+`verifyObject` receives the persisted session's `contentType` and `sizeBytes`
+and returns `false` when the object is missing or its stored size or content
+type does not match, while other storage failures propagate and surface as
+`503 STORAGE_UNAVAILABLE`. The presigned PUT URL does not sign content-type or
+size constraints, so exact size and content-type enforcement happens at
+completion time through this stored-object comparison.
 
 ## Nonce binding
 

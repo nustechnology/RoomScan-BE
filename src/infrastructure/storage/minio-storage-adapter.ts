@@ -6,6 +6,7 @@ import type {
   StorageDownloadUrl,
   StorageUploadOptions,
   StorageUploadUrl,
+  StorageVerifyOptions,
 } from './storage.types.js';
 
 export interface MinioStorageAdapterOptions {
@@ -38,6 +39,15 @@ function isObjectNotFound(error: unknown): boolean {
   }
   const code = (error as Error & { code?: string }).code;
   return typeof code === 'string' && OBJECT_NOT_FOUND_CODES.has(code);
+}
+
+function metadataContentType(metaData: Record<string, unknown>): string | undefined {
+  for (const [key, value] of Object.entries(metaData)) {
+    if (key.toLowerCase() === 'content-type' && typeof value === 'string') {
+      return value;
+    }
+  }
+  return undefined;
 }
 
 /**
@@ -124,16 +134,21 @@ export class MinioStorageAdapter implements StorageAdapter {
     return { url, expiresAt: options.expiresAt };
   }
 
-  async verifyObject(objectKey: string): Promise<boolean> {
+  async verifyObject(objectKey: string, expected: StorageVerifyOptions): Promise<boolean> {
     await this.#ensureBucket();
+    let stat: { size: number; metaData: Record<string, unknown> };
     try {
-      await this.#client.statObject(this.#bucket, objectKey);
-      return true;
+      stat = await this.#client.statObject(this.#bucket, objectKey);
     } catch (error) {
       if (isObjectNotFound(error)) {
         return false;
       }
       throw error;
     }
+
+    return (
+      stat.size === expected.sizeBytes &&
+      metadataContentType(stat.metaData) === expected.contentType
+    );
   }
 }
