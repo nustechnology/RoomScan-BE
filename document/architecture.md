@@ -106,7 +106,11 @@ The `ProjectRepository` interface isolates the service from Prisma.
 `PrismaProjectRepository` performs case-insensitive name search, total counting,
 allow-listed sorting, stable ID tie-breaking, and offset pagination. The
 `@@index([ownerId, deletedAt, updatedAt, id])` index supports the default
-active-owner listing ordered by latest activity.
+active-owner listing ordered by latest activity. Every project read embeds its
+active scans as lightweight summaries (`id`, `name`, `description`, `thumbnail`,
+`noteCount`, `assetStatus`, `syncStatus`, `createdAt`) ordered newest-first, so
+project list and detail responses carry the scans without a second round trip;
+`scanCount` counts the same non-deleted scans.
 
 Canonical project detail resolves the record and the caller's Owner or active
 Viewer role in one repository lookup. An Owner update performs its guarded
@@ -165,7 +169,10 @@ scan's model and thumbnail. It depends on a `ScanAssetRepository`, the shared
 
 `ScanAssetService` validates the content type and size for the requested
 `assetType`, creates or re-uses a single `ScanAsset` row per `(scan, assetType)`,
-and mints upload and download URLs carrying the configured TTL metadata. The
+and mints upload and download URLs carrying the configured TTL metadata. Model
+scan files must be between the configured `ASSET_MIN_MODEL_SIZE_BYTES` and
+`ASSET_MAX_MODEL_SIZE_BYTES` (10–100 MB); thumbnails are capped by
+`ASSET_MAX_THUMBNAIL_SIZE_BYTES`. The
 repository resolves a concurrent create for the same `(scan, assetType)` key to
 the existing row instead of surfacing the unique-constraint error, so the
 duplicate request is reported as not created and returns `200`. An active,
@@ -178,10 +185,13 @@ its stored size and content type exactly match the persisted session's
 `FAILED` and surfaces `409 ASSET_UPLOAD_FAILED`. Successful `MODEL` completion
 also updates the parent scan's `assetStatus`/`syncStatus`, and retrying a
 completed upload re-applies that update so the scan recovers when the earlier
-scan update failed; thumbnail completion leaves the scan status unchanged.
-Download URLs are only issued for `UPLOADED` assets, and the raw `storageKey`
-field is omitted from responses. Storage failures while minting upload or
-download URLs or while verifying an upload surface as `503 STORAGE_UNAVAILABLE`.
+scan update failed. Thumbnail completion leaves the scan status unchanged but
+persists a stable display URL (`StorageAdapter.createDisplayUrl`) onto the
+scan's `thumbnail` field — re-applied on a completed retry — so project and
+scan responses expose it. Download URLs are only issued for `UPLOADED` assets,
+and the raw `storageKey` field is omitted from responses. Storage failures
+while minting upload or download URLs or while verifying an upload surface as
+`503 STORAGE_UNAVAILABLE`.
 
 Permissions mirror the Scan module: the project Owner creates/completes uploads,
 and the Owner or active Viewers list metadata and receive download URLs. All
@@ -219,14 +229,15 @@ detail reflect the note total.
 ## Storage
 
 `src/infrastructure/storage` defines a narrow `StorageAdapter` interface
-(`buildObjectKey`, `createUploadUrl`, `createDownloadUrl`, `verifyObject`). The
-composition root selects the adapter from `STORAGE_PROVIDER`; module routes do
-not change when the provider changes.
+(`buildObjectKey`, `createUploadUrl`, `createDownloadUrl`, `verifyObject`,
+`createDisplayUrl`). The composition root selects the adapter from
+`STORAGE_PROVIDER`; module routes do not change when the provider changes.
 
 `LocalStorageAdapter` is used in development and tests. It mints unsigned test
 URLs; the requested expiry is returned as TTL metadata only and is neither
 encoded into a capability nor enforced, and `verifyObject` always accepts
-completion because the adapter does not persist bytes. Configuration rejects
+completion because the adapter does not persist bytes. `createDisplayUrl`
+returns a stable `http://storage.local/download/...` URL. Configuration rejects
 `STORAGE_PROVIDER=local` when `NODE_ENV=production`.
 
 `MinioStorageAdapter` is the S3-compatible object-store provider. It is
@@ -241,7 +252,11 @@ and returns `false` when the object is missing or its stored size or content
 type does not match, while other storage failures propagate and surface as
 `503 STORAGE_UNAVAILABLE`. The presigned PUT URL does not sign content-type or
 size constraints, so exact size and content-type enforcement happens at
-completion time through this stored-object comparison.
+completion time through this stored-object comparison. `createDisplayUrl`
+returns a stable, non-expiring object URL (`[scheme]://[endpoint]/[bucket]/[key]`,
+overridable via `displayBaseUrl`), so it requires the bucket or objects to be
+publicly readable or a CDN/reverse proxy in front of MinIO; it is used to
+persist scan thumbnails.
 
 ## Nonce binding
 

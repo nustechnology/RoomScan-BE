@@ -427,6 +427,18 @@ describe('PrismaScanRepository', () => {
     ).resolves.toBeUndefined();
   });
 
+  it('persists a thumbnail display URL on an active scan', async () => {
+    const { client, scan } = createClient();
+    const repository = new PrismaScanRepository(client);
+
+    await repository.updateThumbnail(SCAN_ID, 'http://storage/display/thumbnail');
+
+    expect(scan.updateMany).toHaveBeenCalledWith({
+      where: { id: SCAN_ID, deletedAt: null },
+      data: { thumbnail: 'http://storage/display/thumbnail' },
+    });
+  });
+
   it('hides deletion from a Viewer or unrelated user', async () => {
     const { client, scan } = createClient();
     scan.findFirst.mockResolvedValueOnce(null);

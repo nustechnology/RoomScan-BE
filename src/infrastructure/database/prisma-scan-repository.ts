@@ -326,4 +326,11 @@ export class PrismaScanRepository implements ScanRepository {
       data,
     });
   }
+
+  async updateThumbnail(scanId: string, thumbnail: string | null): Promise<void> {
+    await this.#client.scan.updateMany({
+      where: { id: scanId, deletedAt: null },
+      data: { thumbnail },
+    });
+  }
 }

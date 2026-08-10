@@ -15,7 +15,11 @@ import { TOKEN_ISSUER, TOKEN_AUDIENCE } from '../src/config/constants.js';
 import type { AppConfig } from '../src/config/env.js';
 import type { DatabaseHealth } from '../src/infrastructure/database/database.js';
 import { ScanNotFoundError } from '../src/modules/scan/scan.errors.js';
-import { ScanListResponseSchema, ScanResponseSchema } from '../src/modules/scan/scan.schemas.js';
+import {
+  CreateScanResponseSchema,
+  ScanListResponseSchema,
+  ScanResponseSchema,
+} from '../src/modules/scan/scan.schemas.js';
 import type { ScanService } from '../src/modules/scan/scan.service.js';
 import type { ScanResult } from '../src/modules/scan/scan.types.js';
 import type { ScanAssetService } from '../src/modules/scan-asset/scan-asset.service.js';
@@ -57,6 +61,7 @@ const config: AppConfig = {
   storageUseSsl: false,
   storageUploadUrlTtlSeconds: 900,
   storageDownloadUrlTtlSeconds: 60,
+  assetMinModelSizeBytes: 10_000_000,
   assetMaxModelSizeBytes: 500_000_000,
   assetMaxThumbnailSizeBytes: 10_000_000,
 };
@@ -209,6 +214,62 @@ describe('Scan HTTP endpoints', () => {
         name: 'Living Room',
         description: null,
       });
+    });
+
+    it('mints thumbnail and scan-file upload URLs from the create payload', async () => {
+      const createUploadSession = vi.fn().mockResolvedValue({
+        uploadSessionId: 'c0ffee00-0000-4000-8000-000000000099',
+        assetId: 'c0ffee00-0000-4000-8000-000000000099',
+        status: 'PENDING',
+        uploadUrl: 'http://storage/upload/url',
+        uploadUrlExpiresAt: NOW.toISOString(),
+        created: false,
+      });
+      (scanAssetService as { createUploadSession: unknown }).createUploadSession =
+        createUploadSession;
+
+      const response = await request(app)
+        .post(`/api/v1/projects/${PROJECT_ID}/scans`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({
+          name: 'Living Room',
+          thumbnail: { contentType: 'image/png', sizeBytes: 2048 },
+          scanFile: {
+            contentType: 'model/usdz',
+            sizeBytes: 20_000_000,
+            checksum: 'abc-checksum',
+            modelVersion: '1',
+          },
+        })
+        .expect(201);
+
+      const body = CreateScanResponseSchema.parse(response.body as unknown);
+      expect(body.uploads?.thumbnail?.uploadUrl).toBe('http://storage/upload/url');
+      expect(body.uploads?.scanFile?.uploadUrl).toBe('http://storage/upload/url');
+      expect(createUploadSession).toHaveBeenCalledTimes(2);
+      expect(createUploadSession).toHaveBeenCalledWith(USER_A, SCAN_ID, {
+        assetType: 'THUMBNAIL',
+        contentType: 'image/png',
+        sizeBytes: 2048,
+      });
+      expect(createUploadSession).toHaveBeenCalledWith(USER_A, SCAN_ID, {
+        assetType: 'MODEL',
+        contentType: 'model/usdz',
+        sizeBytes: 20_000_000,
+        checksum: 'abc-checksum',
+        modelVersion: '1',
+      });
+    });
+
+    it('rejects an invalid upload descriptor in the create payload', async () => {
+      await request(app)
+        .post(`/api/v1/projects/${PROJECT_ID}/scans`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({
+          name: 'Living Room',
+          scanFile: { contentType: 'text/plain', sizeBytes: 20_000_000 },
+        })
+        .expect(400);
     });
 
     it('returns 200 for an idempotent repeat create', async () => {

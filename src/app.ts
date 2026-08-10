@@ -142,6 +142,7 @@ export function createApp({
     API_PREFIX,
     createScanRouter({
       scanService,
+      scanAssetService,
       accessTokenVerifier,
       currentUserRepository,
     }),

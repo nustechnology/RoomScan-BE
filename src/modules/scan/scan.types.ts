@@ -106,4 +106,5 @@ export interface ScanRepository {
     scanId: string,
     data: { assetStatus?: ScanAssetStatus; syncStatus?: ScanSyncStatus },
   ): Promise<void>;
+  updateThumbnail(scanId: string, thumbnail: string | null): Promise<void>;
 }

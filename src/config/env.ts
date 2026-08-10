@@ -126,7 +126,8 @@ export const environmentSchema = z
     STORAGE_USE_SSL: environmentBooleanSchema,
     STORAGE_UPLOAD_URL_TTL_SECONDS: z.coerce.number().int().positive().default(900),
     STORAGE_DOWNLOAD_URL_TTL_SECONDS: z.coerce.number().int().positive().default(60),
-    ASSET_MAX_MODEL_SIZE_BYTES: z.coerce.number().int().positive().default(500_000_000),
+    ASSET_MIN_MODEL_SIZE_BYTES: z.coerce.number().int().positive().default(10_000_000),
+    ASSET_MAX_MODEL_SIZE_BYTES: z.coerce.number().int().positive().default(100_000_000),
     ASSET_MAX_THUMBNAIL_SIZE_BYTES: z.coerce.number().int().positive().default(10_000_000),
   })
   .superRefine((environment, context) => {
@@ -171,6 +172,14 @@ export const environmentSchema = z
         }
       }
     }
+
+    if (environment.ASSET_MIN_MODEL_SIZE_BYTES >= environment.ASSET_MAX_MODEL_SIZE_BYTES) {
+      context.addIssue({
+        code: 'custom',
+        path: ['ASSET_MAX_MODEL_SIZE_BYTES'],
+        message: 'ASSET_MAX_MODEL_SIZE_BYTES must be greater than ASSET_MIN_MODEL_SIZE_BYTES',
+      });
+    }
   });
 
 export interface AppConfig {
@@ -201,6 +210,7 @@ export interface AppConfig {
   storageUseSsl: boolean;
   storageUploadUrlTtlSeconds: number;
   storageDownloadUrlTtlSeconds: number;
+  assetMinModelSizeBytes: number;
   assetMaxModelSizeBytes: number;
   assetMaxThumbnailSizeBytes: number;
 }
@@ -242,6 +252,7 @@ export function loadConfig(input: NodeJS.ProcessEnv = process.env): AppConfig {
     storageUseSsl: environment.STORAGE_USE_SSL,
     storageUploadUrlTtlSeconds: environment.STORAGE_UPLOAD_URL_TTL_SECONDS,
     storageDownloadUrlTtlSeconds: environment.STORAGE_DOWNLOAD_URL_TTL_SECONDS,
+    assetMinModelSizeBytes: environment.ASSET_MIN_MODEL_SIZE_BYTES,
     assetMaxModelSizeBytes: environment.ASSET_MAX_MODEL_SIZE_BYTES,
     assetMaxThumbnailSizeBytes: environment.ASSET_MAX_THUMBNAIL_SIZE_BYTES,
   };

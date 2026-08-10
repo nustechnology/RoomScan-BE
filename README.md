@@ -206,16 +206,30 @@ project `updatedAt`. Missing, deleted, or inaccessible scans are hidden behind
 The metadata endpoints do not accept model files; `assetStatus` and `syncStatus`
 start at `NONE` and `PENDING` respectively until the upload flow writes them.
 
+Create Scan can also return presigned upload URLs in the same response: optional
+`thumbnail` and `scanFile` descriptors (`contentType`, `sizeBytes`, and the
+`checksum`/`modelVersion` required for the scan file) make the API mint an
+upload session for each and return its `uploadUrl` under `uploads.thumbnail` /
+`uploads.scanFile`. The client then uploads the files directly to those URLs and
+marks each session complete.
+
 Scan assets use minted URLs: the Owner creates an upload session
 (`POST /api/v1/scans/:scanId/assets/upload-sessions`), the client uploads to the
 returned URL, then marks it complete
 (`POST /api/v1/upload-sessions/:uploadSessionId/complete`). Completion is
-idempotent and marks the parent scan synced. Owner and active Viewers can list
+idempotent and marks the parent scan synced. A model scan file must be between
+10 MB and 100 MB; a completed thumbnail upload persists a display URL onto the
+scan so project and scan responses show it. Owner and active Viewers can list
 metadata and request download URLs
 (`GET /api/v1/scans/:scanId/assets/:assetType/download-url`); revoked Viewers
 and deleted projects/scans are denied. The raw `storageKey` field is omitted
 from API responses, although the local provider's URLs embed the object key
 path.
+
+Project list and detail responses include each project's active scans under
+`scans`, with `id`, `name`, `description`, `thumbnail`, `noteCount`,
+`assetStatus`, `syncStatus`, and `createdAt`; the `scanCount` field is the
+number of active scans (the "N room scans" label).
 
 Notes are text annotations anchored to 3D positions inside a scan model. `POST`
 and `GET` at `/api/v1/scans/:scanId/notes` create and list notes; `GET`, `PATCH`,
@@ -269,7 +283,8 @@ and `x-request-id`.
 | `STORAGE_USE_SSL`                                        | No       | `false`       | Use HTTPS instead of HTTP for the MinIO endpoint                    |
 | `STORAGE_UPLOAD_URL_TTL_SECONDS`                         | No       | `900`         | Signed upload URL lifetime                                          |
 | `STORAGE_DOWNLOAD_URL_TTL_SECONDS`                       | No       | `60`          | Signed download URL lifetime                                        |
-| `ASSET_MAX_MODEL_SIZE_BYTES`                             | No       | `500000000`   | Maximum model asset size                                            |
+| `ASSET_MIN_MODEL_SIZE_BYTES`                             | No       | `10000000`    | Minimum model scan-file size (10 MB)                                |
+| `ASSET_MAX_MODEL_SIZE_BYTES`                             | No       | `100000000`   | Maximum model scan-file size (100 MB)                               |
 | `ASSET_MAX_THUMBNAIL_SIZE_BYTES`                         | No       | `10000000`    | Maximum thumbnail asset size                                        |
 
 The remaining PostgreSQL, MinIO and `ROOMSCAN_PORT` values in `.env.example`

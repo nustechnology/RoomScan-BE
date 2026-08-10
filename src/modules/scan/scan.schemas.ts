@@ -1,4 +1,5 @@
 import { z } from '../../openapi/zod.js';
+import { MODEL_CONTENT_TYPES, THUMBNAIL_CONTENT_TYPES } from '../scan-asset/scan-asset.types.js';
 
 export const ScanSyncStatusSchema = z.enum(['PENDING', 'SYNCING', 'SYNCED', 'FAILED', 'CONFLICT']);
 
@@ -9,6 +10,13 @@ export const ScanPermissionsSchema = z.object({
   canView: z.boolean(),
   canEdit: z.boolean(),
   canDelete: z.boolean(),
+});
+
+export const ScanUploadUrlSchema = z.object({
+  uploadSessionId: z.uuid(),
+  assetId: z.uuid(),
+  uploadUrl: z.url(),
+  uploadUrlExpiresAt: z.iso.datetime(),
 });
 
 export const ScanResponseSchema = z.object({
@@ -40,13 +48,41 @@ export const ScanListResponseSchema = z.object({
   }),
 });
 
+export const ThumbnailUploadDescriptorSchema = z
+  .object({
+    contentType: z.enum(THUMBNAIL_CONTENT_TYPES),
+    sizeBytes: z.number().int().positive(),
+    checksum: z.string().trim().min(1).max(128).optional(),
+  })
+  .strict();
+
+export const ScanFileUploadDescriptorSchema = z
+  .object({
+    contentType: z.enum(MODEL_CONTENT_TYPES),
+    sizeBytes: z.number().int().positive(),
+    checksum: z.string().trim().min(1).max(128),
+    modelVersion: z.string().trim().min(1).max(64),
+  })
+  .strict();
+
 export const CreateScanBodySchema = z
   .object({
     name: z.string().trim().min(1).max(100),
     description: z.string().max(500).nullable().default(null),
     clientMutationId: z.string().trim().min(1).max(128).optional(),
+    thumbnail: ThumbnailUploadDescriptorSchema.optional(),
+    scanFile: ScanFileUploadDescriptorSchema.optional(),
   })
   .strict();
+
+export const CreateScanResponseSchema = ScanResponseSchema.extend({
+  uploads: z
+    .object({
+      thumbnail: ScanUploadUrlSchema.optional(),
+      scanFile: ScanUploadUrlSchema.optional(),
+    })
+    .optional(),
+});
 
 export const UpdateScanBodySchema = z
   .object({
@@ -81,7 +117,11 @@ export const ListScansQuerySchema = z
 
 export type ScanResponse = z.infer<typeof ScanResponseSchema>;
 export type ScanListResponse = z.infer<typeof ScanListResponseSchema>;
+export type ScanUploadUrl = z.infer<typeof ScanUploadUrlSchema>;
 export type CreateScanBody = z.infer<typeof CreateScanBodySchema>;
+export type CreateScanResponse = z.infer<typeof CreateScanResponseSchema>;
+export type ThumbnailUploadDescriptor = z.infer<typeof ThumbnailUploadDescriptorSchema>;
+export type ScanFileUploadDescriptor = z.infer<typeof ScanFileUploadDescriptorSchema>;
 export type UpdateScanBody = z.infer<typeof UpdateScanBodySchema>;
 export type ScanIdParam = z.infer<typeof ScanIdParamSchema>;
 export type ListScansQuery = z.infer<typeof ListScansQuerySchema>;

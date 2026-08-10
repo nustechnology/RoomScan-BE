@@ -22,6 +22,28 @@ const projectSelect = {
       email: true,
     },
   },
+  scans: {
+    where: {
+      deletedAt: null,
+    },
+    orderBy: {
+      createdAt: 'desc',
+    },
+    select: {
+      id: true,
+      name: true,
+      description: true,
+      thumbnail: true,
+      assetStatus: true,
+      syncStatus: true,
+      createdAt: true,
+      _count: {
+        select: {
+          notes: true,
+        },
+      },
+    },
+  },
   _count: {
     select: {
       accesses: {
@@ -41,6 +63,19 @@ const projectSelect = {
   updatedAt: true,
 } as const;
 
+interface ProjectScanRow {
+  id: string;
+  name: string;
+  description: string | null;
+  thumbnail: string | null;
+  assetStatus: 'NONE' | 'PENDING' | 'UPLOADING' | 'UPLOADED' | 'FAILED';
+  syncStatus: 'PENDING' | 'SYNCING' | 'SYNCED' | 'FAILED' | 'CONFLICT';
+  createdAt: Date;
+  _count: {
+    notes: number;
+  };
+}
+
 interface ProjectRow {
   id: string;
   name: string;
@@ -50,6 +85,7 @@ interface ProjectRow {
     id: string;
     email: string | null;
   };
+  scans: ProjectScanRow[];
   _count: {
     accesses: number;
     scans: number;
@@ -74,6 +110,16 @@ function toProjectRecord(row: ProjectRow): ProjectRecord {
     ownerId: row.ownerId,
     owner: row.owner,
     scanCount: row._count.scans,
+    scans: row.scans.map((scan) => ({
+      id: scan.id,
+      name: scan.name,
+      description: scan.description,
+      thumbnail: scan.thumbnail,
+      noteCount: scan._count.notes,
+      assetStatus: scan.assetStatus,
+      syncStatus: scan.syncStatus,
+      createdAt: scan.createdAt,
+    })),
     sharedCount: row._count.accesses,
     thumbnail: null,
     syncStatus: null,

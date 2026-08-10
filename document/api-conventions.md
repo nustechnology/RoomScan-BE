@@ -200,7 +200,19 @@ Project response:
     "id": "8c53d31d-2788-48de-82a0-c4f219ca3701",
     "email": "owner@example.com"
   },
-  "scanCount": 0,
+  "scanCount": 1,
+  "scans": [
+    {
+      "id": "f1e2d3c4-a5b6-7890-abcd-ef1234567890",
+      "name": "Living Room",
+      "description": null,
+      "thumbnail": null,
+      "noteCount": 3,
+      "assetStatus": "UPLOADED",
+      "syncStatus": "SYNCED",
+      "createdAt": "2026-07-29T10:00:00.000Z"
+    }
+  ],
   "sharedCount": 0,
   "thumbnail": null,
   "syncStatus": null,
@@ -219,9 +231,11 @@ Project response:
 
 `owner.email` is nullable. An active Viewer receives role `VIEWER` with only
 `canView: true`. `sharedCount` counts active Viewer access records.
-`scanCount` counts active (non-deleted) scans in the project. `thumbnail` and
-`syncStatus` are `null` until the downstream thumbnail and sync persistence
-features are present.
+`scanCount` counts active (non-deleted) scans in the project, and `scans` lists
+those scans ordered by newest `createdAt` first with `id`, `name`,
+`description`, `thumbnail`, `noteCount`, `assetStatus`, `syncStatus`, and
+`createdAt`. `thumbnail` and `syncStatus` are `null` until the downstream
+thumbnail and sync persistence features are present.
 
 The owned-project list supports case-insensitive name search and page-based
 pagination:
@@ -323,8 +337,54 @@ Scan response:
 scan. `assetStatus` uses `NONE | PENDING | UPLOADING | UPLOADED | FAILED` and
 starts `NONE` for a metadata-only scan; `syncStatus` uses `PENDING | SYNCING |
 SYNCED | FAILED | CONFLICT` and starts `PENDING`. The metadata endpoints never
-accept model-file data; the asset and sync status write path is the
+accept model-file bytes; the asset and sync status write path is the
 responsibility of the scan-asset module.
+
+Create Scan accepts optional `thumbnail` and `scanFile` upload descriptors. When
+present, the API creates the scan and mints an upload session for each
+descriptor, returning the scan plus `uploads`:
+
+```json
+{
+  "id": "f1e2d3c4-a5b6-7890-abcd-ef1234567890",
+  "projectId": "a1b2c3d4-e5f6-4890-abcd-ef1234567890",
+  "name": "Living Room",
+  "thumbnail": null,
+  "assetStatus": "NONE",
+  "syncStatus": "PENDING",
+  "modelVersion": 1,
+  "createdAt": "2026-07-29T10:00:00.000Z",
+  "updatedAt": "2026-07-29T10:00:00.000Z",
+  "permissions": {
+    "role": "OWNER",
+    "canView": true,
+    "canEdit": true,
+    "canDelete": true
+  },
+  "uploads": {
+    "thumbnail": {
+      "uploadSessionId": "c0ffee00-0000-4000-8000-000000000099",
+      "assetId": "c0ffee00-0000-4000-8000-000000000099",
+      "uploadUrl": "https://minio.example.com/bucket/scans/.../thumbnail?...",
+      "uploadUrlExpiresAt": "2026-07-29T10:15:00.000Z"
+    },
+    "scanFile": {
+      "uploadSessionId": "c0ffee00-0000-4000-8000-000000000100",
+      "assetId": "c0ffee00-0000-4000-8000-000000000100",
+      "uploadUrl": "https://minio.example.com/bucket/scans/.../model?...",
+      "uploadUrlExpiresAt": "2026-07-29T10:15:00.000Z"
+    }
+  }
+}
+```
+
+`creator` and `noteCount` are omitted above for brevity but are always present.
+The client uploads each file directly to its `uploadUrl`, then calls the
+scan-asset completion endpoint. Each `uploadUrl` is a presigned PUT URL with the
+configured upload TTL; the model scan file must be between 10 MB and 100 MB.
+A `thumbnail` descriptor requires `contentType` (`image/jpeg`, `image/png`) and
+`sizeBytes`; a `scanFile` descriptor additionally requires `checksum` and
+`modelVersion`. `uploads` is omitted when neither descriptor is supplied.
 
 The scan list supports page-based pagination and an allow-listed sort. `page`
 defaults to 1; `limit` defaults to 20 and may not exceed 100. `sort` defaults to
@@ -340,6 +400,12 @@ Validation rules:
 - `description`: optional nullable string, maximum 500 characters.
 - `clientMutationId` on create: optional string, 1–128 characters; used for
   idempotent create and unique per project.
+- `thumbnail` descriptor on create: optional; `contentType` must be
+  `image/jpeg` or `image/png`, `sizeBytes` positive and at most the thumbnail
+  maximum, `checksum` optional.
+- `scanFile` descriptor on create: optional; `contentType` must be a supported
+  model type (including `model/usdz`), `sizeBytes` between 10 MB and 100 MB,
+  `checksum` and `modelVersion` required.
 - Create and update objects reject unknown fields; PATCH must contain at least
   one supported field; `"description": null` clears the stored description.
 - Clients cannot submit `id`, `projectId`, `createdById`, `createdAt`,
@@ -394,7 +460,9 @@ Create-session request:
 - `contentType`: must be in the allowed list for the asset type (models
   `model/gltf-binary`, `model/gltf+json`, `application/octet-stream`,
   `model/usd`, `model/usdz`; thumbnails `image/jpeg`, `image/png`).
-- `sizeBytes`: positive and within the configured maximum for the asset type.
+- `sizeBytes`: positive; for `MODEL` assets it must be at least the configured
+  minimum (10 MB) and at most the configured maximum (100 MB), and for
+  `THUMBNAIL` assets at most the configured maximum (10 MB).
 - `checksum` and `modelVersion`: required for `MODEL` assets.
 - `idempotencyKey`: optional; a repeated create with an active, unexpired
   session returns the existing session with `200`.
@@ -413,7 +481,9 @@ Behavior and rules:
   status update so a retry recovers from an earlier failed scan update.
 - Completed model uploads mark the scan `assetStatus = UPLOADED` and
   `syncStatus = SYNCED`; a reported failure marks the scan `FAILED`. Thumbnail
-  completion leaves the scan status unchanged.
+  completion leaves the scan status unchanged but persists a display URL onto
+  the scan's `thumbnail` field (re-applied on a completed retry), so project and
+  scan responses expose it.
 - A download URL is only issued once an asset has status `UPLOADED`; otherwise
   the API returns `409 ASSET_NOT_READY`, and a missing asset record returns
   `404 ASSET_NOT_FOUND`.
@@ -423,7 +493,9 @@ Behavior and rules:
   `minio` provider mints presigned S3 URLs whose expiry is enforced by MinIO
   and, before completion, verifies that the uploaded object exists and that its
   stored size and content type exactly match the session's declared
-  `contentType` and `sizeBytes`.
+  `contentType` and `sizeBytes`. The thumbnail display URL is a stable
+  (non-expiring) object URL and therefore requires the bucket or objects to be
+  publicly readable, or a CDN/reverse proxy in front of MinIO.
 
 Error behavior:
 

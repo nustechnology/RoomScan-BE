@@ -13,6 +13,17 @@ export const ProjectPermissionsSchema = z.object({
   canCreateScan: z.boolean(),
 });
 
+export const ProjectScanSummarySchema = z.object({
+  id: z.uuid(),
+  name: z.string(),
+  description: z.string().nullable(),
+  thumbnail: z.url().nullable(),
+  noteCount: z.number().int().nonnegative(),
+  assetStatus: z.enum(['NONE', 'PENDING', 'UPLOADING', 'UPLOADED', 'FAILED']),
+  syncStatus: z.enum(['PENDING', 'SYNCING', 'SYNCED', 'FAILED', 'CONFLICT']),
+  createdAt: z.iso.datetime(),
+});
+
 export const ProjectResponseSchema = z.object({
   id: z.uuid(),
   name: z.string(),
@@ -22,6 +33,7 @@ export const ProjectResponseSchema = z.object({
     email: z.email().nullable(),
   }),
   scanCount: z.number().int().nonnegative(),
+  scans: z.array(ProjectScanSummarySchema),
   sharedCount: z.number().int().nonnegative(),
   thumbnail: z.url().nullable(),
   syncStatus: ProjectSyncStatusSchema,
@@ -85,6 +97,7 @@ export const ListProjectsQuerySchema = z
   .strict();
 
 export type ProjectResponse = z.infer<typeof ProjectResponseSchema>;
+export type ProjectScanSummary = z.infer<typeof ProjectScanSummarySchema>;
 export type ProjectListResponse = z.infer<typeof ProjectListResponseSchema>;
 export type CreateProjectBody = z.infer<typeof CreateProjectBodySchema>;
 export type UpdateProjectBody = z.infer<typeof UpdateProjectBodySchema>;

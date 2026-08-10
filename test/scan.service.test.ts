@@ -51,6 +51,7 @@ function createRepository() {
     update: vi.fn<ScanRepository['update']>().mockResolvedValue(createRecord()),
     softDelete: vi.fn<ScanRepository['softDelete']>().mockResolvedValue(undefined),
     updateAssetStatus: vi.fn<ScanRepository['updateAssetStatus']>().mockResolvedValue(undefined),
+    updateThumbnail: vi.fn<ScanRepository['updateThumbnail']>().mockResolvedValue(undefined),
   };
   const repository: ScanRepository = mocks;
   const findAccessRole = vi

@@ -13,6 +13,21 @@ export interface ProjectOwner {
   email: string | null;
 }
 
+export interface ProjectScanSummary {
+  id: string;
+  name: string;
+  description: string | null;
+  thumbnail: string | null;
+  noteCount: number;
+  assetStatus: 'NONE' | 'PENDING' | 'UPLOADING' | 'UPLOADED' | 'FAILED';
+  syncStatus: ProjectSyncStatus;
+  createdAt: Date;
+}
+
+export type ProjectScanSummaryResult = Omit<ProjectScanSummary, 'createdAt'> & {
+  createdAt: string;
+};
+
 export interface ProjectRecord {
   id: string;
   name: string;
@@ -20,6 +35,7 @@ export interface ProjectRecord {
   ownerId: string;
   owner: ProjectOwner;
   scanCount: number;
+  scans: ProjectScanSummary[];
   sharedCount: number;
   thumbnail: string | null;
   syncStatus: ProjectSyncStatus | null;
@@ -42,6 +58,7 @@ export interface ProjectResult {
   description: string | null;
   owner: ProjectOwner;
   scanCount: number;
+  scans: ProjectScanSummaryResult[];
   sharedCount: number;
   thumbnail: string | null;
   syncStatus: ProjectSyncStatus | null;

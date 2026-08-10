@@ -94,6 +94,7 @@ const scanAssetService = new ScanAssetService({
   storage: storageAdapter,
   uploadUrlTtlSeconds: config.storageUploadUrlTtlSeconds,
   downloadUrlTtlSeconds: config.storageDownloadUrlTtlSeconds,
+  minModelSizeBytes: config.assetMinModelSizeBytes,
   maxModelSizeBytes: config.assetMaxModelSizeBytes,
   maxThumbnailSizeBytes: config.assetMaxThumbnailSizeBytes,
 });
