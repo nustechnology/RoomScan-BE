@@ -24,7 +24,9 @@ import type {
 import { MODEL_CONTENT_TYPES, THUMBNAIL_CONTENT_TYPES } from './scan-asset.types.js';
 import type {
   StorageAdapter,
+  StorageDownloadUrl,
   StorageUploadOptions,
+  StorageUploadUrl,
 } from '../../infrastructure/storage/storage.types.js';
 
 export interface ScanAssetServiceDependencies {
@@ -133,6 +135,17 @@ export class ScanAssetService {
     }
   }
 
+  async #mintUploadUrl(
+    objectKey: string,
+    options: StorageUploadOptions,
+  ): Promise<StorageUploadUrl> {
+    try {
+      return await this.#storage.createUploadUrl(objectKey, options);
+    } catch {
+      throw new StorageUnavailableError();
+    }
+  }
+
   async createUploadSession(
     userId: string,
     scanId: string,
@@ -163,7 +176,7 @@ export class ScanAssetService {
       const expiry = existing.uploadUrlExpiresAt;
 
       if (active && expiry !== null && expiry > now) {
-        const uploadUrl = await this.#storage.createUploadUrl(existing.storageKey, {
+        const uploadUrl = await this.#mintUploadUrl(existing.storageKey, {
           ...uploadOptions,
           expiresAt: expiry,
         });
@@ -189,7 +202,7 @@ export class ScanAssetService {
       if (data.checksum !== undefined) update.checksum = data.checksum;
       if (data.modelVersion !== undefined) update.modelVersion = data.modelVersion;
       const updated = await this.#repository.update(existing.id, update);
-      const uploadUrl = await this.#storage.createUploadUrl(objectKey, uploadOptions);
+      const uploadUrl = await this.#mintUploadUrl(objectKey, uploadOptions);
       return {
         uploadSessionId: updated.id,
         assetId: updated.id,
@@ -197,7 +210,7 @@ export class ScanAssetService {
         status: updated.status,
         uploadUrl: uploadUrl.url,
         uploadUrlExpiresAt: uploadUrl.expiresAt.toISOString(),
-        created: true,
+        created: false,
       };
     }
 
@@ -212,8 +225,8 @@ export class ScanAssetService {
       idempotencyKey: data.idempotencyKey ?? null,
       uploadUrlExpiresAt: uploadOptions.expiresAt,
     };
-    const record = await this.#repository.create(createData);
-    const uploadUrl = await this.#storage.createUploadUrl(objectKey, uploadOptions);
+    const { record, created } = await this.#repository.create(createData);
+    const uploadUrl = await this.#mintUploadUrl(objectKey, uploadOptions);
     return {
       uploadSessionId: record.id,
       assetId: record.id,
@@ -221,7 +234,7 @@ export class ScanAssetService {
       status: record.status,
       uploadUrl: uploadUrl.url,
       uploadUrlExpiresAt: uploadUrl.expiresAt.toISOString(),
-      created: true,
+      created,
     };
   }
 
@@ -237,6 +250,12 @@ export class ScanAssetService {
     await this.#requireOwner(asset.scanId, userId);
 
     if (asset.status === 'UPLOADED') {
+      if (asset.assetType === 'MODEL') {
+        await this.#scanRepository.updateAssetStatus(asset.scanId, {
+          assetStatus: 'UPLOADED',
+          syncStatus: 'SYNCED',
+        });
+      }
       return toMetadata(asset);
     }
 
@@ -247,7 +266,10 @@ export class ScanAssetService {
 
     let verified: boolean;
     try {
-      verified = await this.#storage.verifyObject(asset.storageKey);
+      verified = await this.#storage.verifyObject(asset.storageKey, {
+        contentType: asset.contentType,
+        sizeBytes: asset.sizeBytes,
+      });
     } catch {
       throw new StorageUnavailableError();
     }
@@ -255,6 +277,14 @@ export class ScanAssetService {
     if (!verified) {
       await this.#repository.update(asset.id, { status: 'FAILED' });
       throw new AssetUploadFailedError();
+    }
+
+    if (data.sizeBytes !== undefined) {
+      const maxSize =
+        asset.assetType === 'MODEL' ? this.#maxModelSizeBytes : this.#maxThumbnailSizeBytes;
+      if (data.sizeBytes > maxSize) {
+        throw new InvalidAssetRequestError();
+      }
     }
 
     const update: ScanAssetUpdateData = {
@@ -289,13 +319,21 @@ export class ScanAssetService {
   ): Promise<DownloadUrlResult> {
     await this.#requireView(scanId, userId);
     const asset = await this.#repository.findByScanAndType(scanId, assetType);
-    if (asset === null || asset.status !== 'UPLOADED') {
+    if (asset === null) {
+      throw new ScanAssetNotFoundError();
+    }
+    if (asset.status !== 'UPLOADED') {
       throw new AssetNotReadyError();
     }
 
     const now = this.#clock();
     const expiresAt = new Date(now.getTime() + this.#downloadUrlTtlSeconds * 1000);
-    const downloadUrl = await this.#storage.createDownloadUrl(asset.storageKey, { expiresAt });
+    let downloadUrl: StorageDownloadUrl;
+    try {
+      downloadUrl = await this.#storage.createDownloadUrl(asset.storageKey, { expiresAt });
+    } catch {
+      throw new StorageUnavailableError();
+    }
 
     return {
       downloadUrl: downloadUrl.url,

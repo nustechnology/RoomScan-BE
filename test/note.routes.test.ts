@@ -41,6 +41,8 @@ const config: AppConfig = {
   apiRateLimitMaxRequests: 120,
   appleAuthRateLimitWindowSeconds: 900,
   appleAuthRateLimitMaxRequests: 20,
+  refreshAuthRateLimitWindowSeconds: 900,
+  refreshAuthRateLimitMaxRequests: 10,
   appleClientId: 'com.example.roomscan',
   accessTokenSecret: ACCESS_SECRET,
   refreshTokenSecret: 'refresh-secret-that-is-at-least-32-characters',
@@ -51,6 +53,9 @@ const config: AppConfig = {
   storageBucket: '',
   storageRegion: '',
   storageEndpoint: '',
+  storageAccessKeyId: '',
+  storageSecretAccessKey: '',
+  storageUseSsl: false,
   storageUploadUrlTtlSeconds: 900,
   storageDownloadUrlTtlSeconds: 60,
   assetMaxModelSizeBytes: 500_000_000,
@@ -101,6 +106,7 @@ describe('Note HTTP endpoints', () => {
   const logger = pino({ enabled: false });
   const rateLimiters = createRateLimiters(config, logger);
   const authService = { signInWithApple: vi.fn() };
+  const refreshTokenService = { refresh: vi.fn() };
   const accessTokenVerifier: AccessTokenVerifier = {
     verify: vi.fn(async (token: string) => {
       const { payload } = await jwtVerify(token, new TextEncoder().encode(ACCESS_SECRET), {
@@ -160,6 +166,7 @@ describe('Note HTTP endpoints', () => {
     database,
     logger,
     authService,
+    refreshTokenService,
     projectService,
     scanService,
     scanAssetService,

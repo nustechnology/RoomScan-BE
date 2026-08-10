@@ -4,18 +4,22 @@ import { createRateLimiters } from './common/middleware/rate-limit.js';
 import { loadConfig } from './config/env.js';
 import { AppleIdentityTokenVerifier } from './infrastructure/auth/apple-identity-verifier.js';
 import { JoseAccessTokenVerifier } from './infrastructure/auth/jose-access-token-verifier.js';
+import { JoseRefreshTokenVerifier } from './infrastructure/auth/jose-refresh-token-verifier.js';
 import { JoseAuthTokenIssuer } from './infrastructure/auth/jwt-token-issuer.js';
 import { LocalTestAppleIdentityVerifier } from './infrastructure/auth/local-test-apple-identity-verifier.js';
 import { createPrismaClient, PrismaDatabase } from './infrastructure/database/prisma.js';
 import { PrismaCurrentUserRepository } from './infrastructure/database/prisma-current-user-repository.js';
+import { PrismaRefreshTokenRepository } from './infrastructure/database/prisma-refresh-token-repository.js';
 import { PrismaAppleUserRepository } from './infrastructure/database/prisma-user-repository.js';
 import { PrismaProjectRepository } from './infrastructure/database/prisma-project-repository.js';
 import { PrismaScanRepository } from './infrastructure/database/prisma-scan-repository.js';
 import { PrismaScanAssetRepository } from './infrastructure/database/prisma-scan-asset-repository.js';
 import { PrismaNoteRepository } from './infrastructure/database/prisma-note-repository.js';
 import { LocalStorageAdapter } from './infrastructure/storage/local-storage-adapter.js';
+import { MinioStorageAdapter } from './infrastructure/storage/minio-storage-adapter.js';
+import type { StorageAdapter } from './infrastructure/storage/storage.types.js';
 import { createLogger } from './infrastructure/logging/logger.js';
-import { AuthService } from './modules/auth/auth.service.js';
+import { AuthService, RefreshTokenService } from './modules/auth/auth.service.js';
 import { ProjectPermissionService } from './modules/project/project.permissions.js';
 import { ProjectService } from './modules/project/project.service.js';
 import { ScanService } from './modules/scan/scan.service.js';
@@ -32,7 +36,20 @@ const projectRepository = new PrismaProjectRepository(prismaClient);
 const scanRepository = new PrismaScanRepository(prismaClient);
 const scanAssetRepository = new PrismaScanAssetRepository(prismaClient);
 const noteRepository = new PrismaNoteRepository(prismaClient);
-const storageAdapter = new LocalStorageAdapter();
+function createStorageAdapter(): StorageAdapter {
+  if (config.storageProvider === 'minio') {
+    return new MinioStorageAdapter({
+      bucket: config.storageBucket,
+      endPoint: config.storageEndpoint,
+      accessKey: config.storageAccessKeyId,
+      secretKey: config.storageSecretAccessKey,
+      useSSL: config.storageUseSsl,
+      ...(config.storageRegion === '' ? {} : { region: config.storageRegion }),
+    });
+  }
+  return new LocalStorageAdapter();
+}
+const storageAdapter = createStorageAdapter();
 const appleIdentityVerifier = new LocalTestAppleIdentityVerifier({
   delegate: new AppleIdentityTokenVerifier(config.appleClientId),
   enabled: config.nodeEnv === 'development' && config.localTestAuthEnabled,
@@ -46,9 +63,19 @@ const tokenIssuer = new JoseAuthTokenIssuer({
 const accessTokenVerifier = new JoseAccessTokenVerifier({
   accessTokenSecret: config.accessTokenSecret,
 });
+const refreshTokenVerifier = new JoseRefreshTokenVerifier({
+  refreshTokenSecret: config.refreshTokenSecret,
+});
+const refreshTokenRepository = new PrismaRefreshTokenRepository(prismaClient);
 const authService = new AuthService({
   appleIdentityVerifier,
   userRepository,
+  tokenIssuer,
+  tokenRepository: refreshTokenRepository,
+});
+const refreshTokenService = new RefreshTokenService({
+  tokenVerifier: refreshTokenVerifier,
+  tokenRepository: refreshTokenRepository,
   tokenIssuer,
 });
 const projectPermissions = new ProjectPermissionService(projectRepository);
@@ -80,6 +107,7 @@ const app = createApp({
   database,
   logger,
   authService,
+  refreshTokenService,
   projectService,
   scanService,
   scanAssetService,

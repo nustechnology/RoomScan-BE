@@ -29,6 +29,8 @@ describe('loadConfig', () => {
       apiRateLimitMaxRequests: 120,
       appleAuthRateLimitWindowSeconds: 900,
       appleAuthRateLimitMaxRequests: 20,
+      refreshAuthRateLimitWindowSeconds: 900,
+      refreshAuthRateLimitMaxRequests: 10,
       appleClientId: 'com.example.roomscan',
       accessTokenSecret: 'access-secret-that-is-at-least-32-characters',
       refreshTokenSecret: 'refresh-secret-that-is-at-least-32-characters',
@@ -39,6 +41,9 @@ describe('loadConfig', () => {
       storageBucket: '',
       storageRegion: '',
       storageEndpoint: '',
+      storageAccessKeyId: '',
+      storageSecretAccessKey: '',
+      storageUseSsl: false,
       storageUploadUrlTtlSeconds: 900,
       storageDownloadUrlTtlSeconds: 60,
       assetMaxModelSizeBytes: 500_000_000,
@@ -75,6 +80,76 @@ describe('loadConfig', () => {
         ...validEnvironment,
         NODE_ENV: 'development',
         LOCAL_TEST_AUTH_ENABLED: 'yes',
+      }),
+    ).toThrow(ZodError);
+  });
+
+  it('rejects the local storage provider in production', () => {
+    expect(() =>
+      loadConfig({
+        ...validEnvironment,
+        NODE_ENV: 'production',
+        STORAGE_PROVIDER: 'local',
+      }),
+    ).toThrow(/STORAGE_PROVIDER=local is not allowed when NODE_ENV=production/);
+  });
+
+  it('allows the local storage provider outside production', () => {
+    const config = loadConfig({
+      ...validEnvironment,
+      STORAGE_PROVIDER: 'local',
+    });
+
+    expect(config.storageProvider).toBe('local');
+  });
+
+  it('parses a fully configured minio storage provider', () => {
+    const config = loadConfig({
+      ...validEnvironment,
+      STORAGE_PROVIDER: 'minio',
+      STORAGE_BUCKET: 'roomscan-assets',
+      STORAGE_REGION: 'us-east-1',
+      STORAGE_ENDPOINT: 'localhost:9000',
+      STORAGE_ACCESS_KEY_ID: 'minio-access-key',
+      STORAGE_SECRET_ACCESS_KEY: 'minio-secret-key',
+      STORAGE_USE_SSL: 'true',
+    });
+
+    expect(config).toMatchObject({
+      storageProvider: 'minio',
+      storageBucket: 'roomscan-assets',
+      storageRegion: 'us-east-1',
+      storageEndpoint: 'localhost:9000',
+      storageAccessKeyId: 'minio-access-key',
+      storageSecretAccessKey: 'minio-secret-key',
+      storageUseSsl: true,
+    });
+  });
+
+  it.each([
+    ['STORAGE_BUCKET', ''],
+    ['STORAGE_ENDPOINT', ''],
+    ['STORAGE_ACCESS_KEY_ID', ''],
+    ['STORAGE_SECRET_ACCESS_KEY', ''],
+  ])('rejects a minio provider missing %s', (name, value) => {
+    expect(() =>
+      loadConfig({
+        ...validEnvironment,
+        STORAGE_PROVIDER: 'minio',
+        STORAGE_BUCKET: 'roomscan-assets',
+        STORAGE_ENDPOINT: 'localhost:9000',
+        STORAGE_ACCESS_KEY_ID: 'minio-access-key',
+        STORAGE_SECRET_ACCESS_KEY: 'minio-secret-key',
+        [name]: value,
+      }),
+    ).toThrow(RegExp(`${name} is required when STORAGE_PROVIDER=minio`));
+  });
+
+  it('rejects an unknown storage provider', () => {
+    expect(() =>
+      loadConfig({
+        ...validEnvironment,
+        STORAGE_PROVIDER: 's3',
       }),
     ).toThrow(ZodError);
   });

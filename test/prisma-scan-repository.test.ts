@@ -402,6 +402,31 @@ describe('PrismaScanRepository', () => {
     expect(transaction).toHaveBeenCalledOnce();
   });
 
+  it('updates asset status on an active scan with a soft-delete guard', async () => {
+    const { client, scan } = createClient();
+    const repository = new PrismaScanRepository(client);
+
+    await repository.updateAssetStatus(SCAN_ID, {
+      assetStatus: 'UPLOADED',
+      syncStatus: 'SYNCED',
+    });
+
+    expect(scan.updateMany).toHaveBeenCalledWith({
+      where: { id: SCAN_ID, deletedAt: null },
+      data: { assetStatus: 'UPLOADED', syncStatus: 'SYNCED' },
+    });
+  });
+
+  it('treats an asset status update affecting no rows as a no-op', async () => {
+    const { client, scan } = createClient();
+    scan.updateMany.mockResolvedValue({ count: 0 });
+    const repository = new PrismaScanRepository(client);
+
+    await expect(
+      repository.updateAssetStatus(SCAN_ID, { assetStatus: 'UPLOADED', syncStatus: 'SYNCED' }),
+    ).resolves.toBeUndefined();
+  });
+
   it('hides deletion from a Viewer or unrelated user', async () => {
     const { client, scan } = createClient();
     scan.findFirst.mockResolvedValueOnce(null);

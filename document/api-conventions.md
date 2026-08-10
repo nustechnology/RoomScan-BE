@@ -5,6 +5,7 @@
 - Public application routes are versioned under `/api/v1`.
 - Liveness and readiness are `/api/v1/health` and `/api/v1/ready`.
 - Apple authentication is `POST /api/v1/auth/apple`.
+- Token refresh is `POST /api/v1/auth/refresh`.
 - Project management is `POST`, `GET`, `GET/:id`, `PATCH/:id`, and `DELETE/:id` at
   `/api/v1/projects`.
 - Scan metadata is `POST` and `GET` at `/api/v1/projects/:projectId/scans`, and
@@ -55,13 +56,14 @@ Error responses also include it in the `requestId` field. A non-empty incoming
 
 ## Rate limiting
 
-Public API traffic has two process-local per-IP policies:
+Public API traffic has three process-local per-IP policies:
 
 - `/api/v1` allows 120 requests per 60 seconds.
 - `POST /api/v1/auth/apple` additionally allows 20 requests per 15 minutes.
+- `POST /api/v1/auth/refresh` additionally allows 10 requests per 15 minutes.
 
 `/api/v1/health`, `/api/v1/ready`, `/api-doc` and `/api-doc.json` are exempt.
-All Apple attempts count, including validation, credential and dependency
+All Apple and refresh attempts count, including validation, credential and dependency
 failures. IPv6 clients are grouped by `/56`.
 
 Allowed and rejected limited requests expose draft-8 `RateLimit` and
@@ -118,8 +120,7 @@ Malformed or unverifiable Apple tokens return 401 with
 `INVALID_APPLE_IDENTITY_TOKEN`. Apple JWKS fetch failures return 503 with
 `APPLE_IDENTITY_PROVIDER_UNAVAILABLE`. Exceeded API or Apple quotas return 429
 with `RATE_LIMIT_EXCEEDED`. These errors use generic client-facing messages.
-The endpoint does not exchange Apple authorization codes and does not provide
-an application refresh endpoint.
+The endpoint does not exchange Apple authorization codes.
 
 For local development only, `LOCAL_TEST_AUTH_ENABLED=true` with
 `NODE_ENV=development` permits the fixed identity token
@@ -128,6 +129,49 @@ verification, resolves the user provisioned by `yarn seed:local`, and otherwise
 uses the normal user upsert and RoomScan JWT issuance flow. Any other token
 still goes through Apple. Configuration rejects the flag in test, staging, and
 production, so this shortcut is not part of the deployed OpenAPI contract.
+
+## Refresh token rotation
+
+`POST /api/v1/auth/refresh` accepts a RoomScan refresh JWT and issues a new
+access+refresh pair. The old refresh token is revoked so each refresh JWT may
+only be used once.
+
+Request body:
+
+```json
+{ "refreshToken": "roomscan-refresh-jwt" }
+```
+
+Success `200`:
+
+```json
+{ "accessToken": "roomscan-access-jwt", "refreshToken": "roomscan-refresh-jwt" }
+```
+
+Errors:
+
+| Code                    | HTTP | Meaning                                                |
+| ----------------------- | ---- | ------------------------------------------------------ |
+| `VALIDATION_ERROR`      | 400  | The request body is missing `refreshToken`             |
+| `INVALID_REFRESH_TOKEN` | 401  | The supplied token is invalid, expired, or revoked     |
+| `RATE_LIMIT_EXCEEDED`   | 429  | Per-IP quota exceeded (10 req / 15 min)                |
+| `INTERNAL_SERVER_ERROR` | 500  | Unexpected failure without secret or database exposure |
+
+Rotation is stateful: each issued refresh JWT has a unique `jti` (JWT ID)
+persisted in the `refresh_tokens` table until it expires. Revocation sets
+`revokedAt` without deleting the row, so every recorded JTI remains queryable
+for audit and future theft-detection. The service consumes the presented JTI
+atomically: a single database operation matches the unrevoked, unexpired row and
+sets `revokedAt` in place of the former separate lookup-and-revoke. When an
+already-revoked or unknown `jti` is consumed, the operation affects zero rows
+and the endpoint returns 401 with `INVALID_REFRESH_TOKEN`. This prevents
+concurrent requests from both rotating the same token. The service is designed
+to support token-theft detection by revoking all sessions for a user when a
+stale `jti` is presented, though the current implementation only rejects the
+stale token.
+
+The same per-IP rate-limit headers (`RateLimit`, `RateLimit-Policy`, and
+`Retry-After` on 429) apply to this endpoint.
 
 ## Projects
 
@@ -332,7 +376,7 @@ Error behavior:
 Every scan-asset endpoint requires a valid Bearer access token. A scan has at
 most one model asset and one thumbnail asset (keyed by `assetType`). The project
 Owner creates and completes uploads; the Owner and active Viewers can list
-metadata and request short-lived download URLs. Revoked Viewers and access to
+metadata and request download URLs. Revoked Viewers and access to
 deleted projects/scans are hidden behind `404`.
 
 | Method | Endpoint                                               | Result                                                          |
@@ -340,7 +384,7 @@ deleted projects/scans are hidden behind `404`.
 | `POST` | `/api/v1/scans/:scanId/assets/upload-sessions`         | Create an upload session; Owner only; `201` or idempotent `200` |
 | `POST` | `/api/v1/upload-sessions/:uploadSessionId/complete`    | Mark an upload session completed; Owner only; idempotent `200`  |
 | `GET`  | `/api/v1/scans/:scanId/assets`                         | List asset metadata; Owner or active Viewer                     |
-| `GET`  | `/api/v1/scans/:scanId/assets/:assetType/download-url` | Generate a signed download URL; Owner or active Viewer          |
+| `GET`  | `/api/v1/scans/:scanId/assets/:assetType/download-url` | Generate a download URL; Owner or active Viewer                 |
 | `POST` | `/api/v1/upload-sessions/:uploadSessionId/fail`        | Report an upload failure; Owner only                            |
 
 Create-session request:
@@ -356,19 +400,29 @@ Create-session request:
 
 Asset metadata response fields: `assetId`, `scanId`, `assetType`, `status`, and
 for the download response `downloadUrl` plus `downloadUrlExpiresAt`. The target
-object key is a `storageKey` persisted internally but never returned to clients.
+object key is a `storageKey` persisted internally; the field is omitted from
+responses, though the local provider's URLs embed the object key path.
 
 Behavior and rules:
 
 - Create and complete are Owner-only; list and download are Owner or active
   Viewer.
 - Completed uploads are idempotent: repeating `complete` returns the stored
-  asset without creating duplicates.
+  asset without creating duplicates and, for a model, re-applies the parent scan
+  status update so a retry recovers from an earlier failed scan update.
 - Completed model uploads mark the scan `assetStatus = UPLOADED` and
-  `syncStatus = SYNCED`; a reported failure marks the scan `FAILED`.
+  `syncStatus = SYNCED`; a reported failure marks the scan `FAILED`. Thumbnail
+  completion leaves the scan status unchanged.
 - A download URL is only issued once an asset has status `UPLOADED`; otherwise
-  the API returns `409 ASSET_NOT_READY`.
-- Signed URLs are short-lived and expire per the configured TTLs.
+  the API returns `409 ASSET_NOT_READY`, and a missing asset record returns
+  `404 ASSET_NOT_FOUND`.
+- URLs carry the configured TTL as expiry metadata. The `local` provider mints
+  unsigned URLs, does not persist bytes, and is restricted to non-production
+  environments (`NODE_ENV=production` rejects `STORAGE_PROVIDER=local`). The
+  `minio` provider mints presigned S3 URLs whose expiry is enforced by MinIO
+  and, before completion, verifies that the uploaded object exists and that its
+  stored size and content type exactly match the session's declared
+  `contentType` and `sizeBytes`.
 
 Error behavior:
 
@@ -379,7 +433,8 @@ Error behavior:
 - `404 ASSET_NOT_FOUND`: asset record missing or inaccessible.
 - `409 ASSET_NOT_READY`: asset has not been uploaded yet.
 - `409 UPLOAD_SESSION_EXPIRED`: upload session expired before completion.
-- `409 ASSET_UPLOAD_FAILED`: the store could not verify the uploaded object.
+- `409 ASSET_UPLOAD_FAILED`: the uploaded object is missing or its stored size
+  or content type does not match the session.
 - `503 STORAGE_UNAVAILABLE`: the storage provider is unavailable.
 - `429 RATE_LIMIT_EXCEEDED`: API quota exceeded.
 - `500 INTERNAL_SERVER_ERROR`: unexpected failure without Prisma, SQL, or secret

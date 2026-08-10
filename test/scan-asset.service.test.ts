@@ -23,7 +23,7 @@ const OWNER_ID = 'eb5d278f-c857-45c7-887d-7be65288cb75';
 const VIEWER_ID = '8c53d31d-2788-48de-82a0-c4f219ca3701';
 const PROJECT_ID = 'a1b2c3d4-e5f6-4890-abcd-ef1234567890';
 const SCAN_ID = 'f1e2d3c4-a5b6-7890-abcd-ef1234567890';
-const ASSET_ID = 'a1b2c3d4-e5f6-4890-abcd-ef1234567890';
+const ASSET_ID = 'c0ffee00-0000-4000-8000-000000000001';
 const NOW = new Date('2026-07-29T10:00:00.000Z');
 
 function createAssetRecord(overrides: Partial<ScanAssetRecord> = {}): ScanAssetRecord {
@@ -60,7 +60,9 @@ function createHarness() {
   const findByScanAndType = vi
     .fn<ScanAssetRepository['findByScanAndType']>()
     .mockResolvedValue(null);
-  const create = vi.fn<ScanAssetRepository['create']>().mockResolvedValue(createAssetRecord());
+  const create = vi
+    .fn<ScanAssetRepository['create']>()
+    .mockResolvedValue({ record: createAssetRecord(), created: true });
   const update = vi.fn<ScanAssetRepository['update']>().mockResolvedValue(createAssetRecord());
   const listByScan = vi.fn<ScanAssetRepository['listByScan']>().mockResolvedValue([]);
   const assetRepository: ScanAssetRepository = {
@@ -159,6 +161,51 @@ describe('ScanAssetService', () => {
     expect(create).not.toHaveBeenCalled();
   });
 
+  it('refreshes an expired session without reporting a new creation', async () => {
+    const { service, findByScanAndType, update } = createHarness();
+    findByScanAndType.mockResolvedValueOnce(
+      createAssetRecord({ uploadUrlExpiresAt: new Date(NOW.getTime() - 60_000) }),
+    );
+    update.mockResolvedValueOnce(createAssetRecord());
+
+    const result = await service.createUploadSession(OWNER_ID, SCAN_ID, {
+      assetType: 'MODEL',
+      contentType: 'model/gltf-binary',
+      sizeBytes: 1024,
+      checksum: 'abc',
+      modelVersion: '1',
+    });
+
+    expect(result.created).toBe(false);
+    expect(result.uploadSessionId).toBe(ASSET_ID);
+  });
+
+  it('resolves concurrent creates to the same upload session', async () => {
+    const { service, findByScanAndType, create } = createHarness();
+    findByScanAndType.mockResolvedValue(null);
+    const record = createAssetRecord();
+    create.mockResolvedValueOnce({ record, created: true });
+    create.mockResolvedValue({ record, created: false });
+
+    const payload = {
+      assetType: 'MODEL' as const,
+      contentType: 'model/gltf-binary',
+      sizeBytes: 1024,
+      checksum: 'abc',
+      modelVersion: '1',
+    };
+    const [first, second] = await Promise.all([
+      service.createUploadSession(OWNER_ID, SCAN_ID, payload),
+      service.createUploadSession(OWNER_ID, SCAN_ID, payload),
+    ]);
+
+    expect(first.uploadSessionId).toBe(record.id);
+    expect(first.created).toBe(true);
+    expect(second.uploadSessionId).toBe(record.id);
+    expect(second.created).toBe(false);
+    expect(create).toHaveBeenCalledTimes(2);
+  });
+
   it('rejects a Viewer from creating an upload session', async () => {
     const { service } = createHarness();
 
@@ -185,6 +232,21 @@ describe('ScanAssetService', () => {
     ).rejects.toBeInstanceOf(InvalidAssetRequestError);
   });
 
+  it('reports a storage outage when minting an upload URL', async () => {
+    const { service, createUploadUrl } = createHarness();
+    createUploadUrl.mockRejectedValueOnce(new Error('down'));
+
+    await expect(
+      service.createUploadSession(OWNER_ID, SCAN_ID, {
+        assetType: 'MODEL',
+        contentType: 'model/gltf-binary',
+        sizeBytes: 1024,
+        checksum: 'abc',
+        modelVersion: '1',
+      }),
+    ).rejects.toBeInstanceOf(StorageUnavailableError);
+  });
+
   it('rejects an oversized model asset', async () => {
     const { service } = createHarness();
 
@@ -198,26 +260,42 @@ describe('ScanAssetService', () => {
   });
 
   it('completes an upload and marks the model synced', async () => {
-    const { service, update, updateAssetStatus } = createHarness();
+    const { service, update, updateAssetStatus, verifyObject } = createHarness();
     update.mockResolvedValueOnce(createAssetRecord({ status: 'UPLOADED', uploadedAt: NOW }));
 
     const result = await service.completeUpload(OWNER_ID, ASSET_ID, {});
 
     expect(result.status).toBe('UPLOADED');
+    expect(verifyObject).toHaveBeenCalledWith(`scans/${SCAN_ID}/model`, {
+      contentType: 'model/gltf-binary',
+      sizeBytes: 1024,
+    });
     expect(updateAssetStatus).toHaveBeenCalledWith(SCAN_ID, {
       assetStatus: 'UPLOADED',
       syncStatus: 'SYNCED',
     });
   });
 
+  it('rejects a client-supplied size exceeding the model limit', async () => {
+    const { service } = createHarness();
+
+    await expect(
+      service.completeUpload(OWNER_ID, ASSET_ID, { sizeBytes: 600_000_000 }),
+    ).rejects.toBeInstanceOf(InvalidAssetRequestError);
+  });
+
   it('is idempotent when the upload is already completed', async () => {
-    const { service, findById, update } = createHarness();
+    const { service, findById, update, updateAssetStatus } = createHarness();
     findById.mockResolvedValueOnce(createAssetRecord({ status: 'UPLOADED', uploadedAt: NOW }));
 
     const result = await service.completeUpload(OWNER_ID, ASSET_ID, {});
 
     expect(result.status).toBe('UPLOADED');
     expect(update).not.toHaveBeenCalled();
+    expect(updateAssetStatus).toHaveBeenCalledWith(SCAN_ID, {
+      assetStatus: 'UPLOADED',
+      syncStatus: 'SYNCED',
+    });
   });
 
   it('rejects completing an expired upload session', async () => {
@@ -269,6 +347,27 @@ describe('ScanAssetService', () => {
 
     expect(result.downloadUrl).toBe('http://storage/download');
     expect(createDownloadUrl).toHaveBeenCalled();
+  });
+
+  it('throws not-found when the asset does not exist', async () => {
+    const { service, findByScanAndType } = createHarness();
+    findByScanAndType.mockResolvedValueOnce(null);
+
+    await expect(service.getDownloadUrl(VIEWER_ID, SCAN_ID, 'MODEL')).rejects.toBeInstanceOf(
+      ScanAssetNotFoundError,
+    );
+  });
+
+  it('reports a storage outage when minting a download URL', async () => {
+    const { service, findByScanAndType, createDownloadUrl } = createHarness();
+    findByScanAndType.mockResolvedValueOnce(
+      createAssetRecord({ status: 'UPLOADED', uploadedAt: NOW }),
+    );
+    createDownloadUrl.mockRejectedValueOnce(new Error('down'));
+
+    await expect(service.getDownloadUrl(VIEWER_ID, SCAN_ID, 'MODEL')).rejects.toBeInstanceOf(
+      StorageUnavailableError,
+    );
   });
 
   it('returns asset-not-ready when the asset has not been uploaded', async () => {

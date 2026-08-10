@@ -8,11 +8,13 @@ import { AppError } from '../errors/app-error.js';
 export interface RateLimiters {
   api: RequestHandler;
   appleAuth: RequestHandler;
+  refreshAuth: RequestHandler;
 }
 
 export interface RateLimitStores {
   api?: Store;
   appleAuth?: Store;
+  refreshAuth?: Store;
 }
 
 interface RateLimitPolicyOptions {
@@ -92,6 +94,13 @@ export function createRateLimiters(
       maxRequests: config.appleAuthRateLimitMaxRequests,
       logger: rateLimitLogger,
       ...(stores.appleAuth === undefined ? {} : { store: stores.appleAuth }),
+    }),
+    refreshAuth: createRateLimiter({
+      identifier: 'auth-refresh',
+      windowSeconds: config.refreshAuthRateLimitWindowSeconds,
+      maxRequests: config.refreshAuthRateLimitMaxRequests,
+      logger: rateLimitLogger,
+      ...(stores.refreshAuth === undefined ? {} : { store: stores.refreshAuth }),
     }),
   };
 }

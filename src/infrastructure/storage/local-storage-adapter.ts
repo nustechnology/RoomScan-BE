@@ -5,6 +5,7 @@ import type {
   StorageDownloadUrl,
   StorageUploadOptions,
   StorageUploadUrl,
+  StorageVerifyOptions,
 } from './storage.types.js';
 
 export interface LocalStorageAdapterOptions {
@@ -49,7 +50,7 @@ export class LocalStorageAdapter implements StorageAdapter {
     });
   }
 
-  verifyObject(_objectKey: string): Promise<boolean> {
+  verifyObject(_objectKey: string, _expected: StorageVerifyOptions): Promise<boolean> {
     return Promise.resolve(true);
   }
 }

@@ -109,16 +109,21 @@ export const environmentSchema = z
     RATE_LIMIT_API_MAX_REQUESTS: rateLimitMaxRequestsSchema.default(120),
     RATE_LIMIT_APPLE_AUTH_WINDOW_SECONDS: rateLimitWindowSecondsSchema.default(900),
     RATE_LIMIT_APPLE_AUTH_MAX_REQUESTS: rateLimitMaxRequestsSchema.default(20),
+    RATE_LIMIT_REFRESH_AUTH_WINDOW_SECONDS: rateLimitWindowSecondsSchema.default(900),
+    RATE_LIMIT_REFRESH_AUTH_MAX_REQUESTS: rateLimitMaxRequestsSchema.default(10),
     APPLE_CLIENT_ID: z.string().trim().min(1).max(255),
     AUTH_ACCESS_TOKEN_SECRET: z.string().min(32),
     AUTH_REFRESH_TOKEN_SECRET: z.string().min(32),
     AUTH_ACCESS_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(3600),
     AUTH_REFRESH_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(2_592_000),
     LOCAL_TEST_AUTH_ENABLED: environmentBooleanSchema,
-    STORAGE_PROVIDER: z.string().trim().min(1).default('local'),
+    STORAGE_PROVIDER: z.enum(['local', 'minio']).default('local'),
     STORAGE_BUCKET: z.string().trim().default(''),
     STORAGE_REGION: z.string().trim().default(''),
     STORAGE_ENDPOINT: z.string().trim().default(''),
+    STORAGE_ACCESS_KEY_ID: z.string().trim().default(''),
+    STORAGE_SECRET_ACCESS_KEY: z.string().trim().default(''),
+    STORAGE_USE_SSL: environmentBooleanSchema,
     STORAGE_UPLOAD_URL_TTL_SECONDS: z.coerce.number().int().positive().default(900),
     STORAGE_DOWNLOAD_URL_TTL_SECONDS: z.coerce.number().int().positive().default(60),
     ASSET_MAX_MODEL_SIZE_BYTES: z.coerce.number().int().positive().default(500_000_000),
@@ -140,6 +145,32 @@ export const environmentSchema = z
         message: 'LOCAL_TEST_AUTH_ENABLED may only be enabled when NODE_ENV=development',
       });
     }
+
+    if (environment.NODE_ENV === 'production' && environment.STORAGE_PROVIDER === 'local') {
+      context.addIssue({
+        code: 'custom',
+        path: ['STORAGE_PROVIDER'],
+        message: 'STORAGE_PROVIDER=local is not allowed when NODE_ENV=production',
+      });
+    }
+
+    if (environment.STORAGE_PROVIDER === 'minio') {
+      const requiredStorage: Array<[keyof typeof environmentSchema.shape, string]> = [
+        ['STORAGE_BUCKET', environment.STORAGE_BUCKET],
+        ['STORAGE_ENDPOINT', environment.STORAGE_ENDPOINT],
+        ['STORAGE_ACCESS_KEY_ID', environment.STORAGE_ACCESS_KEY_ID],
+        ['STORAGE_SECRET_ACCESS_KEY', environment.STORAGE_SECRET_ACCESS_KEY],
+      ];
+      for (const [name, value] of requiredStorage) {
+        if (value.trim().length === 0) {
+          context.addIssue({
+            code: 'custom',
+            path: [name],
+            message: `${name} is required when STORAGE_PROVIDER=minio`,
+          });
+        }
+      }
+    }
   });
 
 export interface AppConfig {
@@ -153,6 +184,8 @@ export interface AppConfig {
   apiRateLimitMaxRequests: number;
   appleAuthRateLimitWindowSeconds: number;
   appleAuthRateLimitMaxRequests: number;
+  refreshAuthRateLimitWindowSeconds: number;
+  refreshAuthRateLimitMaxRequests: number;
   appleClientId: string;
   accessTokenSecret: string;
   refreshTokenSecret: string;
@@ -163,6 +196,9 @@ export interface AppConfig {
   storageBucket: string;
   storageRegion: string;
   storageEndpoint: string;
+  storageAccessKeyId: string;
+  storageSecretAccessKey: string;
+  storageUseSsl: boolean;
   storageUploadUrlTtlSeconds: number;
   storageDownloadUrlTtlSeconds: number;
   assetMaxModelSizeBytes: number;
@@ -189,6 +225,8 @@ export function loadConfig(input: NodeJS.ProcessEnv = process.env): AppConfig {
     apiRateLimitMaxRequests: environment.RATE_LIMIT_API_MAX_REQUESTS,
     appleAuthRateLimitWindowSeconds: environment.RATE_LIMIT_APPLE_AUTH_WINDOW_SECONDS,
     appleAuthRateLimitMaxRequests: environment.RATE_LIMIT_APPLE_AUTH_MAX_REQUESTS,
+    refreshAuthRateLimitWindowSeconds: environment.RATE_LIMIT_REFRESH_AUTH_WINDOW_SECONDS,
+    refreshAuthRateLimitMaxRequests: environment.RATE_LIMIT_REFRESH_AUTH_MAX_REQUESTS,
     appleClientId: environment.APPLE_CLIENT_ID,
     accessTokenSecret: environment.AUTH_ACCESS_TOKEN_SECRET,
     refreshTokenSecret: environment.AUTH_REFRESH_TOKEN_SECRET,
@@ -199,6 +237,9 @@ export function loadConfig(input: NodeJS.ProcessEnv = process.env): AppConfig {
     storageBucket: environment.STORAGE_BUCKET,
     storageRegion: environment.STORAGE_REGION,
     storageEndpoint: environment.STORAGE_ENDPOINT,
+    storageAccessKeyId: environment.STORAGE_ACCESS_KEY_ID,
+    storageSecretAccessKey: environment.STORAGE_SECRET_ACCESS_KEY,
+    storageUseSsl: environment.STORAGE_USE_SSL,
     storageUploadUrlTtlSeconds: environment.STORAGE_UPLOAD_URL_TTL_SECONDS,
     storageDownloadUrlTtlSeconds: environment.STORAGE_DOWNLOAD_URL_TTL_SECONDS,
     assetMaxModelSizeBytes: environment.ASSET_MAX_MODEL_SIZE_BYTES,

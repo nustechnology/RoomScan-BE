@@ -55,7 +55,7 @@ export interface ScanAssetUpdateData {
 export interface ScanAssetRepository {
   findById(id: string): Promise<ScanAssetRecord | null>;
   findByScanAndType(scanId: string, assetType: ScanAssetType): Promise<ScanAssetRecord | null>;
-  create(data: ScanAssetCreateData): Promise<ScanAssetRecord>;
+  create(data: ScanAssetCreateData): Promise<{ record: ScanAssetRecord; created: boolean }>;
   update(id: string, data: ScanAssetUpdateData): Promise<ScanAssetRecord>;
   listByScan(scanId: string): Promise<ScanAssetRecord[]>;
 }

@@ -47,6 +47,8 @@ describe('JoseAuthTokenIssuer', () => {
     });
     expect(access.payload.exp! - access.payload.iat!).toBe(3600);
     expect(refresh.payload.exp! - refresh.payload.iat!).toBe(2_592_000);
+    expect(tokens.refreshTokenJti).toBe(refresh.payload.jti);
+    expect(tokens.refreshTokenExpiresAt.getTime()).toBe(refresh.payload.exp! * 1000);
     expect(access.payload.jti).toEqual(expect.any(String));
     expect(refresh.payload.jti).toEqual(expect.any(String));
     expect(access.payload.jti).not.toBe(refresh.payload.jti);

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import type { PrismaClient } from '../src/generated/prisma/client.js';
+import { Prisma, type PrismaClient } from '../src/generated/prisma/client.js';
 import { PrismaScanAssetRepository } from '../src/infrastructure/database/prisma-scan-asset-repository.js';
 
 const SCAN_ID = 'f1e2d3c4-a5b6-7890-abcd-ef1234567890';
@@ -87,11 +87,11 @@ describe('PrismaScanAssetRepository', () => {
     expect(result?.assetType).toBe('MODEL');
   });
 
-  it('creates an asset row in PENDING state', async () => {
+  it('creates an asset row in PENDING state and reports a fresh insert', async () => {
     const { client, scanAsset } = createClient();
     const repository = new PrismaScanAssetRepository(client);
 
-    await repository.create({
+    const result = await repository.create({
       scanId: SCAN_ID,
       assetType: 'MODEL',
       contentType: 'model/gltf-binary',
@@ -118,6 +118,60 @@ describe('PrismaScanAssetRepository', () => {
       },
       select: scanAssetSelect,
     });
+    expect(result.created).toBe(true);
+    expect(result.record.id).toBe(ASSET_ID);
+  });
+
+  it('resolves a concurrent duplicate insert to the existing session as not created', async () => {
+    const { client, scanAsset } = createClient();
+    const conflict = new Prisma.PrismaClientKnownRequestError('unique constraint', {
+      code: 'P2002',
+      clientVersion: 'test',
+      meta: { target: ['scanId', 'assetType'] },
+    });
+    scanAsset.create.mockRejectedValueOnce(conflict);
+    scanAsset.findUnique.mockResolvedValueOnce(createAssetRow({ id: ASSET_ID }));
+    const repository = new PrismaScanAssetRepository(client);
+
+    const result = await repository.create({
+      scanId: SCAN_ID,
+      assetType: 'MODEL',
+      contentType: 'model/gltf-binary',
+      sizeBytes: 1024,
+      checksum: 'abc123',
+      modelVersion: '1',
+      storageKey: `scans/${SCAN_ID}/model`,
+      idempotencyKey: null,
+      uploadUrlExpiresAt: NOW,
+    });
+
+    expect(scanAsset.findUnique).toHaveBeenCalledWith({
+      where: { scanId_assetType: { scanId: SCAN_ID, assetType: 'MODEL' } },
+      select: scanAssetSelect,
+    });
+    expect(result.created).toBe(false);
+    expect(result.record.id).toBe(ASSET_ID);
+  });
+
+  it('rethrows non-duplicate errors from create', async () => {
+    const { client, scanAsset } = createClient();
+    scanAsset.create.mockRejectedValueOnce(new Error('boom'));
+    const repository = new PrismaScanAssetRepository(client);
+
+    await expect(
+      repository.create({
+        scanId: SCAN_ID,
+        assetType: 'MODEL',
+        contentType: 'model/gltf-binary',
+        sizeBytes: 1024,
+        checksum: 'abc123',
+        modelVersion: '1',
+        storageKey: `scans/${SCAN_ID}/model`,
+        idempotencyKey: null,
+        uploadUrlExpiresAt: NOW,
+      }),
+    ).rejects.toThrow('boom');
+    expect(scanAsset.findUnique).not.toHaveBeenCalled();
   });
 
   it('updates an asset', async () => {

@@ -25,7 +25,6 @@ import {
 } from '../src/modules/scan-asset/scan-asset.schemas.js';
 import {
   AssetNotReadyError,
-  InvalidAssetRequestError,
   ScanAssetNotFoundError,
   StorageUnavailableError,
   UploadSessionExpiredError,
@@ -55,6 +54,8 @@ const config: AppConfig = {
   apiRateLimitMaxRequests: 120,
   appleAuthRateLimitWindowSeconds: 900,
   appleAuthRateLimitMaxRequests: 20,
+  refreshAuthRateLimitWindowSeconds: 900,
+  refreshAuthRateLimitMaxRequests: 10,
   appleClientId: 'com.example.roomscan',
   accessTokenSecret: ACCESS_SECRET,
   refreshTokenSecret: 'refresh-secret-that-is-at-least-32-characters',
@@ -65,6 +66,9 @@ const config: AppConfig = {
   storageBucket: '',
   storageRegion: '',
   storageEndpoint: '',
+  storageAccessKeyId: '',
+  storageSecretAccessKey: '',
+  storageUseSsl: false,
   storageUploadUrlTtlSeconds: 900,
   storageDownloadUrlTtlSeconds: 60,
   assetMaxModelSizeBytes: 500_000_000,
@@ -120,6 +124,7 @@ describe('Scan asset HTTP endpoints', () => {
   const logger = pino({ enabled: false });
   const rateLimiters = createRateLimiters(config, logger);
   const authService = { signInWithApple: vi.fn() };
+  const refreshTokenService = { refresh: vi.fn() };
   const accessTokenVerifier: AccessTokenVerifier = {
     verify: vi.fn(async (token: string) => {
       const { payload } = await jwtVerify(token, new TextEncoder().encode(ACCESS_SECRET), {
@@ -179,6 +184,7 @@ describe('Scan asset HTTP endpoints', () => {
     database,
     logger,
     authService,
+    refreshTokenService,
     projectService,
     scanService,
     scanAssetService,
@@ -287,8 +293,6 @@ describe('Scan asset HTTP endpoints', () => {
     });
 
     it('rejects a disallowed content type for the asset type', async () => {
-      createUploadSession.mockRejectedValueOnce(new InvalidAssetRequestError());
-
       const response = await request(app)
         .post(`/api/v1/scans/${SCAN_ID}/assets/upload-sessions`)
         .set('Authorization', `Bearer ${tokenA}`)
@@ -439,6 +443,18 @@ describe('Scan asset HTTP endpoints', () => {
       const body = ErrorResponseSchema.parse(response.body as unknown);
 
       expect(body.error.code).toBe('ASSET_NOT_READY');
+    });
+
+    it('returns not-found when the asset record is missing', async () => {
+      getDownloadUrl.mockRejectedValueOnce(new ScanAssetNotFoundError());
+
+      const response = await request(app)
+        .get(`/api/v1/scans/${SCAN_ID}/assets/MODEL/download-url`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(404);
+      const body = ErrorResponseSchema.parse(response.body as unknown);
+
+      expect(body.error.code).toBe('ASSET_NOT_FOUND');
     });
 
     it('rejects an invalid asset type', async () => {

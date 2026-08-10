@@ -20,6 +20,11 @@ export interface StorageDownloadOptions {
   expiresAt: Date;
 }
 
+export interface StorageVerifyOptions {
+  contentType: string;
+  sizeBytes: number;
+}
+
 export interface StorageAdapter {
   readonly provider: string;
   buildObjectKey(scanId: string, assetType: ScanAssetType): string;
@@ -28,5 +33,5 @@ export interface StorageAdapter {
     objectKey: string,
     options: StorageDownloadOptions,
   ): Promise<StorageDownloadUrl>;
-  verifyObject(objectKey: string): Promise<boolean>;
+  verifyObject(objectKey: string, expected: StorageVerifyOptions): Promise<boolean>;
 }
