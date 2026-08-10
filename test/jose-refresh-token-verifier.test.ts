@@ -124,4 +124,33 @@ describe('JoseRefreshTokenVerifier', () => {
 
     await expect(verifier.verify(token)).rejects.toBeInstanceOf(InvalidRefreshTokenError);
   });
+
+  it('uses the system clock when no clock is injected', async () => {
+    const verifier = new JoseRefreshTokenVerifier({ refreshTokenSecret: REFRESH_SECRET });
+    const token = await signToken(
+      { tokenType: 'refresh', jti: 'eb5d278f-c857-45c7-887d-7be65288cb75' },
+      REFRESH_SECRET,
+      { issuedAt: Math.floor(Date.now() / 1000) },
+    );
+
+    await expect(verifier.verify(token)).resolves.toMatchObject({
+      userId: USER_ID,
+      jti: 'eb5d278f-c857-45c7-887d-7be65288cb75',
+    });
+  });
+
+  it('rethrows unexpected non-JOSE verification failures', async () => {
+    const verifier = new JoseRefreshTokenVerifier({
+      refreshTokenSecret: REFRESH_SECRET,
+      clock: () => {
+        throw new Error('clock failure');
+      },
+    });
+    const token = await signToken(
+      { tokenType: 'refresh', jti: 'eb5d278f-c857-45c7-887d-7be65288cb75' },
+      REFRESH_SECRET,
+    );
+
+    await expect(verifier.verify(token)).rejects.toThrow('clock failure');
+  });
 });

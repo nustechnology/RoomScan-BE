@@ -2,9 +2,9 @@ import type { PrismaClient } from '../../generated/prisma/client.js';
 import type { RefreshTokenRepository } from '../../modules/auth/auth.types.js';
 
 export class PrismaRefreshTokenRepository implements RefreshTokenRepository {
-  readonly #client: Pick<PrismaClient, 'refreshToken'>;
+  readonly #client: Pick<PrismaClient, 'refreshToken' | '$transaction'>;
 
-  constructor(client: Pick<PrismaClient, 'refreshToken'>) {
+  constructor(client: Pick<PrismaClient, 'refreshToken' | '$transaction'>) {
     this.#client = client;
   }
 
@@ -25,5 +25,24 @@ export class PrismaRefreshTokenRepository implements RefreshTokenRepository {
     });
 
     return result.count > 0;
+  }
+
+  async rotate(oldJti: string, newJti: string, userId: string, expiresAt: Date): Promise<boolean> {
+    return this.#client.$transaction(async (tx) => {
+      const result = await tx.refreshToken.updateMany({
+        where: { jti: oldJti, revokedAt: null, expiresAt: { gt: new Date() } },
+        data: { revokedAt: new Date() },
+      });
+
+      if (result.count === 0) {
+        return false;
+      }
+
+      await tx.refreshToken.create({
+        data: { jti: newJti, userId, expiresAt },
+      });
+
+      return true;
+    });
   }
 }

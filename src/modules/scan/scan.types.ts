@@ -102,4 +102,8 @@ export interface ScanRepository {
   ): Promise<{ record: ScanRecord; role: ScanRole } | null>;
   update(id: string, ownerId: string, data: ScanUpdateInput): Promise<ScanRecord>;
   softDelete(id: string, ownerId: string): Promise<void>;
+  updateAssetStatus(
+    scanId: string,
+    data: { assetStatus?: ScanAssetStatus; syncStatus?: ScanSyncStatus },
+  ): Promise<void>;
 }

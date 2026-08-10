@@ -33,6 +33,11 @@ enum AssetStatus {
   FAILED
 }
 
+enum AssetType {
+  MODEL
+  THUMBNAIL
+}
+
 model User {
   id            String       @id @default(uuid()) @db.Uuid
   provider      AuthProvider
@@ -81,7 +86,6 @@ model Project {
   @@index([ownerId, deletedAt, updatedAt, id])
   @@map("projects")
 }
-
 model ProjectAccess {
   id        String      @id @default(uuid()) @db.Uuid
   projectId String      @db.Uuid
@@ -116,9 +120,34 @@ model Scan {
 
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
   creator User    @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  assets  ScanAsset[]
 
   @@unique([projectId, clientMutationId])
   @@index([projectId, deletedAt, createdAt, id])
   @@index([createdById])
   @@map("scans")
+}
+
+model ScanAsset {
+  id                 String      @id @default(uuid()) @db.Uuid
+  scanId             String      @db.Uuid
+  assetType          AssetType
+  status             AssetStatus @default(PENDING)
+  contentType        String      @db.VarChar(128)
+  sizeBytes          Int
+  checksum           String?     @db.VarChar(128)
+  modelVersion       String?     @db.VarChar(64)
+  storageKey         String      @db.VarChar(512)
+  idempotencyKey     String?     @db.VarChar(128)
+  uploadedAt         DateTime?
+  uploadUrlExpiresAt DateTime?
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+
+  scan Scan @relation(fields: [scanId], references: [id], onDelete: Cascade)
+
+  @@unique([scanId, assetType])
+  @@unique([idempotencyKey])
+  @@index([scanId, status])
+  @@map("scan_assets")
 }

@@ -92,13 +92,7 @@ export function createAuthRouter({
         result = await refreshTokenService.refresh(refreshToken);
       } catch (error) {
         if (error instanceof InvalidRefreshTokenError) {
-          next(
-            new AppError({
-              statusCode: 401,
-              code: 'INVALID_REFRESH_TOKEN',
-              message: 'Refresh token is invalid',
-            }),
-          );
+          next(error);
           return;
         }
 

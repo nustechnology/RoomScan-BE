@@ -18,6 +18,7 @@ import { ScanNotFoundError } from '../src/modules/scan/scan.errors.js';
 import { ScanListResponseSchema, ScanResponseSchema } from '../src/modules/scan/scan.schemas.js';
 import type { ScanService } from '../src/modules/scan/scan.service.js';
 import type { ScanResult } from '../src/modules/scan/scan.types.js';
+import type { ScanAssetService } from '../src/modules/scan-asset/scan-asset.service.js';
 import type { ProjectService } from '../src/modules/project/project.service.js';
 
 const ACCESS_SECRET = 'access-secret-that-is-at-least-32-characters';
@@ -46,6 +47,17 @@ const config: AppConfig = {
   accessTokenTtlSeconds: 3600,
   refreshTokenTtlSeconds: 2_592_000,
   localTestAuthEnabled: false,
+  storageProvider: 'local',
+  storageBucket: '',
+  storageRegion: '',
+  storageEndpoint: '',
+  storageAccessKeyId: '',
+  storageSecretAccessKey: '',
+  storageUseSsl: false,
+  storageUploadUrlTtlSeconds: 900,
+  storageDownloadUrlTtlSeconds: 60,
+  assetMaxModelSizeBytes: 500_000_000,
+  assetMaxThumbnailSizeBytes: 10_000_000,
 };
 
 function scanResult(overrides: Partial<ScanResult> = {}): ScanResult {
@@ -134,6 +146,13 @@ describe('Scan HTTP endpoints', () => {
     update,
     delete: remove,
   } as unknown as ScanService;
+  const scanAssetService = {
+    createUploadSession: vi.fn(),
+    completeUpload: vi.fn(),
+    listAssets: vi.fn(),
+    getDownloadUrl: vi.fn(),
+    failUpload: vi.fn(),
+  } as unknown as ScanAssetService;
   const app = createApp({
     config,
     database,
@@ -142,6 +161,7 @@ describe('Scan HTTP endpoints', () => {
     refreshTokenService,
     projectService,
     scanService,
+    scanAssetService,
     accessTokenVerifier,
     currentUserRepository,
     rateLimiters,
