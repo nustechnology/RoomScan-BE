@@ -219,6 +219,20 @@ describe('PrismaNoteRepository', () => {
     expect(result.items).toHaveLength(1);
   });
 
+  it('rejects a stored null position as an invalid vector', async () => {
+    const { client, note } = createClient();
+    note.findMany.mockResolvedValueOnce([createNoteRow({ position: null })]);
+    const repository = new PrismaNoteRepository(client);
+
+    await expect(
+      repository.listByScan(SCAN_ID, {
+        page: 1,
+        limit: 20,
+        sort: 'updatedAt:desc',
+      }),
+    ).rejects.toThrow('Stored note position is not a valid vector');
+  });
+
   it('finds a note the Owner can view in one lookup', async () => {
     const { client, note } = createClient();
     const repository = new PrismaNoteRepository(client);

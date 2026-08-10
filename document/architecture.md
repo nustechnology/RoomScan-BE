@@ -208,13 +208,13 @@ note validates that its `modelVersion` equals the parent scan's current model
 version and rejects a mismatch with `409 MODEL_VERSION_MISMATCH`, so notes
 cannot be anchored to a stale model revision.
 
-`PrismaNoteRepository` filters every note lookup through a non-deleted scan and
-project, so deleting a scan or project makes its notes inaccessible. Note
-mutations run in one transaction that also touches the parent scan and project
-`updatedAt`, keeping latest-activity ordering in sync with note edits. Note
-content is never written to logs; the error envelope returns only stable codes
-and messages. The repository derives the scan's real `noteCount` from note rows
-so scan list and detail reflect the note total.
+`PrismaNoteRepository` filters every note lookup through a non-deleted scan, so
+deleting a scan makes its notes inaccessible. Note mutations run in one
+transaction that also touches the parent scan and project `updatedAt`, keeping
+latest-activity ordering in sync with note edits. Note content is never written
+to logs; the error envelope returns only stable codes and messages. The
+repository derives the scan's real `noteCount` from note rows so scan list and
+detail reflect the note total.
 
 ## Storage
 

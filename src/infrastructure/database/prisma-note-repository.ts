@@ -14,6 +14,10 @@ import type {
 } from '../../modules/note/note.types.js';
 
 function parseVector3(value: Prisma.JsonValue): Vector3 {
+  if (value === null) {
+    throw new Error('Stored note position is not a valid vector');
+  }
+
   const parsed = value as Record<string, unknown>;
   const x = parsed['x'];
   const y = parsed['y'];

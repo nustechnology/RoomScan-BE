@@ -219,9 +219,10 @@ path.
 
 Notes are text annotations anchored to 3D positions inside a scan model. `POST`
 and `GET` at `/api/v1/scans/:scanId/notes` create and list notes; `GET`, `PATCH`,
-`PATCH /position`, and `DELETE` at `/api/v1/notes/:noteId` read, edit, move, and
-delete a note. The project Owner creates, edits, moves, and deletes notes; an
-active Viewer may only list and read them. Content is required on create (1–2000
+and `DELETE` at `/api/v1/notes/:noteId` read, edit, and delete a note, and
+`PATCH /api/v1/notes/:noteId/position` moves it. The project Owner creates,
+edits, moves, and deletes notes; an active Viewer may only list and read them.
+Content is required on create (1–2000
 trimmed characters), color is a preset (`YELLOW`, `RED`, `BLUE`, `GREEN`,
 `ORANGE`, `PURPLE`), position is a `{ x, y, z }` vector, and `modelVersion` must
 match the scan's current model version (`409` otherwise). Note content is never

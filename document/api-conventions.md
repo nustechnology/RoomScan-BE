@@ -13,7 +13,8 @@
 - Scan assets (model/thumbnail upload and download) live under `/api/v1/scans`,
   with upload-session completion and failure at `/api/v1/upload-sessions`.
 - Notes are `POST` and `GET` at `/api/v1/scans/:scanId/notes`, and `GET`,
-  `PATCH`, `PATCH/:position`, and `DELETE` at `/api/v1/notes/:noteId`.
+  `PATCH`, and `DELETE` at `/api/v1/notes/:noteId`, with the move operation at
+  `PATCH /api/v1/notes/:noteId/position`.
 - Swagger UI remains at `/api-doc`; raw OpenAPI is `/api-doc.json`.
 - Resource paths use plural nouns and kebab-case when business modules arrive.
 
