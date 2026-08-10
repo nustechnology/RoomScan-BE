@@ -5,6 +5,7 @@ import { authOpenApiRegistry } from '../modules/auth/auth.openapi.js';
 import { healthOpenApiRegistry } from '../modules/health/health.openapi.js';
 import { projectOpenApiRegistry } from '../modules/project/project.openapi.js';
 import { scanOpenApiRegistry } from '../modules/scan/scan.openapi.js';
+import { scanAssetOpenApiRegistry } from '../modules/scan-asset/scan-asset.openapi.js';
 
 export function createOpenApiDocument(): ReturnType<OpenApiGeneratorV31['generateDocument']> {
   const generator = new OpenApiGeneratorV31([
@@ -12,6 +13,7 @@ export function createOpenApiDocument(): ReturnType<OpenApiGeneratorV31['generat
     ...authOpenApiRegistry.definitions,
     ...projectOpenApiRegistry.definitions,
     ...scanOpenApiRegistry.definitions,
+    ...scanAssetOpenApiRegistry.definitions,
   ]);
 
   return generator.generateDocument({
@@ -43,6 +45,10 @@ export function createOpenApiDocument(): ReturnType<OpenApiGeneratorV31['generat
       {
         name: 'Scans',
         description: 'Room scan metadata owned by a project',
+      },
+      {
+        name: 'Scan Assets',
+        description: 'Model and thumbnail asset upload and download for a scan',
       },
     ],
   });

@@ -41,6 +41,7 @@
     "express-rate-limit": "8.6.0",
     "helmet": "8.1.0",
     "jose": "6.2.4",
+    "minio": "8.0.5",
     "pg": "8.16.3",
     "pino": "10.1.0",
     "pino-http": "11.0.0",

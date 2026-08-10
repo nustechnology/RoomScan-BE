@@ -13,11 +13,16 @@ import { PrismaRefreshTokenRepository } from './infrastructure/database/prisma-r
 import { PrismaAppleUserRepository } from './infrastructure/database/prisma-user-repository.js';
 import { PrismaProjectRepository } from './infrastructure/database/prisma-project-repository.js';
 import { PrismaScanRepository } from './infrastructure/database/prisma-scan-repository.js';
+import { PrismaScanAssetRepository } from './infrastructure/database/prisma-scan-asset-repository.js';
+import { LocalStorageAdapter } from './infrastructure/storage/local-storage-adapter.js';
+import { MinioStorageAdapter } from './infrastructure/storage/minio-storage-adapter.js';
+import type { StorageAdapter } from './infrastructure/storage/storage.types.js';
 import { createLogger } from './infrastructure/logging/logger.js';
 import { AuthService, RefreshTokenService } from './modules/auth/auth.service.js';
 import { ProjectPermissionService } from './modules/project/project.permissions.js';
 import { ProjectService } from './modules/project/project.service.js';
 import { ScanService } from './modules/scan/scan.service.js';
+import { ScanAssetService } from './modules/scan-asset/scan-asset.service.js';
 
 const config = loadConfig();
 const logger = createLogger(config);
@@ -27,6 +32,21 @@ const userRepository = new PrismaAppleUserRepository(prismaClient);
 const currentUserRepository = new PrismaCurrentUserRepository(prismaClient);
 const projectRepository = new PrismaProjectRepository(prismaClient);
 const scanRepository = new PrismaScanRepository(prismaClient);
+const scanAssetRepository = new PrismaScanAssetRepository(prismaClient);
+function createStorageAdapter(): StorageAdapter {
+  if (config.storageProvider === 'minio') {
+    return new MinioStorageAdapter({
+      bucket: config.storageBucket,
+      endPoint: config.storageEndpoint,
+      accessKey: config.storageAccessKeyId,
+      secretKey: config.storageSecretAccessKey,
+      useSSL: config.storageUseSsl,
+      ...(config.storageRegion === '' ? {} : { region: config.storageRegion }),
+    });
+  }
+  return new LocalStorageAdapter();
+}
+const storageAdapter = createStorageAdapter();
 const appleIdentityVerifier = new LocalTestAppleIdentityVerifier({
   delegate: new AppleIdentityTokenVerifier(config.appleClientId),
   enabled: config.nodeEnv === 'development' && config.localTestAuthEnabled,
@@ -64,6 +84,16 @@ const scanService = new ScanService({
   repository: scanRepository,
   permissions: projectPermissions,
 });
+const scanAssetService = new ScanAssetService({
+  repository: scanAssetRepository,
+  scanRepository,
+  permissions: projectPermissions,
+  storage: storageAdapter,
+  uploadUrlTtlSeconds: config.storageUploadUrlTtlSeconds,
+  downloadUrlTtlSeconds: config.storageDownloadUrlTtlSeconds,
+  maxModelSizeBytes: config.assetMaxModelSizeBytes,
+  maxThumbnailSizeBytes: config.assetMaxThumbnailSizeBytes,
+});
 const rateLimiters = createRateLimiters(config, logger);
 const app = createApp({
   config,
@@ -73,6 +103,7 @@ const app = createApp({
   refreshTokenService,
   projectService,
   scanService,
+  scanAssetService,
   accessTokenVerifier,
   currentUserRepository,
   rateLimiters,

@@ -36,10 +36,17 @@ the new contract merely to make code and documentation agree.
    `LOCAL_TEST_AUTH_ENABLED=true`, run `yarn seed:local`, and start the API with
    `yarn dev`.
 
-Docker supplies only PostgreSQL in the standard local workflow. Run Prisma
-commands, seeds, the API, validation, tests, coverage and builds natively with
-Yarn. If the `db` service is already healthy, leave it running across tasks;
-do not restart or recreate it as part of final verification.
+Docker supplies PostgreSQL (and optionally MinIO) in the standard local
+workflow. The default `STORAGE_PROVIDER=local` needs no extra service, so
+MinIO is not part of the routine setup. To exercise the real presigned-URL
+provider instead, run `docker compose up minio -d` (the MinIO service requires
+`MINIO_ROOT_USER` and `MINIO_ROOT_PASSWORD` from `.env`; its API and console
+ports publish on the loopback interface), set `STORAGE_PROVIDER=minio` with the
+matching `STORAGE_BUCKET`, `STORAGE_ENDPOINT`, `STORAGE_ACCESS_KEY_ID` and
+`STORAGE_SECRET_ACCESS_KEY` values from `.env.example`, and start the API. Run
+Prisma commands, seeds, the API, validation, tests, coverage and builds
+natively with Yarn. If the `db` service is already healthy, leave it running
+across tasks; do not restart or recreate it as part of final verification.
 
 The local seed is idempotent and refuses to run unless
 `NODE_ENV=development`. It creates (or refreshes) the fixed local Apple user,
@@ -56,7 +63,10 @@ tried without manual setup. With the shortcut enabled, use:
 at `POST /api/v1/auth/apple`. The response contains normally signed RoomScan
 access and refresh JWTs for `local-test@roomscan.dev`. Other identity tokens
 continue through Apple verification. The production-style Compose API sets
-`NODE_ENV=production`, so it never enables this shortcut.
+`NODE_ENV=production`, so it never enables this shortcut and it also rejects
+`STORAGE_PROVIDER=local`; the Compose stack starts MinIO and wires the API to it
+(`STORAGE_PROVIDER=minio` by default), so the API container starts only once the
+object store is healthy.
 
 The default development rate limits use the in-process MemoryStore and require
 no additional service. `TRUST_PROXY` remains empty for direct local and Compose
@@ -119,9 +129,12 @@ access. The `add_scans` migration creates the `SyncStatus` and `AssetStatus`
 enums and the `scans` table with a `projects` foreign key (`ON DELETE CASCADE`),
 a `users` creator foreign key (`ON DELETE RESTRICT`), 100/500/2048-character
 bounds, a composite unique `(projectId, clientMutationId)`, and indexes on
-`(projectId, deletedAt, createdAt, id)` and `createdById`. Tests use Prisma
-delegate doubles; native migration and endpoint verification use the PostgreSQL
-`db` container.
+`(projectId, deletedAt, createdAt, id)` and `createdById`. The `add_scan_assets`
+migration creates the `AssetType` enum and the `scan_assets` table with a
+`scans` foreign key (`ON DELETE CASCADE`), a unique `(scanId, assetType)`
+constraint, a unique `idempotencyKey`, and an index on `(scanId, status)`.
+Tests use Prisma delegate doubles; native migration and endpoint verification
+use the PostgreSQL `db` container.
 
 ## Dependency and generated-file policy
 
@@ -138,6 +151,9 @@ HTTP quotas use the pinned `express-rate-limit` dependency. Tests construct
 fresh process-local stores with small quotas and inject them through the
 application factory. Production currently uses the same MemoryStore; adding
 multiple API replicas requires a shared store such as Redis.
+
+Presigned object-store URLs use the pinned `minio` client. Adapter unit tests
+inject a fake client, so the quality gate never contacts a MinIO server.
 
 Update this document in the same branch whenever development commands, required
 tool versions, environment setup, tests, coverage, hooks, CI, Docker, Prisma

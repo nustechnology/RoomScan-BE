@@ -14,6 +14,7 @@ import type { AppConfig } from '../src/config/env.js';
 import type { AppleAuthService, TokenRefreshService } from '../src/modules/auth/auth.types.js';
 import type { ProjectService } from '../src/modules/project/project.service.js';
 import type { ScanService } from '../src/modules/scan/scan.service.js';
+import type { ScanAssetService } from '../src/modules/scan-asset/scan-asset.service.js';
 
 const baseConfig: AppConfig = {
   nodeEnv: 'test',
@@ -34,6 +35,17 @@ const baseConfig: AppConfig = {
   accessTokenTtlSeconds: 3600,
   refreshTokenTtlSeconds: 2_592_000,
   localTestAuthEnabled: false,
+  storageProvider: 'local',
+  storageBucket: '',
+  storageRegion: '',
+  storageEndpoint: '',
+  storageAccessKeyId: '',
+  storageSecretAccessKey: '',
+  storageUseSsl: false,
+  storageUploadUrlTtlSeconds: 900,
+  storageDownloadUrlTtlSeconds: 60,
+  assetMaxModelSizeBytes: 500_000_000,
+  assetMaxThumbnailSizeBytes: 10_000_000,
 };
 
 function createTestApp(overrides: Partial<AppConfig> = {}, stores: RateLimitStores = {}) {
@@ -81,6 +93,13 @@ function createTestApp(overrides: Partial<AppConfig> = {}, stores: RateLimitStor
     update: vi.fn(),
     delete: vi.fn(),
   } as unknown as ScanService;
+  const scanAssetService = {
+    createUploadSession: vi.fn(),
+    completeUpload: vi.fn(),
+    listAssets: vi.fn(),
+    getDownloadUrl: vi.fn(),
+    failUpload: vi.fn(),
+  } as unknown as ScanAssetService;
   const rateLimiters = createRateLimiters(config, logger, stores);
   const app = createApp({
     config,
@@ -93,6 +112,7 @@ function createTestApp(overrides: Partial<AppConfig> = {}, stores: RateLimitStor
     refreshTokenService,
     projectService,
     scanService,
+    scanAssetService,
     accessTokenVerifier,
     currentUserRepository,
     rateLimiters,
