@@ -49,6 +49,8 @@ enum NoteColor {
 
 enum InvitationStatus {
   PENDING
+  ACCEPTED
+  DECLINED
   REVOKED
 }
 
@@ -66,7 +68,8 @@ model User {
   refreshTokens   RefreshToken[]
   scans           Scan[]
   notes           Note[]
-  invitations     Invitation[]
+  invitations     Invitation[] @relation("InvitationCreator")
+  acceptedInvitations Invitation[] @relation("InvitationAcceptor")
 
   @@unique([provider, providerId])
   @@map("users")
@@ -110,7 +113,6 @@ model ProjectAccess {
   role         ProjectRole @default(VIEWER)
   invitationId String?     @db.Uuid
   acceptedAt   DateTime?
-  declinedAt   DateTime?
   revokedAt    DateTime?
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
@@ -125,22 +127,28 @@ model ProjectAccess {
 }
 
 model Invitation {
-  id          String           @id @default(uuid()) @db.Uuid
-  projectId   String           @db.Uuid
-  createdById String           @db.Uuid
-  tokenHash   String           @unique @db.VarChar(64)
-  status      InvitationStatus @default(PENDING)
-  expiresAt   DateTime
-  sentAt      DateTime         @default(now())
-  revokedAt   DateTime?
-  createdAt   DateTime         @default(now())
-  updatedAt   DateTime         @updatedAt
+  id               String           @id @default(uuid()) @db.Uuid
+  projectId        String           @db.Uuid
+  createdById      String           @db.Uuid
+  recipientEmail   String           @db.VarChar(320)
+  tokenHash        String           @unique @db.VarChar(64)
+  status           InvitationStatus @default(PENDING)
+  expiresAt        DateTime
+  sentAt           DateTime         @default(now())
+  acceptedAt       DateTime?
+  acceptedByUserId String?          @db.Uuid
+  declinedAt       DateTime?
+  revokedAt        DateTime?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
 
-  project Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  creator User            @relation(fields: [createdById], references: [id], onDelete: Restrict)
-  accesses ProjectAccess[]
+  project     Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  creator     User            @relation("InvitationCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  acceptedBy  User?           @relation("InvitationAcceptor", fields: [acceptedByUserId], references: [id], onDelete: SetNull)
+  accesses    ProjectAccess[]
 
   @@index([projectId, status])
+  @@index([projectId, recipientEmail])
   @@map("invitations")
 }
 

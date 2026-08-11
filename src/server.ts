@@ -19,6 +19,9 @@ import { PrismaShareRepository } from './infrastructure/database/prisma-share-re
 import { LocalStorageAdapter } from './infrastructure/storage/local-storage-adapter.js';
 import { MinioStorageAdapter } from './infrastructure/storage/minio-storage-adapter.js';
 import type { StorageAdapter } from './infrastructure/storage/storage.types.js';
+import { LogMailer } from './infrastructure/mail/log-mailer.js';
+import { SmtpMailer, createNodemailerTransport } from './infrastructure/mail/smtp-mailer.js';
+import type { Mailer } from './infrastructure/mail/mailer.types.js';
 import { createLogger } from './infrastructure/logging/logger.js';
 import { AuthService, RefreshTokenService } from './modules/auth/auth.service.js';
 import { ProjectPermissionService } from './modules/project/project.permissions.js';
@@ -53,6 +56,22 @@ function createStorageAdapter(): StorageAdapter {
   return new LocalStorageAdapter();
 }
 const storageAdapter = createStorageAdapter();
+function createMailer(): Mailer {
+  if (config.mailProvider === 'smtp') {
+    return new SmtpMailer({
+      from: config.mailFrom,
+      transport: createNodemailerTransport({
+        host: config.smtpHost,
+        port: config.smtpPort,
+        user: config.smtpUser,
+        pass: config.smtpPass,
+        secure: config.smtpSecure,
+      }),
+    });
+  }
+  return new LogMailer(logger);
+}
+const mailer = createMailer();
 const appleIdentityVerifier = new LocalTestAppleIdentityVerifier({
   delegate: new AppleIdentityTokenVerifier(config.appleClientId),
   enabled: config.nodeEnv === 'development' && config.localTestAuthEnabled,
@@ -107,6 +126,8 @@ const noteService = new NoteService({
 });
 const shareService = new ShareService({
   repository: shareRepository,
+  mailer,
+  logger,
   invitationTtlSeconds: config.invitationTtlSeconds,
   invitationBaseUrl: config.invitationBaseUrl,
 });

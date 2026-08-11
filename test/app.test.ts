@@ -65,6 +65,13 @@ const config: AppConfig = {
   assetMaxThumbnailSizeBytes: 10_000_000,
   invitationTtlSeconds: 604_800,
   invitationBaseUrl: 'http://localhost:3000',
+  mailProvider: 'log',
+  smtpHost: '',
+  smtpPort: 2525,
+  smtpUser: '',
+  smtpPass: '',
+  smtpSecure: false,
+  mailFrom: 'RoomScan App <notifications@roomscan.app>',
 };
 
 const clock = () => new Date('2026-07-23T07:00:00.000Z');

@@ -7,6 +7,7 @@ import {
 import type {
   InvitationRecord,
   InvitationWithProject,
+  ShareProjectInfo,
   ShareRepository,
 } from '../../modules/share/share.types.js';
 
@@ -14,10 +15,14 @@ const invitationSelect = {
   id: true,
   projectId: true,
   createdById: true,
+  recipientEmail: true,
   tokenHash: true,
   status: true,
   expiresAt: true,
   sentAt: true,
+  acceptedAt: true,
+  acceptedByUserId: true,
+  declinedAt: true,
   revokedAt: true,
   createdAt: true,
   updatedAt: true,
@@ -27,10 +32,14 @@ interface InvitationRow {
   id: string;
   projectId: string;
   createdById: string;
+  recipientEmail: string;
   tokenHash: string;
-  status: 'PENDING' | 'REVOKED';
+  status: 'PENDING' | 'ACCEPTED' | 'DECLINED' | 'REVOKED';
   expiresAt: Date;
   sentAt: Date;
+  acceptedAt: Date | null;
+  acceptedByUserId: string | null;
+  declinedAt: Date | null;
   revokedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
@@ -41,20 +50,29 @@ function toInvitationRecord(row: InvitationRow): InvitationRecord {
     id: row.id,
     projectId: row.projectId,
     createdById: row.createdById,
+    recipientEmail: row.recipientEmail,
     tokenHash: row.tokenHash,
     status: row.status,
     expiresAt: row.expiresAt,
     sentAt: row.sentAt,
+    acceptedAt: row.acceptedAt,
+    acceptedByUserId: row.acceptedByUserId,
+    declinedAt: row.declinedAt,
     revokedAt: row.revokedAt,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
 }
 
-export class PrismaShareRepository implements ShareRepository {
-  readonly #client: Pick<PrismaClient, 'invitation' | 'projectAccess' | 'project' | 'scan'>;
+type ShareClient = Pick<
+  PrismaClient,
+  'invitation' | 'projectAccess' | 'project' | 'scan' | '$transaction'
+>;
 
-  constructor(client: Pick<PrismaClient, 'invitation' | 'projectAccess' | 'project' | 'scan'>) {
+export class PrismaShareRepository implements ShareRepository {
+  readonly #client: ShareClient;
+
+  constructor(client: ShareClient) {
     this.#client = client;
   }
 
@@ -64,6 +82,31 @@ export class PrismaShareRepository implements ShareRepository {
       select: { ownerId: true },
     });
     return project?.ownerId ?? null;
+  }
+
+  async findProjectInfo(projectId: string): Promise<ShareProjectInfo | null> {
+    const project = await this.#client.project.findFirst({
+      where: { id: projectId, deletedAt: null },
+      select: {
+        name: true,
+        ownerId: true,
+        owner: {
+          select: {
+            email: true,
+          },
+        },
+      },
+    });
+
+    if (project === null) {
+      return null;
+    }
+
+    return {
+      name: project.name,
+      ownerId: project.ownerId,
+      ownerEmail: project.owner.email,
+    };
   }
 
   async hasUploadedModel(projectId: string): Promise<boolean> {
@@ -81,6 +124,7 @@ export class PrismaShareRepository implements ShareRepository {
   async createInvitation(data: {
     projectId: string;
     createdById: string;
+    recipientEmail: string;
     tokenHash: string;
     expiresAt: Date;
     sentAt: Date;
@@ -89,6 +133,7 @@ export class PrismaShareRepository implements ShareRepository {
       data: {
         projectId: data.projectId,
         createdById: data.createdById,
+        recipientEmail: data.recipientEmail,
         tokenHash: data.tokenHash,
         status: InvitationStatus.PENDING,
         expiresAt: data.expiresAt,
@@ -139,6 +184,18 @@ export class PrismaShareRepository implements ShareRepository {
     };
   }
 
+  async findByProjectAndEmail(
+    projectId: string,
+    recipientEmail: string,
+  ): Promise<InvitationRecord | null> {
+    const row = await this.#client.invitation.findFirst({
+      where: { projectId, recipientEmail },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      select: invitationSelect,
+    });
+    return row === null ? null : toInvitationRecord(row);
+  }
+
   async findInvitationById(id: string): Promise<InvitationRecord | null> {
     const row = await this.#client.invitation.findUnique({
       where: { id },
@@ -147,13 +204,114 @@ export class PrismaShareRepository implements ShareRepository {
     return row === null ? null : toInvitationRecord(row);
   }
 
+  async acceptInvitation(
+    invitationId: string,
+    projectId: string,
+    userId: string,
+    acceptedAt: Date,
+  ): Promise<InvitationRecord | null> {
+    return await this.#client.$transaction(async (transaction) => {
+      const updated = await transaction.invitation.updateMany({
+        where: { id: invitationId, status: InvitationStatus.PENDING },
+        data: {
+          status: InvitationStatus.ACCEPTED,
+          acceptedAt,
+          acceptedByUserId: userId,
+        },
+      });
+
+      if (updated.count === 0) {
+        return null;
+      }
+
+      await transaction.projectAccess.upsert({
+        where: { projectId_userId: { projectId, userId } },
+        create: {
+          projectId,
+          userId,
+          role: PrismaProjectRole.VIEWER,
+          invitationId,
+          acceptedAt,
+          revokedAt: null,
+        },
+        update: {
+          role: PrismaProjectRole.VIEWER,
+          invitationId,
+          acceptedAt,
+          revokedAt: null,
+        },
+      });
+
+      const row = await transaction.invitation.findUnique({
+        where: { id: invitationId },
+        select: invitationSelect,
+      });
+      return row === null ? null : toInvitationRecord(row);
+    });
+  }
+
+  async declineInvitation(
+    invitationId: string,
+    declinedAt: Date,
+  ): Promise<InvitationRecord | null> {
+    const updated = await this.#client.invitation.updateMany({
+      where: { id: invitationId, status: InvitationStatus.PENDING },
+      data: {
+        status: InvitationStatus.DECLINED,
+        declinedAt,
+      },
+    });
+
+    if (updated.count === 0) {
+      return null;
+    }
+
+    const row = await this.#client.invitation.findUnique({
+      where: { id: invitationId },
+      select: invitationSelect,
+    });
+    return row === null ? null : toInvitationRecord(row);
+  }
+
   async revokeInvitation(id: string, revokedAt: Date): Promise<InvitationRecord | null> {
-    const row = await this.#client.invitation.update({
-      where: { id },
+    const updated = await this.#client.invitation.updateMany({
+      where: { id, status: InvitationStatus.PENDING },
       data: {
         status: InvitationStatus.REVOKED,
         revokedAt,
       },
+    });
+
+    if (updated.count === 0) {
+      return null;
+    }
+
+    const row = await this.#client.invitation.findUnique({
+      where: { id },
+      select: invitationSelect,
+    });
+    return row === null ? null : toInvitationRecord(row);
+  }
+
+  async resendInvitation(
+    id: string,
+    data: { tokenHash: string; sentAt: Date; expiresAt: Date },
+  ): Promise<InvitationRecord | null> {
+    const updated = await this.#client.invitation.updateMany({
+      where: { id, status: InvitationStatus.PENDING },
+      data: {
+        tokenHash: data.tokenHash,
+        sentAt: data.sentAt,
+        expiresAt: data.expiresAt,
+      },
+    });
+
+    if (updated.count === 0) {
+      return null;
+    }
+
+    const row = await this.#client.invitation.findUnique({
+      where: { id },
       select: invitationSelect,
     });
     return row === null ? null : toInvitationRecord(row);
@@ -172,75 +330,6 @@ export class PrismaShareRepository implements ShareRepository {
     return await this.#client.projectAccess.findFirst({
       where: { projectId, userId, revokedAt: null },
       select: { id: true },
-    });
-  }
-
-  async findDeclinedAccess(
-    projectId: string,
-    userId: string,
-    invitationId: string,
-  ): Promise<{ id: string } | null> {
-    return await this.#client.projectAccess.findFirst({
-      where: {
-        projectId,
-        userId,
-        invitationId,
-        declinedAt: { not: null },
-      },
-      select: { id: true },
-    });
-  }
-
-  async acceptInvitation(
-    projectId: string,
-    userId: string,
-    invitationId: string,
-    acceptedAt: Date,
-  ): Promise<void> {
-    await this.#client.projectAccess.upsert({
-      where: { projectId_userId: { projectId, userId } },
-      create: {
-        projectId,
-        userId,
-        role: PrismaProjectRole.VIEWER,
-        invitationId,
-        acceptedAt,
-        declinedAt: null,
-        revokedAt: null,
-      },
-      update: {
-        role: PrismaProjectRole.VIEWER,
-        invitationId,
-        acceptedAt,
-        declinedAt: null,
-        revokedAt: null,
-      },
-    });
-  }
-
-  async declineInvitation(
-    projectId: string,
-    userId: string,
-    invitationId: string,
-    declinedAt: Date,
-  ): Promise<void> {
-    await this.#client.projectAccess.upsert({
-      where: { projectId_userId: { projectId, userId } },
-      create: {
-        projectId,
-        userId,
-        role: PrismaProjectRole.VIEWER,
-        invitationId,
-        acceptedAt: null,
-        declinedAt,
-        revokedAt: declinedAt,
-      },
-      update: {
-        invitationId,
-        acceptedAt: null,
-        declinedAt,
-        revokedAt: declinedAt,
-      },
     });
   }
 

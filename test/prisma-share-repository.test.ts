@@ -8,6 +8,7 @@ const OWNER_ID = 'eb5d278f-c857-45c7-887d-7be65288cb75';
 const VIEWER_ID = '8c53d31d-2788-48de-82a0-c4f219ca3701';
 const INVITATION_ID = 'b1a2c3d4-e5f6-4890-abcd-ef1234567890';
 const TOKEN_HASH = 'a'.repeat(64);
+const RECIPIENT_EMAIL = 'recipient@example.com';
 const NOW = new Date('2026-07-29T10:00:00.000Z');
 
 function createInvitationRow(overrides: Record<string, unknown> = {}) {
@@ -15,10 +16,14 @@ function createInvitationRow(overrides: Record<string, unknown> = {}) {
     id: INVITATION_ID,
     projectId: PROJECT_ID,
     createdById: OWNER_ID,
+    recipientEmail: RECIPIENT_EMAIL,
     tokenHash: TOKEN_HASH,
     status: 'PENDING',
     expiresAt: NOW,
     sentAt: NOW,
+    acceptedAt: null,
+    acceptedByUserId: null,
+    declinedAt: null,
     revokedAt: null,
     createdAt: NOW,
     updatedAt: NOW,
@@ -31,8 +36,8 @@ function createClient() {
     create: vi.fn().mockResolvedValue(createInvitationRow()),
     findFirst: vi.fn().mockResolvedValue(createInvitationRow()),
     findUnique: vi.fn().mockResolvedValue(createInvitationRow()),
-    update: vi.fn().mockResolvedValue(createInvitationRow({ status: 'REVOKED', revokedAt: NOW })),
     findMany: vi.fn().mockResolvedValue([createInvitationRow()]),
+    updateMany: vi.fn().mockResolvedValue({ count: 1 }),
   };
   const projectAccess = {
     findFirst: vi.fn().mockResolvedValue({ id: 'access-id' }),
@@ -44,7 +49,7 @@ function createClient() {
         userId: VIEWER_ID,
         acceptedAt: NOW,
         createdAt: NOW,
-        user: { id: VIEWER_ID, email: 'viewer@example.com' },
+        user: { id: VIEWER_ID, email: RECIPIENT_EMAIL },
       },
     ]),
   };
@@ -54,14 +59,32 @@ function createClient() {
   const scan = {
     findFirst: vi.fn().mockResolvedValue({ id: 'scan-id' }),
   };
+  const transaction = vi.fn(async (operation: unknown) => {
+    return (
+      operation as (tx: {
+        invitation: {
+          updateMany: typeof invitation.updateMany;
+          findUnique: typeof invitation.findUnique;
+        };
+        projectAccess: { upsert: typeof projectAccess.upsert };
+      }) => Promise<unknown>
+    )({
+      invitation: { updateMany: invitation.updateMany, findUnique: invitation.findUnique },
+      projectAccess: { upsert: projectAccess.upsert },
+    });
+  });
   const client = {
     invitation,
     projectAccess,
     project,
     scan,
-  } as unknown as Pick<PrismaClient, 'invitation' | 'projectAccess' | 'project' | 'scan'>;
+    $transaction: transaction,
+  } as unknown as Pick<
+    PrismaClient,
+    'invitation' | 'projectAccess' | 'project' | 'scan' | '$transaction'
+  >;
 
-  return { client, invitation, projectAccess, project, scan };
+  return { client, invitation, projectAccess, project, scan, transaction };
 }
 
 describe('PrismaShareRepository', () => {
@@ -86,6 +109,30 @@ describe('PrismaShareRepository', () => {
     ).resolves.toBeNull();
   });
 
+  it('findProjectInfo returns the name and owner for email delivery', async () => {
+    const { client, project } = createClient();
+    project.findFirst.mockResolvedValue({
+      name: 'District 2 Apartment',
+      ownerId: OWNER_ID,
+      owner: { email: 'owner@example.com' },
+    });
+
+    const result = await new PrismaShareRepository(client).findProjectInfo(PROJECT_ID);
+
+    expect(result).toEqual({
+      name: 'District 2 Apartment',
+      ownerId: OWNER_ID,
+      ownerEmail: 'owner@example.com',
+    });
+  });
+
+  it('findProjectInfo returns null when the project is missing or deleted', async () => {
+    const { client, project } = createClient();
+    project.findFirst.mockResolvedValue(null);
+
+    await expect(new PrismaShareRepository(client).findProjectInfo(PROJECT_ID)).resolves.toBeNull();
+  });
+
   it('hasUploadedModel is true when a non-deleted scan has an uploaded model', async () => {
     const { client, scan } = createClient();
 
@@ -107,12 +154,13 @@ describe('PrismaShareRepository', () => {
     );
   });
 
-  it('createInvitation stores only the token hash with a PENDING status', async () => {
+  it('createInvitation stores the recipient and only the token hash', async () => {
     const { client, invitation } = createClient();
 
     await new PrismaShareRepository(client).createInvitation({
       projectId: PROJECT_ID,
       createdById: OWNER_ID,
+      recipientEmail: RECIPIENT_EMAIL,
       tokenHash: TOKEN_HASH,
       expiresAt: NOW,
       sentAt: NOW,
@@ -123,6 +171,7 @@ describe('PrismaShareRepository', () => {
         data: {
           projectId: PROJECT_ID,
           createdById: OWNER_ID,
+          recipientEmail: RECIPIENT_EMAIL,
           tokenHash: TOKEN_HASH,
           status: 'PENDING',
           expiresAt: NOW,
@@ -146,7 +195,7 @@ describe('PrismaShareRepository', () => {
 
     const result = await new PrismaShareRepository(client).findByTokenHash(TOKEN_HASH);
 
-    expect(result?.invitation.id).toBe(INVITATION_ID);
+    expect(result?.invitation.recipientEmail).toBe(RECIPIENT_EMAIL);
     expect(result?.invitation.tokenHash).toBe(TOKEN_HASH);
     expect(result?.project).toEqual({
       id: PROJECT_ID,
@@ -169,6 +218,23 @@ describe('PrismaShareRepository', () => {
     await expect(new PrismaShareRepository(client).findByTokenHash(TOKEN_HASH)).resolves.toBeNull();
   });
 
+  it('findByProjectAndEmail returns the latest invitation for a recipient', async () => {
+    const { client, invitation } = createClient();
+
+    const result = await new PrismaShareRepository(client).findByProjectAndEmail(
+      PROJECT_ID,
+      RECIPIENT_EMAIL,
+    );
+
+    expect(result?.recipientEmail).toBe(RECIPIENT_EMAIL);
+    expect(invitation.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { projectId: PROJECT_ID, recipientEmail: RECIPIENT_EMAIL },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      }),
+    );
+  });
+
   it('findInvitationById returns the stored invitation', async () => {
     const { client, invitation } = createClient();
 
@@ -182,18 +248,120 @@ describe('PrismaShareRepository', () => {
     );
   });
 
-  it('revokeInvitation marks the invitation as REVOKED', async () => {
+  it('acceptInvitation marks the invitation ACCEPTED and grants Viewer access in one transaction', async () => {
+    const { client, invitation, projectAccess, transaction } = createClient();
+    invitation.findUnique.mockResolvedValue(
+      createInvitationRow({ status: 'ACCEPTED', acceptedAt: NOW, acceptedByUserId: VIEWER_ID }),
+    );
+
+    const result = await new PrismaShareRepository(client).acceptInvitation(
+      INVITATION_ID,
+      PROJECT_ID,
+      VIEWER_ID,
+      NOW,
+    );
+
+    expect(result?.status).toBe('ACCEPTED');
+    expect(transaction).toHaveBeenCalledOnce();
+    expect(invitation.updateMany).toHaveBeenCalledWith({
+      where: { id: INVITATION_ID, status: 'PENDING' },
+      data: { status: 'ACCEPTED', acceptedAt: NOW, acceptedByUserId: VIEWER_ID },
+    });
+    expect(projectAccess.upsert).toHaveBeenCalledWith({
+      where: { projectId_userId: { projectId: PROJECT_ID, userId: VIEWER_ID } },
+      create: {
+        projectId: PROJECT_ID,
+        userId: VIEWER_ID,
+        role: 'VIEWER',
+        invitationId: INVITATION_ID,
+        acceptedAt: NOW,
+        revokedAt: null,
+      },
+      update: {
+        role: 'VIEWER',
+        invitationId: INVITATION_ID,
+        acceptedAt: NOW,
+        revokedAt: null,
+      },
+    });
+  });
+
+  it('acceptInvitation returns null when the invitation is no longer pending', async () => {
     const { client, invitation } = createClient();
+    invitation.updateMany.mockResolvedValue({ count: 0 });
+
+    await expect(
+      new PrismaShareRepository(client).acceptInvitation(INVITATION_ID, PROJECT_ID, VIEWER_ID, NOW),
+    ).resolves.toBeNull();
+  });
+
+  it('declineInvitation marks the invitation DECLINED', async () => {
+    const { client, invitation } = createClient();
+    invitation.findUnique.mockResolvedValue(
+      createInvitationRow({ status: 'DECLINED', declinedAt: NOW }),
+    );
+
+    const result = await new PrismaShareRepository(client).declineInvitation(INVITATION_ID, NOW);
+
+    expect(result?.status).toBe('DECLINED');
+    expect(invitation.updateMany).toHaveBeenCalledWith({
+      where: { id: INVITATION_ID, status: 'PENDING' },
+      data: { status: 'DECLINED', declinedAt: NOW },
+    });
+  });
+
+  it('declineInvitation returns null when the invitation is no longer pending', async () => {
+    const { client, invitation } = createClient();
+    invitation.updateMany.mockResolvedValue({ count: 0 });
+
+    await expect(
+      new PrismaShareRepository(client).declineInvitation(INVITATION_ID, NOW),
+    ).resolves.toBeNull();
+  });
+
+  it('revokeInvitation marks a pending invitation REVOKED', async () => {
+    const { client, invitation } = createClient();
+    invitation.findUnique.mockResolvedValue(
+      createInvitationRow({ status: 'REVOKED', revokedAt: NOW }),
+    );
 
     const result = await new PrismaShareRepository(client).revokeInvitation(INVITATION_ID, NOW);
 
-    expect(result).toEqual(expect.objectContaining({ status: 'REVOKED', revokedAt: NOW }));
-    expect(invitation.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { id: INVITATION_ID },
-        data: { status: 'REVOKED', revokedAt: NOW },
-      }),
+    expect(result?.status).toBe('REVOKED');
+    expect(invitation.updateMany).toHaveBeenCalledWith({
+      where: { id: INVITATION_ID, status: 'PENDING' },
+      data: { status: 'REVOKED', revokedAt: NOW },
+    });
+  });
+
+  it('revokeInvitation returns null for a non-pending invitation', async () => {
+    const { client, invitation } = createClient();
+    invitation.updateMany.mockResolvedValue({ count: 0 });
+
+    await expect(
+      new PrismaShareRepository(client).revokeInvitation(INVITATION_ID, NOW),
+    ).resolves.toBeNull();
+  });
+
+  it('resendInvitation rotates the token and refreshes sentAt and expiresAt', async () => {
+    const { client, invitation } = createClient();
+    const newHash = 'b'.repeat(64);
+    const expiresAt = new Date(NOW.getTime() + 60_000);
+    invitation.findUnique.mockResolvedValue(
+      createInvitationRow({ tokenHash: newHash, sentAt: NOW, expiresAt }),
     );
+
+    const result = await new PrismaShareRepository(client).resendInvitation(INVITATION_ID, {
+      tokenHash: newHash,
+      sentAt: NOW,
+      expiresAt,
+    });
+
+    expect(result?.tokenHash).toBe(newHash);
+    expect(invitation.updateMany).toHaveBeenCalledWith({
+      where: { id: INVITATION_ID, status: 'PENDING' },
+      data: { tokenHash: newHash, sentAt: NOW, expiresAt },
+    });
   });
 
   it('listPendingByProject returns only PENDING invitations', async () => {
@@ -222,84 +390,6 @@ describe('PrismaShareRepository', () => {
     });
   });
 
-  it('findDeclinedAccess filters on the invitation and a non-null declinedAt', async () => {
-    const { client, projectAccess } = createClient();
-
-    await expect(
-      new PrismaShareRepository(client).findDeclinedAccess(PROJECT_ID, VIEWER_ID, INVITATION_ID),
-    ).resolves.toEqual({ id: 'access-id' });
-    expect(projectAccess.findFirst).toHaveBeenCalledWith({
-      where: {
-        projectId: PROJECT_ID,
-        userId: VIEWER_ID,
-        invitationId: INVITATION_ID,
-        declinedAt: { not: null },
-      },
-      select: { id: true },
-    });
-  });
-
-  it('acceptInvitation upserts an active Viewer access', async () => {
-    const { client, projectAccess } = createClient();
-
-    await new PrismaShareRepository(client).acceptInvitation(
-      PROJECT_ID,
-      VIEWER_ID,
-      INVITATION_ID,
-      NOW,
-    );
-
-    expect(projectAccess.upsert).toHaveBeenCalledWith({
-      where: { projectId_userId: { projectId: PROJECT_ID, userId: VIEWER_ID } },
-      create: {
-        projectId: PROJECT_ID,
-        userId: VIEWER_ID,
-        role: 'VIEWER',
-        invitationId: INVITATION_ID,
-        acceptedAt: NOW,
-        declinedAt: null,
-        revokedAt: null,
-      },
-      update: {
-        role: 'VIEWER',
-        invitationId: INVITATION_ID,
-        acceptedAt: NOW,
-        declinedAt: null,
-        revokedAt: null,
-      },
-    });
-  });
-
-  it('declineInvitation upserts an inactive declined access', async () => {
-    const { client, projectAccess } = createClient();
-
-    await new PrismaShareRepository(client).declineInvitation(
-      PROJECT_ID,
-      VIEWER_ID,
-      INVITATION_ID,
-      NOW,
-    );
-
-    expect(projectAccess.upsert).toHaveBeenCalledWith({
-      where: { projectId_userId: { projectId: PROJECT_ID, userId: VIEWER_ID } },
-      create: {
-        projectId: PROJECT_ID,
-        userId: VIEWER_ID,
-        role: 'VIEWER',
-        invitationId: INVITATION_ID,
-        acceptedAt: null,
-        declinedAt: NOW,
-        revokedAt: NOW,
-      },
-      update: {
-        invitationId: INVITATION_ID,
-        acceptedAt: null,
-        declinedAt: NOW,
-        revokedAt: NOW,
-      },
-    });
-  });
-
   it('listActiveViewers maps the acceptedAt (or createdAt) as grantedAt', async () => {
     const { client, projectAccess } = createClient();
     projectAccess.findMany.mockResolvedValue([
@@ -307,7 +397,7 @@ describe('PrismaShareRepository', () => {
         userId: VIEWER_ID,
         acceptedAt: NOW,
         createdAt: NOW,
-        user: { id: VIEWER_ID, email: 'viewer@example.com' },
+        user: { id: VIEWER_ID, email: RECIPIENT_EMAIL },
       },
       {
         userId: '11111111-2222-4333-8444-555555555555',
@@ -322,7 +412,7 @@ describe('PrismaShareRepository', () => {
     expect(result).toEqual([
       {
         userId: VIEWER_ID,
-        user: { id: VIEWER_ID, email: 'viewer@example.com' },
+        user: { id: VIEWER_ID, email: RECIPIENT_EMAIL },
         grantedAt: NOW,
       },
       {

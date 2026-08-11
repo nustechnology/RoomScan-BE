@@ -118,7 +118,8 @@ the local PostgreSQL and MinIO data volumes.
 | `PATCH`  | `/api/v1/notes/:noteId`                                | Update note content or color (Owner only)                  |
 | `PATCH`  | `/api/v1/notes/:noteId/position`                       | Move a note to a new 3D position (Owner only)              |
 | `DELETE` | `/api/v1/notes/:noteId`                                | Delete a note (Owner only)                                 |
-| `POST`   | `/api/v1/projects/:projectId/invitations`              | Create an invitation link (Owner only)                     |
+| `POST`   | `/api/v1/projects/:projectId/invitations`              | Create an invitation for an email (Owner only)             |
+| `POST`   | `/api/v1/invitations/:invitationId/resend`             | Resend a pending invitation email (Owner only)             |
 | `GET`    | `/api/v1/invitations/:token`                           | Preview an invitation (anonymous or optional Bearer)       |
 | `POST`   | `/api/v1/invitations/:token/accept`                    | Accept an invitation and gain Viewer access                |
 | `POST`   | `/api/v1/invitations/:token/decline`                   | Decline an invitation                                      |
@@ -249,18 +250,20 @@ trimmed characters), color is a preset (`YELLOW`, `RED`, `BLUE`, `GREEN`,
 match the scan's current model version (`409` otherwise). Note content is never
 written to logs. Deleting a scan or project makes its notes inaccessible.
 
-Projects are shared through expiring invitation links. The Owner creates a link
-(`POST /api/v1/projects/:projectId/invitations`, optionally with
-`expiresInSeconds`) only after the project has at least one scan with an
-uploaded model, and receives an `invitationUrl` whose raw token is random and
-never stored (only its SHA-256 hash is). Recipients can preview the link without
-signing in, then accept to gain Viewer access or decline; the link remains
-usable by other recipients until revoked or expired. The Owner can list pending
-links and active Viewers (`GET /api/v1/projects/:projectId/shares`), revoke a
-pending link, and revoke a Viewer's access
-(`DELETE /api/v1/projects/:projectId/shares/:userId`). Revoked Viewers lose
-project, scan, note, and asset-download access immediately. Share management is
-Owner-only (`403 NOT_OWNER` for others).
+Projects are shared through expiring invitation links addressed to a recipient
+email. The Owner creates an invitation (`POST /api/v1/projects/:projectId/invitations`,
+with `recipientEmail` and optional `expiresInSeconds`) only after the project
+has at least one scan with an uploaded model; the API returns an `invitationUrl`
+whose raw token is random and never stored (only its SHA-256 hash is), and sends
+an invitation email to the recipient. One pending invitation is allowed per
+`(project, email)` (`409` otherwise). Recipients can preview the link without
+signing in, then accept to gain Viewer access or decline; a pending link can be
+re-sent (`POST /api/v1/invitations/:invitationId/resend`), which rotates the
+token and extends the expiry. The Owner can list pending links and active
+Viewers (`GET /api/v1/projects/:projectId/shares`), revoke a pending link, and
+revoke a Viewer's access (`DELETE /api/v1/projects/:projectId/shares/:userId`).
+Revoked Viewers lose project, scan, note, and asset-download access immediately.
+Share management is Owner-only (`403 NOT_OWNER` for others).
 
 For nonce-bound sign-in, the client generates a raw nonce, sends its lowercase
 hexadecimal SHA-256 digest to Apple, and sends the raw nonce in the request
@@ -277,37 +280,41 @@ and `x-request-id`.
 
 ## Environment variables
 
-| Variable                                                 | Required | Default                 | Description                                                         |
-| -------------------------------------------------------- | -------- | ----------------------- | ------------------------------------------------------------------- |
-| `NODE_ENV`                                               | No       | `development`           | `development`, `staging`, `test` or `production`                    |
-| `PORT`                                                   | No       | `3000`                  | HTTP port inside the process                                        |
-| `DATABASE_URL`                                           | Yes      | —                       | PostgreSQL connection string                                        |
-| `LOG_LEVEL`                                              | No       | `info`                  | Pino log level                                                      |
-| `CORS_ORIGIN`                                            | No       | `*`                     | `*` or comma-separated allowed origins                              |
-| `TRUST_PROXY`                                            | No       | disabled                | Trusted hop count or comma-separated proxy IPs/CIDRs                |
-| `RATE_LIMIT_API_WINDOW_SECONDS`                          | No       | `60`                    | General API rate-limit window                                       |
-| `RATE_LIMIT_API_MAX_REQUESTS`                            | No       | `120`                   | Requests per IP in the general API window                           |
-| `RATE_LIMIT_APPLE_AUTH_WINDOW_SECONDS`                   | No       | `900`                   | Apple sign-in rate-limit window                                     |
-| `RATE_LIMIT_APPLE_AUTH_MAX_REQUESTS`                     | No       | `20`                    | Apple sign-in attempts per IP in its window                         |
-| `RATE_LIMIT_REFRESH_AUTH_WINDOW_SECONDS`                 | No       | `900`                   | Token refresh rate-limit window                                     |
-| `RATE_LIMIT_REFRESH_AUTH_MAX_REQUESTS`                   | No       | `10`                    | Token refresh attempts per IP in its window                         |
-| `APPLE_CLIENT_ID`                                        | Yes      | —                       | Native app bundle identifier used as Apple `aud`                    |
-| `AUTH_ACCESS_TOKEN_SECRET`                               | Yes      | —                       | HS256 access-token secret, at least 32 characters                   |
-| `AUTH_REFRESH_TOKEN_SECRET`                              | Yes      | —                       | HS256 refresh-token secret, at least 32 characters                  |
-| `AUTH_ACCESS_TOKEN_TTL_SECONDS`                          | No       | `3600`                  | RoomScan access-token lifetime                                      |
-| `AUTH_REFRESH_TOKEN_TTL_SECONDS`                         | No       | `2592000`               | RoomScan refresh-token lifetime                                     |
-| `LOCAL_TEST_AUTH_ENABLED`                                | No       | `false`                 | Enable the seeded login only in `development`                       |
-| `STORAGE_PROVIDER`                                       | No       | `local`                 | Storage adapter: `local` (dev/test fake) or `minio` (S3-compatible) |
-| `STORAGE_BUCKET` / `STORAGE_REGION` / `STORAGE_ENDPOINT` | No       | ``                      | MinIO bucket, region, and `host[:port]` endpoint                    |
-| `STORAGE_ACCESS_KEY_ID` / `STORAGE_SECRET_ACCESS_KEY`    | No       | ``                      | MinIO credentials; required with `STORAGE_PROVIDER=minio`           |
-| `STORAGE_USE_SSL`                                        | No       | `false`                 | Use HTTPS instead of HTTP for the MinIO endpoint                    |
-| `STORAGE_UPLOAD_URL_TTL_SECONDS`                         | No       | `900`                   | Signed upload URL lifetime                                          |
-| `STORAGE_DOWNLOAD_URL_TTL_SECONDS`                       | No       | `60`                    | Signed download URL lifetime                                        |
-| `ASSET_MIN_MODEL_SIZE_BYTES`                             | No       | `10000000`              | Minimum model scan-file size (10 MB)                                |
-| `ASSET_MAX_MODEL_SIZE_BYTES`                             | No       | `100000000`             | Maximum model scan-file size (100 MB)                               |
-| `ASSET_MAX_THUMBNAIL_SIZE_BYTES`                         | No       | `10000000`              | Maximum thumbnail asset size                                        |
-| `INVITATION_TTL_SECONDS`                                 | No       | `604800`                | Default invitation-link lifetime (7 days)                           |
-| `INVITATION_BASE_URL`                                    | No       | `http://localhost:3000` | Client-facing base used to build `invitationUrl` links              |
+| Variable                                                 | Required | Default                                     | Description                                                         |
+| -------------------------------------------------------- | -------- | ------------------------------------------- | ------------------------------------------------------------------- |
+| `NODE_ENV`                                               | No       | `development`                               | `development`, `staging`, `test` or `production`                    |
+| `PORT`                                                   | No       | `3000`                                      | HTTP port inside the process                                        |
+| `DATABASE_URL`                                           | Yes      | —                                           | PostgreSQL connection string                                        |
+| `LOG_LEVEL`                                              | No       | `info`                                      | Pino log level                                                      |
+| `CORS_ORIGIN`                                            | No       | `*`                                         | `*` or comma-separated allowed origins                              |
+| `TRUST_PROXY`                                            | No       | disabled                                    | Trusted hop count or comma-separated proxy IPs/CIDRs                |
+| `RATE_LIMIT_API_WINDOW_SECONDS`                          | No       | `60`                                        | General API rate-limit window                                       |
+| `RATE_LIMIT_API_MAX_REQUESTS`                            | No       | `120`                                       | Requests per IP in the general API window                           |
+| `RATE_LIMIT_APPLE_AUTH_WINDOW_SECONDS`                   | No       | `900`                                       | Apple sign-in rate-limit window                                     |
+| `RATE_LIMIT_APPLE_AUTH_MAX_REQUESTS`                     | No       | `20`                                        | Apple sign-in attempts per IP in its window                         |
+| `RATE_LIMIT_REFRESH_AUTH_WINDOW_SECONDS`                 | No       | `900`                                       | Token refresh rate-limit window                                     |
+| `RATE_LIMIT_REFRESH_AUTH_MAX_REQUESTS`                   | No       | `10`                                        | Token refresh attempts per IP in its window                         |
+| `APPLE_CLIENT_ID`                                        | Yes      | —                                           | Native app bundle identifier used as Apple `aud`                    |
+| `AUTH_ACCESS_TOKEN_SECRET`                               | Yes      | —                                           | HS256 access-token secret, at least 32 characters                   |
+| `AUTH_REFRESH_TOKEN_SECRET`                              | Yes      | —                                           | HS256 refresh-token secret, at least 32 characters                  |
+| `AUTH_ACCESS_TOKEN_TTL_SECONDS`                          | No       | `3600`                                      | RoomScan access-token lifetime                                      |
+| `AUTH_REFRESH_TOKEN_TTL_SECONDS`                         | No       | `2592000`                                   | RoomScan refresh-token lifetime                                     |
+| `LOCAL_TEST_AUTH_ENABLED`                                | No       | `false`                                     | Enable the seeded login only in `development`                       |
+| `STORAGE_PROVIDER`                                       | No       | `local`                                     | Storage adapter: `local` (dev/test fake) or `minio` (S3-compatible) |
+| `STORAGE_BUCKET` / `STORAGE_REGION` / `STORAGE_ENDPOINT` | No       | ``                                          | MinIO bucket, region, and `host[:port]` endpoint                    |
+| `STORAGE_ACCESS_KEY_ID` / `STORAGE_SECRET_ACCESS_KEY`    | No       | ``                                          | MinIO credentials; required with `STORAGE_PROVIDER=minio`           |
+| `STORAGE_USE_SSL`                                        | No       | `false`                                     | Use HTTPS instead of HTTP for the MinIO endpoint                    |
+| `STORAGE_UPLOAD_URL_TTL_SECONDS`                         | No       | `900`                                       | Signed upload URL lifetime                                          |
+| `STORAGE_DOWNLOAD_URL_TTL_SECONDS`                       | No       | `60`                                        | Signed download URL lifetime                                        |
+| `ASSET_MIN_MODEL_SIZE_BYTES`                             | No       | `10000000`                                  | Minimum model scan-file size (10 MB)                                |
+| `ASSET_MAX_MODEL_SIZE_BYTES`                             | No       | `100000000`                                 | Maximum model scan-file size (100 MB)                               |
+| `ASSET_MAX_THUMBNAIL_SIZE_BYTES`                         | No       | `10000000`                                  | Maximum thumbnail asset size                                        |
+| `INVITATION_TTL_SECONDS`                                 | No       | `604800`                                    | Default invitation-link lifetime (7 days)                           |
+| `INVITATION_BASE_URL`                                    | No       | `http://localhost:3000`                     | Client-facing base used to build `invitationUrl` links              |
+| `MAIL_PROVIDER`                                          | No       | `log`                                       | Mail adapter: `log` (dev/test fake) or `smtp`                       |
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS`    | No       | ``/ `2525` /`` / ``                         | SMTP connection; required with `MAIL_PROVIDER=smtp`                 |
+| `SMTP_SECURE`                                            | No       | `false`                                     | Use TLS for the SMTP connection                                     |
+| `MAIL_FROM`                                              | No       | `RoomScan App <notifications@roomscan.app>` | Sender address for transactional email                              |
 
 The remaining PostgreSQL, MinIO and `ROOMSCAN_PORT` values in `.env.example`
 configure Docker Compose. The refresh TTL must exceed the access TTL. Replace
@@ -329,6 +336,13 @@ Rate-limit counters are stored in the API process, reset on restart and are not
 shared by replicas. The current single-instance Compose topology needs no
 additional store. Before deploying behind a reverse proxy, set `TRUST_PROXY` to
 the exact proxy hop count or trusted IP/CIDR list. Never set it to `true`.
+
+Invitation email follows the same pattern: `MAIL_PROVIDER=log` (the default)
+writes messages to the application log for development and tests and is rejected
+in production, while `MAIL_PROVIDER=smtp` sends through SMTP (for example the
+Mailtrap sandbox) using `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, and
+`SMTP_SECURE`. A failed email send is logged and never fails the invitation
+request.
 
 ## Project scripts
 

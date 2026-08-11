@@ -1,5 +1,5 @@
-export type InvitationStatus = 'PENDING' | 'REVOKED';
-export type InvitationViewStatus = 'PENDING' | 'EXPIRED' | 'REVOKED';
+export type InvitationStatus = 'PENDING' | 'ACCEPTED' | 'DECLINED' | 'REVOKED';
+export type InvitationViewStatus = 'PENDING' | 'EXPIRED' | 'ACCEPTED' | 'DECLINED' | 'REVOKED';
 
 export interface ShareProjectSummary {
   id: string;
@@ -16,10 +16,14 @@ export interface InvitationRecord {
   id: string;
   projectId: string;
   createdById: string;
+  recipientEmail: string;
   tokenHash: string;
   status: InvitationStatus;
   expiresAt: Date;
   sentAt: Date;
+  acceptedAt: Date | null;
+  acceptedByUserId: string | null;
+  declinedAt: Date | null;
   revokedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
@@ -31,15 +35,21 @@ export interface InvitationWithProject {
 }
 
 export interface InvitationCreateInput {
+  recipientEmail: string;
   expiresInSeconds?: number;
 }
 
-export interface InvitationCreateResult {
+export interface InvitationSendResult {
   invitationId: string;
   invitationUrl: string;
+  recipientEmail: string;
   expiresAt: string;
   status: 'PENDING';
+  sentAt: string;
 }
+
+export type InvitationCreateResult = InvitationSendResult;
+export type InvitationResendResult = InvitationSendResult;
 
 export interface InvitationPreviewResult {
   project: {
@@ -49,12 +59,14 @@ export interface InvitationPreviewResult {
     thumbnail: string | null;
   };
   status: InvitationViewStatus;
+  recipientEmail: string;
   sentAt: string;
   expiresAt: string;
   hasAccess?: boolean;
 }
 
 export interface InvitationAcceptResult {
+  invitationId: string;
   project: ShareProjectSummary;
   access: {
     role: 'VIEWER';
@@ -77,6 +89,7 @@ export interface InvitationRevokeResult {
 
 export interface PendingInvitationResult {
   invitationId: string;
+  recipientEmail: string;
   status: 'PENDING' | 'EXPIRED';
   sentAt: string;
   expiresAt: string;
@@ -102,38 +115,44 @@ export interface ViewerRevokeResult {
   revokedAt: string;
 }
 
+export interface ShareProjectInfo {
+  name: string;
+  ownerId: string;
+  ownerEmail: string | null;
+}
+
 export interface ShareRepository {
   findProjectOwner(projectId: string): Promise<string | null>;
+  findProjectInfo(projectId: string): Promise<ShareProjectInfo | null>;
   hasUploadedModel(projectId: string): Promise<boolean>;
   createInvitation(data: {
     projectId: string;
     createdById: string;
+    recipientEmail: string;
     tokenHash: string;
     expiresAt: Date;
     sentAt: Date;
   }): Promise<InvitationRecord>;
   findByTokenHash(tokenHash: string): Promise<InvitationWithProject | null>;
+  findByProjectAndEmail(
+    projectId: string,
+    recipientEmail: string,
+  ): Promise<InvitationRecord | null>;
   findInvitationById(id: string): Promise<InvitationRecord | null>;
+  acceptInvitation(
+    invitationId: string,
+    projectId: string,
+    userId: string,
+    acceptedAt: Date,
+  ): Promise<InvitationRecord | null>;
+  declineInvitation(invitationId: string, declinedAt: Date): Promise<InvitationRecord | null>;
   revokeInvitation(id: string, revokedAt: Date): Promise<InvitationRecord | null>;
+  resendInvitation(
+    id: string,
+    data: { tokenHash: string; sentAt: Date; expiresAt: Date },
+  ): Promise<InvitationRecord | null>;
   listPendingByProject(projectId: string): Promise<InvitationRecord[]>;
   findActiveViewerAccess(projectId: string, userId: string): Promise<{ id: string } | null>;
-  findDeclinedAccess(
-    projectId: string,
-    userId: string,
-    invitationId: string,
-  ): Promise<{ id: string } | null>;
-  acceptInvitation(
-    projectId: string,
-    userId: string,
-    invitationId: string,
-    acceptedAt: Date,
-  ): Promise<void>;
-  declineInvitation(
-    projectId: string,
-    userId: string,
-    invitationId: string,
-    declinedAt: Date,
-  ): Promise<void>;
   listActiveViewers(
     projectId: string,
   ): Promise<

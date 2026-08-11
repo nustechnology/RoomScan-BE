@@ -17,6 +17,8 @@ import { ProjectNotFoundError } from '../src/modules/project/project.errors.js';
 import {
   AccessAlreadyExistsError,
   CannotAcceptOwnInvitationError,
+  InvitationAlreadyAcceptedError,
+  InvitationAlreadySentError,
   InvitationDeclinedError,
   InvitationExpiredError,
   InvitationNotFoundError,
@@ -30,6 +32,7 @@ import {
   InvitationCreateResponseSchema,
   InvitationDeclineResponseSchema,
   InvitationPreviewResponseSchema,
+  InvitationResendResponseSchema,
   InvitationRevokeResponseSchema,
   SharesListResponseSchema,
   ViewerRevokeResponseSchema,
@@ -46,6 +49,7 @@ const USER_RECIPIENT = 'f1a2b3c4-d5e6-7890-abcd-ef1234567890';
 const PROJECT_ID = 'a1b2c3d4-e5f6-4890-abcd-ef1234567890';
 const INVITATION_ID = 'b1a2c3d4-e5f6-4890-abcd-ef1234567890';
 const TOKEN = 'A'.repeat(43);
+const RECIPIENT_EMAIL = 'recipient@example.com';
 const NOW = new Date('2026-07-29T10:00:00.000Z');
 
 const config: AppConfig = {
@@ -81,6 +85,13 @@ const config: AppConfig = {
   assetMaxThumbnailSizeBytes: 10_000_000,
   invitationTtlSeconds: 604_800,
   invitationBaseUrl: 'https://invite.roomscan.dev',
+  mailProvider: 'log',
+  smtpHost: '',
+  smtpPort: 2525,
+  smtpUser: '',
+  smtpPass: '',
+  smtpSecure: false,
+  mailFrom: 'RoomScan App <notifications@roomscan.app>',
 };
 
 const invitationUrl = `https://invite.roomscan.dev/invitations/${TOKEN}`;
@@ -159,6 +170,7 @@ describe('Share HTTP endpoints', () => {
   const acceptInvitation = vi.fn<ShareService['acceptInvitation']>();
   const declineInvitation = vi.fn<ShareService['declineInvitation']>();
   const revokeInvitation = vi.fn<ShareService['revokeInvitation']>();
+  const resendInvitation = vi.fn<ShareService['resendInvitation']>();
   const listShares = vi.fn<ShareService['listShares']>();
   const revokeViewer = vi.fn<ShareService['revokeViewer']>();
   const shareService = {
@@ -167,6 +179,7 @@ describe('Share HTTP endpoints', () => {
     acceptInvitation,
     declineInvitation,
     revokeInvitation,
+    resendInvitation,
     listShares,
     revokeViewer,
   } as unknown as ShareService;
@@ -197,8 +210,10 @@ describe('Share HTTP endpoints', () => {
     createInvitation.mockResolvedValue({
       invitationId: INVITATION_ID,
       invitationUrl,
+      recipientEmail: RECIPIENT_EMAIL,
       expiresAt,
       status: 'PENDING',
+      sentAt: NOW.toISOString(),
     });
     previewInvitation.mockResolvedValue({
       project: {
@@ -208,10 +223,12 @@ describe('Share HTTP endpoints', () => {
         thumbnail: null,
       },
       status: 'PENDING',
+      recipientEmail: RECIPIENT_EMAIL,
       sentAt: NOW.toISOString(),
       expiresAt,
     });
     acceptInvitation.mockResolvedValue({
+      invitationId: INVITATION_ID,
       project: {
         id: PROJECT_ID,
         name: 'District 2 Apartment',
@@ -231,9 +248,23 @@ describe('Share HTTP endpoints', () => {
       status: 'REVOKED',
       revokedAt: NOW.toISOString(),
     });
+    resendInvitation.mockResolvedValue({
+      invitationId: INVITATION_ID,
+      invitationUrl,
+      recipientEmail: RECIPIENT_EMAIL,
+      expiresAt,
+      status: 'PENDING',
+      sentAt: NOW.toISOString(),
+    });
     listShares.mockResolvedValue({
       pendingInvitations: [
-        { invitationId: INVITATION_ID, status: 'PENDING', sentAt: NOW.toISOString(), expiresAt },
+        {
+          invitationId: INVITATION_ID,
+          recipientEmail: RECIPIENT_EMAIL,
+          status: 'PENDING',
+          sentAt: NOW.toISOString(),
+          expiresAt,
+        },
       ],
       viewers: [
         {
@@ -255,17 +286,20 @@ describe('Share HTTP endpoints', () => {
       const response = await request(app)
         .post(`/api/v1/projects/${PROJECT_ID}/invitations`)
         .set('Authorization', `Bearer ${ownerToken}`)
-        .send({ expiresInSeconds: 3600 })
+        .send({ recipientEmail: RECIPIENT_EMAIL, expiresInSeconds: 3600 })
         .expect(201);
 
       const body = InvitationCreateResponseSchema.parse(response.body as unknown);
       expect(body).toEqual({
         invitationId: INVITATION_ID,
         invitationUrl,
+        recipientEmail: RECIPIENT_EMAIL,
         expiresAt,
         status: 'PENDING',
+        sentAt: NOW.toISOString(),
       });
       expect(createInvitation).toHaveBeenCalledWith(USER_OWNER, PROJECT_ID, {
+        recipientEmail: RECIPIENT_EMAIL,
         expiresInSeconds: 3600,
       });
     });
@@ -274,10 +308,26 @@ describe('Share HTTP endpoints', () => {
       await request(app)
         .post(`/api/v1/projects/${PROJECT_ID}/invitations`)
         .set('Authorization', `Bearer ${ownerToken}`)
-        .send({})
+        .send({ recipientEmail: RECIPIENT_EMAIL })
         .expect(201);
 
-      expect(createInvitation).toHaveBeenCalledWith(USER_OWNER, PROJECT_ID, {});
+      expect(createInvitation).toHaveBeenCalledWith(USER_OWNER, PROJECT_ID, {
+        recipientEmail: RECIPIENT_EMAIL,
+      });
+    });
+
+    it('rejects a duplicate pending invitation with 409', async () => {
+      createInvitation.mockRejectedValue(new InvitationAlreadySentError());
+
+      const response = await request(app)
+        .post(`/api/v1/projects/${PROJECT_ID}/invitations`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ recipientEmail: RECIPIENT_EMAIL })
+        .expect(409);
+
+      expect(ErrorResponseSchema.parse(response.body as unknown).error.code).toBe(
+        'INVITATION_ALREADY_SENT',
+      );
     });
 
     it('rejects a non-owner with 403', async () => {
@@ -286,7 +336,7 @@ describe('Share HTTP endpoints', () => {
       const response = await request(app)
         .post(`/api/v1/projects/${PROJECT_ID}/invitations`)
         .set('Authorization', `Bearer ${recipientToken}`)
-        .send({})
+        .send({ recipientEmail: RECIPIENT_EMAIL })
         .expect(403);
 
       expect(ErrorResponseSchema.parse(response.body as unknown).error.code).toBe('NOT_OWNER');
@@ -298,7 +348,7 @@ describe('Share HTTP endpoints', () => {
       const response = await request(app)
         .post(`/api/v1/projects/${PROJECT_ID}/invitations`)
         .set('Authorization', `Bearer ${ownerToken}`)
-        .send({})
+        .send({ recipientEmail: RECIPIENT_EMAIL })
         .expect(404);
 
       expect(ErrorResponseSchema.parse(response.body as unknown).error.code).toBe(
@@ -312,7 +362,7 @@ describe('Share HTTP endpoints', () => {
       const response = await request(app)
         .post(`/api/v1/projects/${PROJECT_ID}/invitations`)
         .set('Authorization', `Bearer ${ownerToken}`)
-        .send({})
+        .send({ recipientEmail: RECIPIENT_EMAIL })
         .expect(409);
 
       expect(ErrorResponseSchema.parse(response.body as unknown).error.code).toBe(
@@ -323,7 +373,7 @@ describe('Share HTTP endpoints', () => {
     it('rejects a request without authentication', async () => {
       const response = await request(app)
         .post(`/api/v1/projects/${PROJECT_ID}/invitations`)
-        .send({})
+        .send({ recipientEmail: RECIPIENT_EMAIL })
         .expect(401);
 
       expect(ErrorResponseSchema.parse(response.body as unknown).error.code).toBe('UNAUTHORIZED');
@@ -331,10 +381,12 @@ describe('Share HTTP endpoints', () => {
     });
 
     it.each([
-      { expiresInSeconds: 0 },
-      { expiresInSeconds: 59 },
-      { expiresInSeconds: 2_592_001 },
-      { unexpected: true },
+      {},
+      { recipientEmail: 'not-an-email' },
+      { recipientEmail: RECIPIENT_EMAIL, expiresInSeconds: 0 },
+      { recipientEmail: RECIPIENT_EMAIL, expiresInSeconds: 59 },
+      { recipientEmail: RECIPIENT_EMAIL, expiresInSeconds: 2_592_001 },
+      { recipientEmail: RECIPIENT_EMAIL, unexpected: true },
     ])('rejects an invalid body %j', async (body) => {
       const response = await request(app)
         .post(`/api/v1/projects/${PROJECT_ID}/invitations`)
@@ -344,6 +396,59 @@ describe('Share HTTP endpoints', () => {
 
       expect(ErrorResponseSchema.parse(response.body as unknown).error.code).toBe(
         'VALIDATION_ERROR',
+      );
+    });
+  });
+
+  describe('POST /api/v1/invitations/:invitationId/resend', () => {
+    it('resends a pending invitation as the owner', async () => {
+      const response = await request(app)
+        .post(`/api/v1/invitations/${INVITATION_ID}/resend`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .expect(200);
+
+      const body = InvitationResendResponseSchema.parse(response.body as unknown);
+      expect(body).toEqual({
+        invitationId: INVITATION_ID,
+        invitationUrl,
+        recipientEmail: RECIPIENT_EMAIL,
+        expiresAt,
+        status: 'PENDING',
+        sentAt: NOW.toISOString(),
+      });
+      expect(resendInvitation).toHaveBeenCalledWith(USER_OWNER, INVITATION_ID);
+    });
+
+    it('rejects an unauthenticated resend with 401', async () => {
+      const response = await request(app)
+        .post(`/api/v1/invitations/${INVITATION_ID}/resend`)
+        .expect(401);
+
+      expect(ErrorResponseSchema.parse(response.body as unknown).error.code).toBe('UNAUTHORIZED');
+      expect(resendInvitation).not.toHaveBeenCalled();
+    });
+
+    it('rejects a non-owner with 403', async () => {
+      resendInvitation.mockRejectedValue(new NotOwnerError());
+
+      const response = await request(app)
+        .post(`/api/v1/invitations/${INVITATION_ID}/resend`)
+        .set('Authorization', `Bearer ${recipientToken}`)
+        .expect(403);
+
+      expect(ErrorResponseSchema.parse(response.body as unknown).error.code).toBe('NOT_OWNER');
+    });
+
+    it('rejects an already accepted invitation with 409', async () => {
+      resendInvitation.mockRejectedValue(new InvitationAlreadyAcceptedError());
+
+      const response = await request(app)
+        .post(`/api/v1/invitations/${INVITATION_ID}/resend`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .expect(409);
+
+      expect(ErrorResponseSchema.parse(response.body as unknown).error.code).toBe(
+        'INVITATION_ALREADY_ACCEPTED',
       );
     });
   });
@@ -361,6 +466,7 @@ describe('Share HTTP endpoints', () => {
           thumbnail: null,
         },
         status: 'PENDING',
+        recipientEmail: RECIPIENT_EMAIL,
         sentAt: NOW.toISOString(),
         expiresAt,
       });
@@ -376,6 +482,7 @@ describe('Share HTTP endpoints', () => {
           thumbnail: null,
         },
         status: 'PENDING',
+        recipientEmail: RECIPIENT_EMAIL,
         sentAt: NOW.toISOString(),
         expiresAt,
         hasAccess: true,
@@ -419,6 +526,7 @@ describe('Share HTTP endpoints', () => {
 
       const body = InvitationAcceptResponseSchema.parse(response.body as unknown);
       expect(body).toEqual({
+        invitationId: INVITATION_ID,
         project: {
           id: PROJECT_ID,
           name: 'District 2 Apartment',
@@ -443,6 +551,12 @@ describe('Share HTTP endpoints', () => {
       ['expired invitation', new InvitationExpiredError(), 409, 'INVITATION_EXPIRED'],
       ['revoked invitation', new InvitationRevokedError(), 409, 'INVITATION_REVOKED'],
       ['already declined invitation', new InvitationDeclinedError(), 409, 'INVITATION_DECLINED'],
+      [
+        'already accepted invitation',
+        new InvitationAlreadyAcceptedError(),
+        409,
+        'INVITATION_ALREADY_ACCEPTED',
+      ],
       ['user already has access', new AccessAlreadyExistsError(), 409, 'ACCESS_ALREADY_EXISTS'],
       [
         'owner self-accept',
@@ -536,6 +650,7 @@ describe('Share HTTP endpoints', () => {
         pendingInvitations: [
           {
             invitationId: INVITATION_ID,
+            recipientEmail: RECIPIENT_EMAIL,
             status: 'PENDING',
             sentAt: NOW.toISOString(),
             expiresAt,

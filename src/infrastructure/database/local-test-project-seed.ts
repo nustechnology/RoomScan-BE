@@ -7,6 +7,7 @@ import { generateInvitationToken, hashInvitationToken } from '../../modules/shar
 export const LOCAL_TEST_PROJECT_ID = '00000000-0000-4000-8000-000000000101';
 export const LOCAL_TEST_PROJECT_NAME = 'District 2 Apartment';
 export const LOCAL_TEST_INVITATION_ID = '00000000-0000-4000-8000-000000000401';
+export const LOCAL_TEST_PENDING_INVITE_EMAIL = 'pending-invite@roomscan.dev';
 
 export const LOCAL_TEST_SCANS = [
   {
@@ -168,13 +169,11 @@ export async function seedLocalTestProject(client: SeedClient): Promise<{ invita
         userId: LOCAL_TEST_VIEWER_ID,
         role: 'VIEWER',
         acceptedAt: new Date(),
-        declinedAt: null,
         revokedAt: null,
       },
       update: {
         role: 'VIEWER',
         acceptedAt: new Date(),
-        declinedAt: null,
         revokedAt: null,
       },
     });
@@ -186,6 +185,7 @@ export async function seedLocalTestProject(client: SeedClient): Promise<{ invita
         id: LOCAL_TEST_INVITATION_ID,
         projectId: LOCAL_TEST_PROJECT_ID,
         createdById: LOCAL_TEST_USER_ID,
+        recipientEmail: LOCAL_TEST_PENDING_INVITE_EMAIL,
         tokenHash: hashInvitationToken(rawToken),
         status: 'PENDING',
         expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
@@ -194,10 +194,14 @@ export async function seedLocalTestProject(client: SeedClient): Promise<{ invita
       update: {
         projectId: LOCAL_TEST_PROJECT_ID,
         createdById: LOCAL_TEST_USER_ID,
+        recipientEmail: LOCAL_TEST_PENDING_INVITE_EMAIL,
         tokenHash: hashInvitationToken(rawToken),
         status: 'PENDING',
         expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
         sentAt: new Date(),
+        acceptedAt: null,
+        acceptedByUserId: null,
+        declinedAt: null,
         revokedAt: null,
       },
     });

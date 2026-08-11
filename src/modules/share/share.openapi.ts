@@ -9,6 +9,7 @@ import {
   InvitationDeclineResponseSchema,
   InvitationIdParamSchema,
   InvitationPreviewResponseSchema,
+  InvitationResendResponseSchema,
   InvitationRevokeResponseSchema,
   InvitationTokenParamSchema,
   SharesListResponseSchema,
@@ -31,6 +32,10 @@ const invitationCreateBody = shareOpenApiRegistry.register(
 const invitationCreateResponse = shareOpenApiRegistry.register(
   'InvitationCreateResponse',
   InvitationCreateResponseSchema,
+);
+const invitationResendResponse = shareOpenApiRegistry.register(
+  'InvitationResendResponse',
+  InvitationResendResponseSchema,
 );
 const invitationPreviewResponse = shareOpenApiRegistry.register(
   'InvitationPreviewResponse',
@@ -112,7 +117,7 @@ const errorResponses = {
   },
   409: {
     description:
-      'The invitation state or access is already final: expired, revoked, declined, accepted, already has access, or the project is not shareable',
+      'The invitation or access state is final: already sent to this email, already accepted, expired, revoked, declined, already has access, or the project is not shareable',
     headers: rateLimitHeaders,
     content: {
       'application/json': {
@@ -155,7 +160,7 @@ shareOpenApiRegistry.registerPath({
   tags: ['Shares'],
   summary: 'Create an invitation link for a project',
   description:
-    'Owner only. The project must have at least one scan with an uploaded model before it can be shared.',
+    'Owner only. The project must have at least one scan with an uploaded model before it can be shared. Sends the invitation email to the recipient.',
   security: [{ [bearerAuth.name]: [] }],
   request: {
     params: ProjectIdParamSchema,
@@ -170,11 +175,36 @@ shareOpenApiRegistry.registerPath({
   },
   responses: {
     201: {
-      description: 'The invitation link was created',
+      description: 'The invitation link was created and the email queued',
       headers: rateLimitHeaders,
       content: {
         'application/json': {
           schema: invitationCreateResponse,
+        },
+      },
+    },
+    ...errorResponses,
+  },
+});
+
+shareOpenApiRegistry.registerPath({
+  method: 'post',
+  path: '/api/v1/invitations/{invitationId}/resend',
+  tags: ['Shares'],
+  summary: 'Resend a pending invitation email',
+  description:
+    'Owner only. Generates a fresh link, extends the expiry, and re-sends the invitation email to the recipient.',
+  security: [{ [bearerAuth.name]: [] }],
+  request: {
+    params: InvitationIdParamSchema,
+  },
+  responses: {
+    200: {
+      description: 'The invitation email was re-sent and the link refreshed',
+      headers: rateLimitHeaders,
+      content: {
+        'application/json': {
+          schema: invitationResendResponse,
         },
       },
     },

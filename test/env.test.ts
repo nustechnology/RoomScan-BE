@@ -51,6 +51,13 @@ describe('loadConfig', () => {
       assetMaxThumbnailSizeBytes: 10_000_000,
       invitationTtlSeconds: 604_800,
       invitationBaseUrl: 'http://localhost:3000',
+      mailProvider: 'log',
+      smtpHost: '',
+      smtpPort: 2525,
+      smtpUser: '',
+      smtpPass: '',
+      smtpSecure: false,
+      mailFrom: 'RoomScan App <notifications@roomscan.app>',
     });
   });
 
@@ -350,4 +357,59 @@ describe('loadConfig', () => {
       ).toThrow(ZodError);
     },
   );
+
+  it('parses a fully configured smtp mail provider', () => {
+    const config = loadConfig({
+      ...validEnvironment,
+      MAIL_PROVIDER: 'smtp',
+      SMTP_HOST: 'sandbox.smtp.mailtrap.io',
+      SMTP_PORT: '2525',
+      SMTP_USER: 'mailtrap-user',
+      SMTP_PASS: 'mailtrap-pass',
+      SMTP_SECURE: 'false',
+      MAIL_FROM: 'RoomScan App <notifications@roomscan.app>',
+    });
+
+    expect(config).toMatchObject({
+      mailProvider: 'smtp',
+      smtpHost: 'sandbox.smtp.mailtrap.io',
+      smtpPort: 2525,
+      smtpUser: 'mailtrap-user',
+      smtpPass: 'mailtrap-pass',
+      smtpSecure: false,
+      mailFrom: 'RoomScan App <notifications@roomscan.app>',
+    });
+  });
+
+  it.each(['SMTP_HOST', 'SMTP_USER', 'SMTP_PASS'])('rejects a smtp provider missing %s', (name) => {
+    expect(() =>
+      loadConfig({
+        ...validEnvironment,
+        MAIL_PROVIDER: 'smtp',
+        SMTP_HOST: 'sandbox.smtp.mailtrap.io',
+        SMTP_USER: 'mailtrap-user',
+        SMTP_PASS: 'mailtrap-pass',
+        [name]: '',
+      }),
+    ).toThrow(RegExp(`${name} is required when MAIL_PROVIDER=smtp`));
+  });
+
+  it('rejects the log mail provider in production', () => {
+    expect(() =>
+      loadConfig({
+        ...validEnvironment,
+        NODE_ENV: 'production',
+        MAIL_PROVIDER: 'log',
+      }),
+    ).toThrow(/MAIL_PROVIDER=log is not allowed when NODE_ENV=production/);
+  });
+
+  it('allows the log mail provider outside production', () => {
+    const config = loadConfig({
+      ...validEnvironment,
+      MAIL_PROVIDER: 'log',
+    });
+
+    expect(config.mailProvider).toBe('log');
+  });
 });

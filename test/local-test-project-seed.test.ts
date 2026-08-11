@@ -135,7 +135,6 @@ describe('seedLocalTestProject', () => {
       projectId: LOCAL_TEST_PROJECT_ID,
       userId: LOCAL_TEST_VIEWER_ID,
       role: 'VIEWER',
-      declinedAt: null,
       revokedAt: null,
     });
     expect(accessCreate.acceptedAt).toBeInstanceOf(Date);
@@ -162,6 +161,7 @@ describe('seedLocalTestProject', () => {
       id: LOCAL_TEST_INVITATION_ID,
       projectId: LOCAL_TEST_PROJECT_ID,
       createdById: LOCAL_TEST_USER_ID,
+      recipientEmail: 'pending-invite@roomscan.dev',
       status: 'PENDING',
     });
     expect(invitationCreate.tokenHash).toMatch(/^[0-9a-f]{64}$/);

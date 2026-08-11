@@ -15,6 +15,7 @@ export const ShareRevokeParamsSchema = z.object({
 
 export const InvitationCreateBodySchema = z
   .object({
+    recipientEmail: z.email(),
     expiresInSeconds: z.number().int().min(60).max(2_592_000).optional(),
   })
   .strict();
@@ -22,9 +23,13 @@ export const InvitationCreateBodySchema = z
 export const InvitationCreateResponseSchema = z.object({
   invitationId: z.uuid(),
   invitationUrl: z.url(),
+  recipientEmail: z.email(),
   expiresAt: z.iso.datetime(),
   status: z.literal('PENDING'),
+  sentAt: z.iso.datetime(),
 });
+
+export const InvitationResendResponseSchema = InvitationCreateResponseSchema;
 
 export const InvitationPreviewResponseSchema = z.object({
   project: z.object({
@@ -33,13 +38,15 @@ export const InvitationPreviewResponseSchema = z.object({
     description: z.string().nullable(),
     thumbnail: z.url().nullable(),
   }),
-  status: z.enum(['PENDING', 'EXPIRED', 'REVOKED']),
+  status: z.enum(['PENDING', 'EXPIRED', 'ACCEPTED', 'DECLINED', 'REVOKED']),
+  recipientEmail: z.email(),
   sentAt: z.iso.datetime(),
   expiresAt: z.iso.datetime(),
   hasAccess: z.boolean().optional(),
 });
 
 export const InvitationAcceptResponseSchema = z.object({
+  invitationId: z.uuid(),
   project: z.object({
     id: z.uuid(),
     name: z.string(),
@@ -73,6 +80,7 @@ export const SharesListResponseSchema = z.object({
   pendingInvitations: z.array(
     z.object({
       invitationId: z.uuid(),
+      recipientEmail: z.email(),
       status: z.enum(['PENDING', 'EXPIRED']),
       sentAt: z.iso.datetime(),
       expiresAt: z.iso.datetime(),
@@ -101,6 +109,7 @@ export type InvitationIdParam = z.infer<typeof InvitationIdParamSchema>;
 export type ShareRevokeParams = z.infer<typeof ShareRevokeParamsSchema>;
 export type InvitationCreateBody = z.infer<typeof InvitationCreateBodySchema>;
 export type InvitationCreateResponse = z.infer<typeof InvitationCreateResponseSchema>;
+export type InvitationResendResponse = z.infer<typeof InvitationResendResponseSchema>;
 export type InvitationPreviewResponse = z.infer<typeof InvitationPreviewResponseSchema>;
 export type InvitationAcceptResponse = z.infer<typeof InvitationAcceptResponseSchema>;
 export type InvitationDeclineResponse = z.infer<typeof InvitationDeclineResponseSchema>;

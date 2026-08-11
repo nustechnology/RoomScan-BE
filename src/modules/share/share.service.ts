@@ -1,9 +1,15 @@
 import { createHash, randomBytes } from 'node:crypto';
 
+import type { Logger } from 'pino';
+
+import type { Mailer } from '../../infrastructure/mail/mailer.types.js';
 import { ProjectNotFoundError } from '../project/project.errors.js';
+import { buildInvitationEmail } from './share.email.js';
 import {
   AccessAlreadyExistsError,
   CannotAcceptOwnInvitationError,
+  InvitationAlreadyAcceptedError,
+  InvitationAlreadySentError,
   InvitationDeclinedError,
   InvitationExpiredError,
   InvitationNotFoundError,
@@ -19,6 +25,7 @@ import type {
   InvitationDeclineResult,
   InvitationPreviewResult,
   InvitationRecord,
+  InvitationResendResult,
   InvitationRevokeResult,
   InvitationViewStatus,
   ShareRepository,
@@ -28,6 +35,8 @@ import type {
 
 export interface ShareServiceDependencies {
   repository: ShareRepository;
+  mailer: Mailer;
+  logger: Logger;
   clock?: () => Date;
   invitationTtlSeconds: number;
   invitationBaseUrl: string;
@@ -43,17 +52,23 @@ export function hashInvitationToken(token: string): string {
 
 export class ShareService {
   readonly #repository: ShareRepository;
+  readonly #mailer: Mailer;
+  readonly #logger: Logger;
   readonly #clock: () => Date;
   readonly #invitationTtlSeconds: number;
   readonly #invitationBaseUrl: string;
 
   constructor({
     repository,
+    mailer,
+    logger,
     clock,
     invitationTtlSeconds,
     invitationBaseUrl,
   }: ShareServiceDependencies) {
     this.#repository = repository;
+    this.#mailer = mailer;
+    this.#logger = logger;
     this.#clock = clock ?? (() => new Date());
     this.#invitationTtlSeconds = invitationTtlSeconds;
     this.#invitationBaseUrl = invitationBaseUrl;
@@ -62,6 +77,12 @@ export class ShareService {
   #viewStatus(record: InvitationRecord): InvitationViewStatus {
     if (record.status === 'REVOKED') {
       return 'REVOKED';
+    }
+    if (record.status === 'ACCEPTED') {
+      return 'ACCEPTED';
+    }
+    if (record.status === 'DECLINED') {
+      return 'DECLINED';
     }
     if (record.expiresAt.getTime() <= this.#clock().getTime()) {
       return 'EXPIRED';
@@ -99,15 +120,57 @@ export class ShareService {
     return invitation;
   }
 
+  async #sendInvitationEmail(input: {
+    recipientEmail: string;
+    ownerDisplay: string;
+    entityName: string;
+    invitationUrl: string;
+    expiresInSeconds: number;
+  }): Promise<void> {
+    const email = buildInvitationEmail({
+      scope: 'project',
+      ownerDisplay: input.ownerDisplay,
+      recipientEmail: input.recipientEmail,
+      entityName: input.entityName,
+      invitationUrl: input.invitationUrl,
+      expiresInSeconds: input.expiresInSeconds,
+    });
+
+    try {
+      await this.#mailer.sendMail({
+        to: input.recipientEmail,
+        subject: email.subject,
+        html: email.html,
+        text: email.text,
+      });
+    } catch (error) {
+      this.#logger.warn(
+        { err: error, to: input.recipientEmail },
+        'Failed to deliver an invitation email',
+      );
+    }
+  }
+
   async createInvitation(
     userId: string,
     projectId: string,
     data: InvitationCreateInput,
   ): Promise<InvitationCreateResult> {
-    await this.#requireProjectOwner(projectId, userId);
+    const info = await this.#repository.findProjectInfo(projectId);
 
+    if (info === null) {
+      throw new ProjectNotFoundError();
+    }
+    if (info.ownerId !== userId) {
+      throw new NotOwnerError();
+    }
     if (!(await this.#repository.hasUploadedModel(projectId))) {
       throw new ProjectNotShareableError();
+    }
+
+    const existing = await this.#repository.findByProjectAndEmail(projectId, data.recipientEmail);
+    if (existing !== null && existing.status === 'PENDING') {
+      throw new InvitationAlreadySentError();
     }
 
     const now = this.#clock();
@@ -117,16 +180,28 @@ export class ShareService {
     const record = await this.#repository.createInvitation({
       projectId,
       createdById: userId,
+      recipientEmail: data.recipientEmail,
       tokenHash: hashInvitationToken(rawToken),
       expiresAt,
       sentAt: now,
     });
 
+    const invitationUrl = `${this.#invitationBaseUrl}/invitations/${rawToken}`;
+    await this.#sendInvitationEmail({
+      recipientEmail: data.recipientEmail,
+      ownerDisplay: info.ownerEmail ?? 'the project owner',
+      entityName: info.name,
+      invitationUrl,
+      expiresInSeconds: ttlSeconds,
+    });
+
     return {
       invitationId: record.id,
-      invitationUrl: `${this.#invitationBaseUrl}/invitations/${rawToken}`,
+      invitationUrl,
+      recipientEmail: record.recipientEmail,
       expiresAt: expiresAt.toISOString(),
       status: 'PENDING',
+      sentAt: now.toISOString(),
     };
   }
 
@@ -140,6 +215,7 @@ export class ShareService {
         thumbnail: project.thumbnail,
       },
       status: this.#viewStatus(invitation),
+      recipientEmail: invitation.recipientEmail,
       sentAt: invitation.sentAt.toISOString(),
       expiresAt: invitation.expiresAt.toISOString(),
     };
@@ -165,6 +241,12 @@ export class ShareService {
     if (invitation.status === 'REVOKED') {
       throw new InvitationRevokedError();
     }
+    if (invitation.status === 'ACCEPTED') {
+      throw new InvitationAlreadyAcceptedError();
+    }
+    if (invitation.status === 'DECLINED') {
+      throw new InvitationDeclinedError();
+    }
     if (invitation.expiresAt.getTime() <= this.#clock().getTime()) {
       throw new InvitationExpiredError();
     }
@@ -174,9 +256,6 @@ export class ShareService {
     if ((await this.#repository.findActiveViewerAccess(project.id, userId)) !== null) {
       throw new AccessAlreadyExistsError();
     }
-    if ((await this.#repository.findDeclinedAccess(project.id, userId, invitation.id)) !== null) {
-      throw new InvitationDeclinedError();
-    }
 
     return { invitation, projectId: project.id, project };
   }
@@ -184,25 +263,34 @@ export class ShareService {
   async acceptInvitation(userId: string, rawToken: string): Promise<InvitationAcceptResult> {
     const { invitation, projectId, project } = await this.#validateAcceptable(rawToken, userId);
     const now = this.#clock();
-    await this.#repository.acceptInvitation(projectId, userId, invitation.id, now);
+    const updated = await this.#repository.acceptInvitation(invitation.id, projectId, userId, now);
+
+    if (updated === null) {
+      throw new InvitationAlreadyAcceptedError();
+    }
 
     return {
+      invitationId: updated.id,
       project,
       access: {
         role: 'VIEWER',
         status: 'ACTIVE',
-        grantedAt: now.toISOString(),
+        grantedAt: (updated.acceptedAt ?? now).toISOString(),
       },
     };
   }
 
   async declineInvitation(userId: string, rawToken: string): Promise<InvitationDeclineResult> {
-    const { invitation, projectId } = await this.#validateAcceptable(rawToken, userId);
+    const { invitation } = await this.#validateAcceptable(rawToken, userId);
     const now = this.#clock();
-    await this.#repository.declineInvitation(projectId, userId, invitation.id, now);
+    const updated = await this.#repository.declineInvitation(invitation.id, now);
+
+    if (updated === null) {
+      throw new InvitationDeclinedError();
+    }
 
     return {
-      invitationId: invitation.id,
+      invitationId: updated.id,
       status: 'DECLINED',
       declinedAt: now.toISOString(),
     };
@@ -224,17 +312,86 @@ export class ShareService {
         revokedAt: (record.revokedAt ?? this.#clock()).toISOString(),
       };
     }
+    if (record.status === 'ACCEPTED') {
+      throw new InvitationAlreadyAcceptedError();
+    }
+    if (record.status === 'DECLINED') {
+      throw new InvitationDeclinedError();
+    }
     if (record.expiresAt.getTime() <= this.#clock().getTime()) {
       throw new InvitationExpiredError();
     }
 
     const now = this.#clock();
-    await this.#repository.revokeInvitation(invitationId, now);
+    const updated = await this.#repository.revokeInvitation(invitationId, now);
+
+    if (updated === null) {
+      throw new InvitationNotFoundError();
+    }
 
     return {
       invitationId,
       status: 'REVOKED',
       revokedAt: now.toISOString(),
+    };
+  }
+
+  async resendInvitation(userId: string, invitationId: string): Promise<InvitationResendResult> {
+    const record = await this.#repository.findInvitationById(invitationId);
+
+    if (record === null) {
+      throw new InvitationNotFoundError();
+    }
+
+    await this.#requireProjectOwner(record.projectId, userId);
+
+    if (record.status === 'REVOKED') {
+      throw new InvitationRevokedError();
+    }
+    if (record.status === 'ACCEPTED') {
+      throw new InvitationAlreadyAcceptedError();
+    }
+    if (record.status === 'DECLINED') {
+      throw new InvitationDeclinedError();
+    }
+    if (record.expiresAt.getTime() <= this.#clock().getTime()) {
+      throw new InvitationExpiredError();
+    }
+
+    const info = await this.#repository.findProjectInfo(record.projectId);
+    if (info === null) {
+      throw new ProjectNotFoundError();
+    }
+
+    const now = this.#clock();
+    const expiresAt = new Date(now.getTime() + this.#invitationTtlSeconds * 1000);
+    const rawToken = generateInvitationToken();
+    const updated = await this.#repository.resendInvitation(invitationId, {
+      tokenHash: hashInvitationToken(rawToken),
+      sentAt: now,
+      expiresAt,
+    });
+
+    if (updated === null) {
+      throw new InvitationNotFoundError();
+    }
+
+    const invitationUrl = `${this.#invitationBaseUrl}/invitations/${rawToken}`;
+    await this.#sendInvitationEmail({
+      recipientEmail: updated.recipientEmail,
+      ownerDisplay: info.ownerEmail ?? 'the project owner',
+      entityName: info.name,
+      invitationUrl,
+      expiresInSeconds: this.#invitationTtlSeconds,
+    });
+
+    return {
+      invitationId: updated.id,
+      invitationUrl,
+      recipientEmail: updated.recipientEmail,
+      expiresAt: expiresAt.toISOString(),
+      status: 'PENDING',
+      sentAt: now.toISOString(),
     };
   }
 
@@ -248,6 +405,7 @@ export class ShareService {
     return {
       pendingInvitations: invitations.map((invitation) => ({
         invitationId: invitation.id,
+        recipientEmail: invitation.recipientEmail,
         status: invitation.expiresAt.getTime() <= now.getTime() ? 'EXPIRED' : 'PENDING',
         sentAt: invitation.sentAt.toISOString(),
         expiresAt: invitation.expiresAt.toISOString(),

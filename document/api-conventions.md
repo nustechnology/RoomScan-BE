@@ -616,45 +616,57 @@ Error behavior:
 
 ## Sharing and invitations
 
-Projects are shared through expiring invitation links. An owner creates a link
-for a project and shares the resulting URL; any number of distinct users may
-accept it, each receiving Viewer access, or decline it for themselves. Links are
-multi-recipient and remain `PENDING` until revoked or expired. The raw token is
-an opaque, random base64url string of 32 bytes; only its SHA-256 hash is stored,
-so a leaked database never exposes a usable link. A project is shareable only
-when it has at least one non-deleted scan with an uploaded model
-(`assetStatus = UPLOADED`).
+Projects are shared through expiring invitation links addressed to a specific
+recipient email. The Owner creates an invitation for a recipient, and the API
+sends an invitation email whose CTA opens the link; the recipient (or any
+signed-in user who possesses the link) accepts it and receives Viewer access.
+Each invitation is per-recipient: creating a second invitation for the same
+email while the first is still pending returns `409 INVITATION_ALREADY_SENT`.
+The raw token is an opaque, random base64url string of 32 bytes; only its
+SHA-256 hash is stored, so a leaked database never exposes a usable link. A
+project is shareable only when it has at least one non-deleted scan with an
+uploaded model (`assetStatus = UPLOADED`).
 
-| Method   | Endpoint                                     | Result                                                    |
-| -------- | -------------------------------------------- | --------------------------------------------------------- |
-| `POST`   | `/api/v1/projects/:projectId/invitations`    | Create an invitation link; Owner only; return `201`       |
-| `GET`    | `/api/v1/invitations/:token`                 | Preview an invitation; anonymous or optional Bearer       |
-| `POST`   | `/api/v1/invitations/:token/accept`          | Accept and gain Viewer access; return `200`               |
-| `POST`   | `/api/v1/invitations/:token/decline`         | Decline for the current user; return `200`                |
-| `DELETE` | `/api/v1/invitations/:invitationId`          | Revoke a pending invitation; Owner only; return `200`     |
-| `GET`    | `/api/v1/projects/:projectId/shares`         | List pending invitations and accepted Viewers; Owner only |
-| `DELETE` | `/api/v1/projects/:projectId/shares/:userId` | Revoke Viewer access; Owner only; return `200`            |
+| Method   | Endpoint                                     | Result                                                      |
+| -------- | -------------------------------------------- | ----------------------------------------------------------- |
+| `POST`   | `/api/v1/projects/:projectId/invitations`    | Create an invitation for an email; Owner only; return `201` |
+| `POST`   | `/api/v1/invitations/:invitationId/resend`   | Resend a pending invitation; Owner only; return `200`       |
+| `GET`    | `/api/v1/invitations/:token`                 | Preview an invitation; anonymous or optional Bearer         |
+| `POST`   | `/api/v1/invitations/:token/accept`          | Accept and gain Viewer access; return `200`                 |
+| `POST`   | `/api/v1/invitations/:token/decline`         | Decline for the current user; return `200`                  |
+| `DELETE` | `/api/v1/invitations/:invitationId`          | Revoke a pending invitation; Owner only; return `200`       |
+| `GET`    | `/api/v1/projects/:projectId/shares`         | List pending invitations and accepted Viewers; Owner only   |
+| `DELETE` | `/api/v1/projects/:projectId/shares/:userId` | Revoke Viewer access; Owner only; return `200`              |
 
 Create invitation body:
 
 ```json
-{ "expiresInSeconds": 604800 }
+{ "recipientEmail": "recipient@example.com", "expiresInSeconds": 604800 }
 ```
 
-`expiresInSeconds` is optional; it defaults to the configured
-`INVITATION_TTL_SECONDS` and must be between 60 and 2,592,000 (30 days).
-Create response `201`:
+`recipientEmail` is required. `expiresInSeconds` is optional; it defaults to the
+configured `INVITATION_TTL_SECONDS` and must be between 60 and 2,592,000 (30
+days). Create response `201`:
 
 ```json
 {
   "invitationId": "b1a2c3d4-e5f6-4890-abcd-ef1234567890",
   "invitationUrl": "https://invite.roomscan.dev/invitations/AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-ab",
+  "recipientEmail": "recipient@example.com",
   "expiresAt": "2026-08-05T10:00:00.000Z",
-  "status": "PENDING"
+  "status": "PENDING",
+  "sentAt": "2026-07-29T10:00:00.000Z"
 }
 ```
 
-`invitationUrl` is `{INVITATION_BASE_URL}/invitations/{rawToken}`.
+`invitationUrl` is `{INVITATION_BASE_URL}/invitations/{rawToken}`. Creating the
+invitation sends an AC5-style invitation email to `recipientEmail`; a mail
+delivery failure is logged and does not fail the request.
+
+Resend `200` has the same shape as the create response. Resending a pending
+invitation rotates the token (the previous link stops working), extends
+`expiresAt` to `now + INVITATION_TTL_SECONDS`, updates `sentAt`, and re-sends
+the email.
 
 Preview `200` (anonymous; `hasAccess` is present only when a valid Bearer token
 is supplied and reports whether that user already has active access):
@@ -668,18 +680,20 @@ is supplied and reports whether that user already has active access):
     "thumbnail": null
   },
   "status": "PENDING",
+  "recipientEmail": "recipient@example.com",
   "sentAt": "2026-07-29T10:00:00.000Z",
   "expiresAt": "2026-08-05T10:00:00.000Z",
   "hasAccess": false
 }
 ```
 
-`status` is `PENDING`, `EXPIRED`, or `REVOKED`.
+`status` is `PENDING`, `EXPIRED`, `ACCEPTED`, `DECLINED`, or `REVOKED`.
 
 Accept `200`:
 
 ```json
 {
+  "invitationId": "b1a2c3d4-e5f6-4890-abcd-ef1234567890",
   "project": {
     "id": "a1b2c3d4-e5f6-4890-abcd-ef1234567890",
     "name": "District 2 Apartment",
@@ -725,6 +739,7 @@ List shares `200`:
   "pendingInvitations": [
     {
       "invitationId": "b1a2c3d4-e5f6-4890-abcd-ef1234567890",
+      "recipientEmail": "recipient@example.com",
       "status": "PENDING",
       "sentAt": "2026-07-29T10:00:00.000Z",
       "expiresAt": "2026-08-05T10:00:00.000Z"
@@ -743,10 +758,10 @@ List shares `200`:
 }
 ```
 
-`pendingInvitations` includes every `PENDING` link (labelled `EXPIRED` once past
-`expiresAt`) so the owner can still revoke stale links. `viewers` lists active
-(`revokedAt` null) Viewer access records with the recipient and the date access
-was granted.
+`pendingInvitations` includes every `PENDING` invitation (labelled `EXPIRED`
+once past `expiresAt`) so the owner can still revoke or resend stale links.
+`viewers` lists active (`revokedAt` null) Viewer access records with the
+recipient and the date access was granted.
 
 Revoke Viewer access `200`:
 
@@ -761,6 +776,7 @@ Revoke Viewer access `200`:
 Validation rules:
 
 - `projectId`, `userId`, `invitationId`: UUID.
+- `recipientEmail`: a valid email address.
 - `token`: exactly 43 characters from the base64url alphabet; anything else is
   malformed.
 - `expiresInSeconds`: optional integer, 60 to 2,592,000; unknown fields are
@@ -772,13 +788,23 @@ Business rules:
   receives `403 NOT_OWNER`. Viewers cannot share a project again.
 - Invitation links grant Viewer role only.
 - A project is shareable only after it has at least one uploaded scan model.
-- An invitation can be revoked before acceptance; revocation is idempotent.
+- One pending invitation per `(project, recipientEmail)`: creating a duplicate
+  returns `409 INVITATION_ALREADY_SENT`. Re-inviting an email whose earlier
+  invitation is revoked, declined, or accepted creates a fresh invitation.
+- Invitations are per-recipient: the first acceptance marks the invitation
+  `ACCEPTED`; an already accepted or declined invitation cannot be accepted
+  again. Acceptance is open (any signed-in user with the link can accept)
+  because Apple Sign-In may deliver a private-relay email different from the
+  invited address.
+- An invitation can be revoked while pending; revocation is idempotent. Expired,
+  accepted, and declined invitations cannot be revoked.
+- Resend requires a pending, unexpired invitation; it rotates the token and
+  re-sends the email.
 - Expired and revoked invitations cannot be accepted or declined.
 - Accepting must not create duplicate Viewer access: at most one access record
   exists per `(project, user)`.
 - The project Owner cannot accept or decline their own invitation.
-- A user who already has active access cannot accept or decline again; a user
-  who declined a link cannot later accept the same link.
+- A user who already has active access cannot accept or decline again.
 - Revoking a Viewer removes project, scan, note, and asset download access
   immediately because every module's permission lookup ignores
   `revokedAt`-non-null access.
@@ -793,6 +819,8 @@ Error behavior:
 - `404 INVITATION_NOT_FOUND`: unknown token or invitation, or the invitation's
   project was deleted.
 - `404 ACCESS_NOT_FOUND`: no access record exists for the user being unshared.
+- `409 INVITATION_ALREADY_SENT`: a pending invitation already targets this email.
+- `409 INVITATION_ALREADY_ACCEPTED`: the invitation was already accepted.
 - `409 INVITATION_EXPIRED`: the link is past its expiry.
 - `409 INVITATION_REVOKED`: the link was revoked.
 - `409 INVITATION_DECLINED`: the user already declined this link.

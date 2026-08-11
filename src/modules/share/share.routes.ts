@@ -16,6 +16,8 @@ import { ProjectIdParamSchema, type ProjectIdParam } from '../project/project.sc
 import {
   AccessAlreadyExistsError,
   CannotAcceptOwnInvitationError,
+  InvitationAlreadyAcceptedError,
+  InvitationAlreadySentError,
   InvitationDeclinedError,
   InvitationExpiredError,
   InvitationNotFoundError,
@@ -31,6 +33,7 @@ import {
   InvitationDeclineResponseSchema,
   InvitationIdParamSchema,
   InvitationPreviewResponseSchema,
+  InvitationResendResponseSchema,
   InvitationRevokeResponseSchema,
   InvitationTokenParamSchema,
   SharesListResponseSchema,
@@ -76,6 +79,20 @@ function mapError(error: unknown): AppError | undefined {
       statusCode: 403,
       code: 'NOT_OWNER',
       message: 'Only the project owner can manage sharing',
+    });
+  }
+  if (error instanceof InvitationAlreadySentError) {
+    return new AppError({
+      statusCode: 409,
+      code: 'INVITATION_ALREADY_SENT',
+      message: 'An invitation has already been sent to this email',
+    });
+  }
+  if (error instanceof InvitationAlreadyAcceptedError) {
+    return new AppError({
+      statusCode: 409,
+      code: 'INVITATION_ALREADY_ACCEPTED',
+      message: 'Invitation has already been accepted',
     });
   }
   if (error instanceof InvitationExpiredError) {
@@ -144,6 +161,7 @@ export function createShareRouter({
           params: ProjectIdParam;
         };
         const result = await shareService.createInvitation(userId, params.projectId, {
+          recipientEmail: body.recipientEmail,
           ...(body.expiresInSeconds === undefined
             ? {}
             : { expiresInSeconds: body.expiresInSeconds }),
@@ -151,6 +169,24 @@ export function createShareRouter({
         const responseBody = InvitationCreateResponseSchema.parse(result);
 
         response.status(201).json(responseBody);
+      } catch (error) {
+        next(mapError(error) ?? error);
+      }
+    },
+  );
+
+  router.post(
+    '/invitations/:invitationId/resend',
+    requireAuth,
+    validateRequest({ params: InvitationIdParamSchema }),
+    async (request, response, next) => {
+      try {
+        const userId = getUserId(request);
+        const { params } = response.locals.validated as { params: InvitationIdParam };
+        const result = await shareService.resendInvitation(userId, params.invitationId);
+        const responseBody = InvitationResendResponseSchema.parse(result);
+
+        response.status(200).json(responseBody);
       } catch (error) {
         next(mapError(error) ?? error);
       }

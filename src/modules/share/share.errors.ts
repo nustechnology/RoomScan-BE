@@ -5,6 +5,20 @@ export class InvitationNotFoundError extends Error {
   }
 }
 
+export class InvitationAlreadySentError extends Error {
+  constructor() {
+    super('An invitation has already been sent to this email');
+    this.name = 'InvitationAlreadySentError';
+  }
+}
+
+export class InvitationAlreadyAcceptedError extends Error {
+  constructor() {
+    super('Invitation has already been accepted');
+    this.name = 'InvitationAlreadyAcceptedError';
+  }
+}
+
 export class ViewerAccessNotFoundError extends Error {
   constructor() {
     super('Viewer access was not found');

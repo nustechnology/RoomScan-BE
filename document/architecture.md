@@ -235,45 +235,65 @@ detail reflect the note total.
 
 ## Share module
 
-The Share module implements project sharing through expiring invitation links. It
-depends on a `ShareRepository` (an `InvitationRepository`-style interface that
-also manages Viewer access records), a `clock`, the configured invitation TTL
+The Share module implements project sharing through expiring invitation links
+addressed to a recipient email. It depends on a `ShareRepository` (an
+`InvitationRepository`-style interface that also manages Viewer access records),
+a `Mailer`, a logger, a `clock`, the configured invitation TTL
 (`INVITATION_TTL_SECONDS`), and the client-facing base URL
-(`INVITATION_BASE_URL`). Share management (create, list, revoke) is Owner-only;
-a non-owner receives `403 NOT_OWNER`, while a missing or deleted project returns
-`404 PROJECT_NOT_FOUND`.
+(`INVITATION_BASE_URL`). Share management (create, resend, list, revoke) is
+Owner-only; a non-owner receives `403 NOT_OWNER`, while a missing or deleted
+project returns `404 PROJECT_NOT_FOUND`.
 
-An `Invitation` row is a link record: `tokenHash` (SHA-256 of the raw token;
-the raw token is never stored), `status` (`PENDING` or `REVOKED`), `expiresAt`,
-`sentAt`, and `revokedAt`. The raw token is 32 random bytes encoded as base64url
-and the `invitationUrl` returned to the owner is
-`{INVITATION_BASE_URL}/invitations/{rawToken}`. Links are multi-recipient: any
-number of distinct users may accept the same link, each receiving their own
-Viewer access, and an accepted project can be listed by the current user on a
-planned shared-with-me endpoint.
+An `Invitation` row is a per-recipient link record: `recipientEmail`, `tokenHash`
+(SHA-256 of the raw token; the raw token is never stored), `status` (`PENDING`,
+`ACCEPTED`, `DECLINED`, or `REVOKED`), `expiresAt`, `sentAt`, `acceptedAt`,
+`acceptedByUserId`, `declinedAt`, and `revokedAt`. The raw token is 32 random
+bytes encoded as base64url and the `invitationUrl` returned to the owner is
+`{INVITATION_BASE_URL}/invitations/{rawToken}`. Creating an invitation sends an
+AC5-style email built by `buildInvitationEmail` (project scope); a delivery
+failure is logged and never fails the request. One pending invitation is allowed
+per `(project, recipientEmail)`; a duplicate returns `409
+INVITATION_ALREADY_SENT`. Resending rotates the token, extends `expiresAt`,
+updates `sentAt`, and re-sends the email.
 
-Per-recipient outcomes live on `ProjectAccess`: an accepted recipient has an
-active row (`revokedAt` null, `acceptedAt` set, `invitationId` set); a declining
-recipient creates an inactive row with `declinedAt` and `revokedAt` set. The
+Acceptance is open: the first signed-in user to redeem a pending link makes it
+`ACCEPTED` (recording `acceptedAt` and `acceptedByUserId`) and receives an
+active Viewer `ProjectAccess` row in one database transaction. The
 `@@unique([projectId, userId])` constraint guarantees at most one access row per
-project per user, so accepting can never create a duplicate. A user with an
+project per user, so accepting can never create a duplicate, and the repository
+guards the status write with a `status = PENDING` predicate so a concurrent
+double-accept resolves to `409 INVITATION_ALREADY_ACCEPTED`. A user with an
 active access row cannot accept or decline again (`409 ACCESS_ALREADY_EXISTS`),
-a user who declined a link cannot later accept it (`409 INVITATION_DECLINED`),
-and the project Owner cannot accept or decline (`409
-CANNOT_ACCEPT_OWN_INVITATION`). Revoked (`409 INVITATION_REVOKED`) or expired
-(`409 INVITATION_EXPIRED`) links cannot be accepted or declined; expired links
-also cannot be revoked (`409 INVITATION_EXPIRED`), while revoking an already
-revoked link is idempotent.
+an accepted or declined invitation is terminal, and the project Owner cannot
+accept or decline (`409 CANNOT_ACCEPT_OWN_INVITATION`). Revoked (`409
+INVITATION_REVOKED`), expired (`409 INVITATION_EXPIRED`), accepted (`409
+INVITATION_ALREADY_ACCEPTED`), and declined (`409 INVITATION_DECLINED`)
+invitations cannot be accepted, declined, resend, or revoked; revoking an
+already revoked link is idempotent.
 
 Preview (`GET /invitations/:token`) requires no authentication and returns the
-link status (`PENDING`, `EXPIRED`, or `REVOKED`) plus a safe project summary;
-when a valid Bearer token is supplied it additionally reports `hasAccess`. A
-project is only shareable once it has at least one non-deleted scan with an
-uploaded model (`assetStatus = UPLOADED`); otherwise creating an invitation
-returns `409 PROJECT_NOT_SHAREABLE`. Revoking a Viewer simply sets `revokedAt`;
-downstream enforcement that revoked Viewers lose project, scan, note, and asset
-download access is inherited from the shared `ProjectPermissionService` access
-lookup, which filters on active (`revokedAt: null`) access on every request.
+link status (`PENDING`, `EXPIRED`, `ACCEPTED`, `DECLINED`, or `REVOKED`) plus a
+safe project summary and the recipient email; when a valid Bearer token is
+supplied it additionally reports `hasAccess`. A project is only shareable once
+it has at least one non-deleted scan with an uploaded model
+(`assetStatus = UPLOADED`); otherwise creating an invitation returns `409
+PROJECT_NOT_SHAREABLE`. Revoking a Viewer simply sets `revokedAt`; downstream
+enforcement that revoked Viewers lose project, scan, note, and asset download
+access is inherited from the shared `ProjectPermissionService` access lookup,
+which filters on active (`revokedAt: null`) access on every request.
+
+## Mail
+
+`src/infrastructure/mail` defines a narrow `Mailer` interface (`sendMail`), plus
+`LogMailer` and `SmtpMailer` adapters selected by `MAIL_PROVIDER` in the
+composition root. `LogMailer` writes message metadata to the application log and
+mirrors the `LocalStorageAdapter` pattern: `MAIL_PROVIDER=log` is rejected when
+`NODE_ENV=production`. `SmtpMailer` wraps an injected nodemailer transporter
+(`createNodemailerTransport` builds one from `SMTP_HOST`, `SMTP_PORT`,
+`SMTP_USER`, `SMTP_PASS`, and `SMTP_SECURE`) and sends with the configured
+`MAIL_FROM` address; the transporter is injected so tests use a fake and never
+touch the network. Module routes do not change when the provider changes, and
+`ShareService` treats a failed send as a logged warning.
 
 ## Storage
 
@@ -351,20 +371,21 @@ The composition root creates one Prisma Client and injects it into the database
 health/lifecycle adapter, the Apple user repository, the current-user
 repository, the project repository, the scan repository, the scan-asset
 repository, the refresh-token repository, the note repository, and the share
-repository, plus the storage adapter. It also creates the three rate-limit
-middleware instances, the access-token and refresh-token verifiers, the project
-permission service, the project service, the scan service, the scan-asset
-service, the refresh-token service, the note service, and the share service once
-per process. Product modules never import the Prisma client directly. The unique
-provider identity constraint makes concurrent first-time Apple logins idempotent
-at the database boundary. The projects table has a foreign key to users with
-`onDelete: Restrict`; project access has unique `(projectId, userId)` membership
-and revocation state plus optional invitation acceptance/decline timestamps.
-Notes belong to a scan with `onDelete: Cascade` and to a creator with
-`onDelete: Restrict`. Invitations belong to a project with `onDelete: Cascade`
-and to a creator with `onDelete: Restrict`; their `tokenHash` is unique and the
-access rows referencing them use `onDelete: SetNull` so revoking an invitation
-never orphans Viewer access.
+repository, plus the storage and mail adapters. It also creates the three
+rate-limit middleware instances, the access-token and refresh-token verifiers,
+the project permission service, the project service, the scan service, the
+scan-asset service, the refresh-token service, the note service, and the share
+service once per process. Product modules never import the Prisma client
+directly. The unique provider identity constraint makes concurrent first-time
+Apple logins idempotent at the database boundary. The projects table has a
+foreign key to users with `onDelete: Restrict`; project access has unique
+`(projectId, userId)` membership, revocation state, and an optional
+`invitationId` with an acceptance timestamp. Notes belong to a scan with
+`onDelete: Cascade` and to a creator with `onDelete: Restrict`. Invitations
+belong to a project with `onDelete: Cascade` and to a creator with
+`onDelete: Restrict`; their `tokenHash` is unique, their `recipientEmail` is
+indexed per project, and the access rows referencing them use
+`onDelete: SetNull` so revoking an invitation never orphans Viewer access.
 
 ## Lifecycle
 

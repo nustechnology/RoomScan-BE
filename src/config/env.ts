@@ -137,6 +137,13 @@ export const environmentSchema = z
       .url()
       .default('http://localhost:3000')
       .transform((value) => value.replace(/\/+$/, '')),
+    MAIL_PROVIDER: z.enum(['log', 'smtp']).default('log'),
+    SMTP_HOST: z.string().trim().default(''),
+    SMTP_PORT: z.coerce.number().int().positive().max(65_535).default(2525),
+    SMTP_USER: z.string().trim().default(''),
+    SMTP_PASS: z.string().trim().default(''),
+    SMTP_SECURE: environmentBooleanSchema,
+    MAIL_FROM: z.string().trim().min(1).default('RoomScan App <notifications@roomscan.app>'),
   })
   .superRefine((environment, context) => {
     if (environment.AUTH_REFRESH_TOKEN_TTL_SECONDS <= environment.AUTH_ACCESS_TOKEN_TTL_SECONDS) {
@@ -163,6 +170,14 @@ export const environmentSchema = z
       });
     }
 
+    if (environment.NODE_ENV === 'production' && environment.MAIL_PROVIDER === 'log') {
+      context.addIssue({
+        code: 'custom',
+        path: ['MAIL_PROVIDER'],
+        message: 'MAIL_PROVIDER=log is not allowed when NODE_ENV=production',
+      });
+    }
+
     if (environment.STORAGE_PROVIDER === 'minio') {
       const requiredStorage: Array<[keyof typeof environmentSchema.shape, string]> = [
         ['STORAGE_BUCKET', environment.STORAGE_BUCKET],
@@ -176,6 +191,23 @@ export const environmentSchema = z
             code: 'custom',
             path: [name],
             message: `${name} is required when STORAGE_PROVIDER=minio`,
+          });
+        }
+      }
+    }
+
+    if (environment.MAIL_PROVIDER === 'smtp') {
+      const requiredSmtp: Array<[keyof typeof environmentSchema.shape, string]> = [
+        ['SMTP_HOST', environment.SMTP_HOST],
+        ['SMTP_USER', environment.SMTP_USER],
+        ['SMTP_PASS', environment.SMTP_PASS],
+      ];
+      for (const [name, value] of requiredSmtp) {
+        if (value.trim().length === 0) {
+          context.addIssue({
+            code: 'custom',
+            path: [name],
+            message: `${name} is required when MAIL_PROVIDER=smtp`,
           });
         }
       }
@@ -223,6 +255,13 @@ export interface AppConfig {
   assetMaxThumbnailSizeBytes: number;
   invitationTtlSeconds: number;
   invitationBaseUrl: string;
+  mailProvider: 'log' | 'smtp';
+  smtpHost: string;
+  smtpPort: number;
+  smtpUser: string;
+  smtpPass: string;
+  smtpSecure: boolean;
+  mailFrom: string;
 }
 
 export function loadConfig(input: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -267,5 +306,12 @@ export function loadConfig(input: NodeJS.ProcessEnv = process.env): AppConfig {
     assetMaxThumbnailSizeBytes: environment.ASSET_MAX_THUMBNAIL_SIZE_BYTES,
     invitationTtlSeconds: environment.INVITATION_TTL_SECONDS,
     invitationBaseUrl: environment.INVITATION_BASE_URL,
+    mailProvider: environment.MAIL_PROVIDER,
+    smtpHost: environment.SMTP_HOST,
+    smtpPort: environment.SMTP_PORT,
+    smtpUser: environment.SMTP_USER,
+    smtpPass: environment.SMTP_PASS,
+    smtpSecure: environment.SMTP_SECURE,
+    mailFrom: environment.MAIL_FROM,
   };
 }

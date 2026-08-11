@@ -79,6 +79,13 @@ services:
       ASSET_MAX_THUMBNAIL_SIZE_BYTES: ${ASSET_MAX_THUMBNAIL_SIZE_BYTES:-10000000}
       INVITATION_TTL_SECONDS: ${INVITATION_TTL_SECONDS:-604800}
       INVITATION_BASE_URL: ${INVITATION_BASE_URL:-http://localhost:3000}
+      MAIL_PROVIDER: ${MAIL_PROVIDER:-smtp}
+      SMTP_HOST: ${SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT:-2525}
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASS: ${SMTP_PASS}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      MAIL_FROM: ${MAIL_FROM:-RoomScan App <notifications@roomscan.app>}
     ports:
       - '${ROOMSCAN_PORT:-3000}:3000'
     depends_on:
