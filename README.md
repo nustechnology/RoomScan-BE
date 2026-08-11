@@ -209,9 +209,11 @@ start at `NONE` and `PENDING` respectively until the upload flow writes them.
 Create Scan can also return presigned upload URLs in the same response: optional
 `thumbnail` and `scanFile` descriptors (`contentType`, `sizeBytes`, and the
 `checksum`/`modelVersion` required for the scan file) make the API mint an
-upload session for each and return its `uploadUrl` under `uploads.thumbnail` /
-`uploads.scanFile`. The client then uploads the files directly to those URLs and
-marks each session complete.
+upload session for each present descriptor and return its `uploadUrl` under
+`uploads.thumbnail` / `uploads.scanFile`. The descriptors are independent — a
+call may include `thumbnail` only, `scanFile` only, or both. The client then
+PUTs each file directly to its own `uploadUrl` and marks each session complete
+with `POST /api/v1/upload-sessions/:uploadSessionId/complete`.
 
 Scan assets use minted URLs: the Owner creates an upload session
 (`POST /api/v1/scans/:scanId/assets/upload-sessions`), the client uploads to the

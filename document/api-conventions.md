@@ -379,12 +379,18 @@ descriptor, returning the scan plus `uploads`:
 ```
 
 `creator` and `noteCount` are omitted above for brevity but are always present.
-The client uploads each file directly to its `uploadUrl`, then calls the
-scan-asset completion endpoint. Each `uploadUrl` is a presigned PUT URL with the
-configured upload TTL; the model scan file must be between 10 MB and 100 MB.
+The `thumbnail` and `scanFile` descriptors are independent and optional: one
+call may supply only `thumbnail`, only `scanFile`, or both, and each present
+descriptor mints its own upload session and presigned `uploadUrl`. The client
+uploads each file directly to its `uploadUrl` with a PUT, then calls the
+completion endpoint for that session
+(`POST /api/v1/upload-sessions/{uploadSessionId}/complete`); every minted
+session is completed separately. Each `uploadUrl` is a presigned PUT URL with
+the configured upload TTL; the model scan file must be between 10 MB and 100 MB.
 A `thumbnail` descriptor requires `contentType` (`image/jpeg`, `image/png`) and
-`sizeBytes`; a `scanFile` descriptor additionally requires `checksum` and
-`modelVersion`. `uploads` is omitted when neither descriptor is supplied.
+`sizeBytes` (`checksum` optional); a `scanFile` descriptor additionally requires
+`checksum` and `modelVersion`. `uploads` is omitted when neither descriptor is
+supplied.
 
 The scan list supports page-based pagination and an allow-listed sort. `page`
 defaults to 1; `limit` defaults to 20 and may not exceed 100. `sort` defaults to
