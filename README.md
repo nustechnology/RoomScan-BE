@@ -341,8 +341,10 @@ Invitation email follows the same pattern: `MAIL_PROVIDER=log` (the default)
 writes messages to the application log for development and tests and is rejected
 in production, while `MAIL_PROVIDER=smtp` sends through SMTP (for example the
 Mailtrap sandbox) using `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, and
-`SMTP_SECURE`. A failed email send is logged and never fails the invitation
-request.
+`SMTP_SECURE`. The production-style Compose API defaults to `MAIL_PROVIDER=smtp`,
+so it requires `SMTP_HOST`, `SMTP_USER`, and `SMTP_PASS` in `.env` (like the
+MinIO credentials); without them the API container refuses to start. A failed
+email send is logged and never fails the invitation request.
 
 ## Project scripts
 

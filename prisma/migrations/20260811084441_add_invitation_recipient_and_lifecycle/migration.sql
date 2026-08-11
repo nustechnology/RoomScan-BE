@@ -2,9 +2,10 @@
   Warnings:
 
   - You are about to drop the column `declinedAt` on the `project_accesses` table. All the data in the column will be lost.
-  - Added the required column `recipientEmail` to the `invitations` table without a default value. This is not possible if the table is not empty.
-
+  - The required column `recipientEmail` is added with a placeholder backfill so the migration also applies when
+    the `invitations` table already contains rows (for example on a partially deployed database).
 */
+
 -- AlterEnum
 -- This migration adds more than one value to an enum.
 -- With PostgreSQL versions 11 and earlier, this is not possible
@@ -20,7 +21,12 @@ ALTER TYPE "InvitationStatus" ADD VALUE 'DECLINED';
 ALTER TABLE "invitations" ADD COLUMN     "acceptedAt" TIMESTAMP(3),
 ADD COLUMN     "acceptedByUserId" UUID,
 ADD COLUMN     "declinedAt" TIMESTAMP(3),
-ADD COLUMN     "recipientEmail" VARCHAR(320) NOT NULL;
+ADD COLUMN     "recipientEmail" VARCHAR(320);
+
+-- Backfill existing rows before making the column required.
+UPDATE "invitations" SET "recipientEmail" = '' WHERE "recipientEmail" IS NULL;
+
+ALTER TABLE "invitations" ALTER COLUMN "recipientEmail" SET NOT NULL;
 
 -- AlterTable
 ALTER TABLE "project_accesses" DROP COLUMN "declinedAt";
