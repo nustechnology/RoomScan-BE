@@ -12,6 +12,9 @@
   `GET`, `PATCH`, and `DELETE` at `/api/v1/scans/:scanId`.
 - Scan assets (model/thumbnail upload and download) live under `/api/v1/scans`,
   with upload-session completion and failure at `/api/v1/upload-sessions`.
+- Notes are `POST` and `GET` at `/api/v1/scans/:scanId/notes`, and `GET`,
+  `PATCH`, and `DELETE` at `/api/v1/notes/:noteId`, with the move operation at
+  `PATCH /api/v1/notes/:noteId/position`.
 - Swagger UI remains at `/api-doc`; raw OpenAPI is `/api-doc.json`.
 - Resource paths use plural nouns and kebab-case when business modules arrive.
 
@@ -197,7 +200,19 @@ Project response:
     "id": "8c53d31d-2788-48de-82a0-c4f219ca3701",
     "email": "owner@example.com"
   },
-  "scanCount": 0,
+  "scanCount": 1,
+  "scans": [
+    {
+      "id": "f1e2d3c4-a5b6-7890-abcd-ef1234567890",
+      "name": "Living Room",
+      "description": null,
+      "thumbnail": null,
+      "noteCount": 3,
+      "assetStatus": "UPLOADED",
+      "syncStatus": "SYNCED",
+      "createdAt": "2026-07-29T10:00:00.000Z"
+    }
+  ],
   "sharedCount": 0,
   "thumbnail": null,
   "syncStatus": null,
@@ -216,9 +231,11 @@ Project response:
 
 `owner.email` is nullable. An active Viewer receives role `VIEWER` with only
 `canView: true`. `sharedCount` counts active Viewer access records.
-`scanCount` counts active (non-deleted) scans in the project. `thumbnail` and
-`syncStatus` are `null` until the downstream thumbnail and sync persistence
-features are present.
+`scanCount` counts active (non-deleted) scans in the project, and `scans` lists
+those scans ordered by newest `createdAt` first with `id`, `name`,
+`description`, `thumbnail`, `noteCount`, `assetStatus`, `syncStatus`, and
+`createdAt`. `thumbnail` and `syncStatus` are `null` until the downstream
+thumbnail and sync persistence features are present.
 
 The owned-project list supports case-insensitive name search and page-based
 pagination:
@@ -316,12 +333,58 @@ Scan response:
 }
 ```
 
-`creator.email` is nullable. `noteCount` is `0` until the Note persistence
-model is present. `assetStatus` uses `NONE | PENDING | UPLOADING | UPLOADED |
-FAILED` and starts `NONE` for a metadata-only scan; `syncStatus` uses `PENDING |
-SYNCING | SYNCED | FAILED | CONFLICT` and starts `PENDING`. The metadata
-endpoints never accept model-file data; the asset and sync status write path is
-the responsibility of the future upload module.
+`creator.email` is nullable. `noteCount` counts active notes attached to the
+scan. `assetStatus` uses `NONE | PENDING | UPLOADING | UPLOADED | FAILED` and
+starts `NONE` for a metadata-only scan; `syncStatus` uses `PENDING | SYNCING |
+SYNCED | FAILED | CONFLICT` and starts `PENDING`. The metadata endpoints never
+accept model-file bytes; the asset and sync status write path is the
+responsibility of the scan-asset module.
+
+Create Scan accepts optional `thumbnail` and `scanFile` upload descriptors. When
+present, the API creates the scan and mints an upload session for each
+descriptor, returning the scan plus `uploads`:
+
+```json
+{
+  "id": "f1e2d3c4-a5b6-7890-abcd-ef1234567890",
+  "projectId": "a1b2c3d4-e5f6-4890-abcd-ef1234567890",
+  "name": "Living Room",
+  "thumbnail": null,
+  "assetStatus": "NONE",
+  "syncStatus": "PENDING",
+  "modelVersion": 1,
+  "createdAt": "2026-07-29T10:00:00.000Z",
+  "updatedAt": "2026-07-29T10:00:00.000Z",
+  "permissions": {
+    "role": "OWNER",
+    "canView": true,
+    "canEdit": true,
+    "canDelete": true
+  },
+  "uploads": {
+    "thumbnail": {
+      "uploadSessionId": "c0ffee00-0000-4000-8000-000000000099",
+      "assetId": "c0ffee00-0000-4000-8000-000000000099",
+      "uploadUrl": "https://minio.example.com/bucket/scans/.../thumbnail?...",
+      "uploadUrlExpiresAt": "2026-07-29T10:15:00.000Z"
+    },
+    "scanFile": {
+      "uploadSessionId": "c0ffee00-0000-4000-8000-000000000100",
+      "assetId": "c0ffee00-0000-4000-8000-000000000100",
+      "uploadUrl": "https://minio.example.com/bucket/scans/.../model?...",
+      "uploadUrlExpiresAt": "2026-07-29T10:15:00.000Z"
+    }
+  }
+}
+```
+
+`creator` and `noteCount` are omitted above for brevity but are always present.
+The client uploads each file directly to its `uploadUrl`, then calls the
+scan-asset completion endpoint. Each `uploadUrl` is a presigned PUT URL with the
+configured upload TTL; the model scan file must be between 10 MB and 100 MB.
+A `thumbnail` descriptor requires `contentType` (`image/jpeg`, `image/png`) and
+`sizeBytes`; a `scanFile` descriptor additionally requires `checksum` and
+`modelVersion`. `uploads` is omitted when neither descriptor is supplied.
 
 The scan list supports page-based pagination and an allow-listed sort. `page`
 defaults to 1; `limit` defaults to 20 and may not exceed 100. `sort` defaults to
@@ -337,6 +400,12 @@ Validation rules:
 - `description`: optional nullable string, maximum 500 characters.
 - `clientMutationId` on create: optional string, 1–128 characters; used for
   idempotent create and unique per project.
+- `thumbnail` descriptor on create: optional; `contentType` must be
+  `image/jpeg` or `image/png`, `sizeBytes` positive and at most the thumbnail
+  maximum, `checksum` optional.
+- `scanFile` descriptor on create: optional; `contentType` must be a supported
+  model type (including `model/usdz`), `sizeBytes` between 10 MB and 100 MB,
+  `checksum` and `modelVersion` required.
 - Create and update objects reject unknown fields; PATCH must contain at least
   one supported field; `"description": null` clears the stored description.
 - Clients cannot submit `id`, `projectId`, `createdById`, `createdAt`,
@@ -391,7 +460,9 @@ Create-session request:
 - `contentType`: must be in the allowed list for the asset type (models
   `model/gltf-binary`, `model/gltf+json`, `application/octet-stream`,
   `model/usd`, `model/usdz`; thumbnails `image/jpeg`, `image/png`).
-- `sizeBytes`: positive and within the configured maximum for the asset type.
+- `sizeBytes`: positive; for `MODEL` assets it must be at least the configured
+  minimum (10 MB) and at most the configured maximum (100 MB), and for
+  `THUMBNAIL` assets at most the configured maximum (10 MB).
 - `checksum` and `modelVersion`: required for `MODEL` assets.
 - `idempotencyKey`: optional; a repeated create with an active, unexpired
   session returns the existing session with `200`.
@@ -410,7 +481,9 @@ Behavior and rules:
   status update so a retry recovers from an earlier failed scan update.
 - Completed model uploads mark the scan `assetStatus = UPLOADED` and
   `syncStatus = SYNCED`; a reported failure marks the scan `FAILED`. Thumbnail
-  completion leaves the scan status unchanged.
+  completion leaves the scan status unchanged but persists a display URL onto
+  the scan's `thumbnail` field (re-applied on a completed retry), so project and
+  scan responses expose it.
 - A download URL is only issued once an asset has status `UPLOADED`; otherwise
   the API returns `409 ASSET_NOT_READY`, and a missing asset record returns
   `404 ASSET_NOT_FOUND`.
@@ -420,7 +493,9 @@ Behavior and rules:
   `minio` provider mints presigned S3 URLs whose expiry is enforced by MinIO
   and, before completion, verifies that the uploaded object exists and that its
   stored size and content type exactly match the session's declared
-  `contentType` and `sizeBytes`.
+  `contentType` and `sizeBytes`. The thumbnail display URL is a stable
+  (non-expiring) object URL and therefore requires the bucket or objects to be
+  publicly readable, or a CDN/reverse proxy in front of MinIO.
 
 Error behavior:
 
@@ -437,6 +512,100 @@ Error behavior:
 - `429 RATE_LIMIT_EXCEEDED`: API quota exceeded.
 - `500 INTERNAL_SERVER_ERROR`: unexpected failure without Prisma, SQL, or secret
   leakage.
+
+## Notes
+
+Every note endpoint requires a valid Bearer access token. Notes belong to
+exactly one scan; the project Owner creates, edits, moves, and deletes notes,
+and the Owner and active Viewers can list and read them. Deleted or
+inaccessible scans, projects, and notes are hidden behind `404`.
+
+| Method   | Endpoint                         | Result                                                   |
+| -------- | -------------------------------- | -------------------------------------------------------- |
+| `POST`   | `/api/v1/scans/:scanId/notes`    | Create a note on a scan; Owner only; return `201`        |
+| `GET`    | `/api/v1/scans/:scanId/notes`    | List notes for a scan; Owner or active Viewer; paginated |
+| `GET`    | `/api/v1/notes/:noteId`          | Get note detail; Owner or active Viewer                  |
+| `PATCH`  | `/api/v1/notes/:noteId`          | Update note content or color; Owner only                 |
+| `PATCH`  | `/api/v1/notes/:noteId/position` | Move a note to a new 3D position; Owner only             |
+| `DELETE` | `/api/v1/notes/:noteId`          | Delete a note; Owner only; return `204`                  |
+
+Note response:
+
+```json
+{
+  "id": "b1a2c3d4-e5f6-4890-abcd-ef1234567890",
+  "scanId": "f1e2d3c4-a5b6-7890-abcd-ef1234567890",
+  "content": "Cabinet hinge is loose",
+  "color": "YELLOW",
+  "position": { "x": 1.5, "y": -2, "z": 3.25 },
+  "orientation": { "x": 0, "y": 0, "z": 1 },
+  "modelVersion": "1",
+  "creator": {
+    "id": "eb5d278f-c857-45c7-887d-7be65288cb75",
+    "email": "owner@example.com"
+  },
+  "createdAt": "2026-07-29T10:00:00.000Z",
+  "updatedAt": "2026-07-29T10:00:00.000Z",
+  "permissions": {
+    "role": "OWNER",
+    "canView": true,
+    "canEdit": true,
+    "canDelete": true
+  }
+}
+```
+
+`position` is a required `{ x, y, z }` vector stored relative to the scan model,
+not the current camera angle. `orientation` is an optional `{ x, y, z }` vector.
+`modelVersion` is a string that must match the parent scan's model version;
+creating or moving a note with a different version returns `409`.
+
+The note list supports page-based pagination and an allow-listed sort. `page`
+defaults to 1; `limit` defaults to 20 and may not exceed 100. `sort` defaults to
+`updatedAt:desc`. Supported values are `updatedAt:desc`, `updatedAt:asc`,
+`createdAt:desc`, and `createdAt:asc`. Every order uses `id` as its final stable
+tie-breaker.
+
+Validation rules:
+
+- `scanId` and `noteId`: UUID.
+- `content` on create: required, trimmed Unicode string, 1–2000 characters, not
+  whitespace-only; on update it is optional with the same bounds.
+- `color`: one of `YELLOW`, `RED`, `BLUE`, `GREEN`, `ORANGE`, `PURPLE`.
+- `position`: object with numeric `x`, `y`, and `z`.
+- `orientation`: optional nullable object with numeric `x`, `y`, and `z`.
+- `modelVersion` on create and on move: required string, 1–64 characters, and
+  must equal the parent scan's current model version.
+- Create, update, and move objects reject unknown fields; update must contain at
+  least one supported field.
+- Clients cannot submit `id`, `scanId`, `createdById`, `createdAt`, or
+  `updatedAt`.
+
+Authorization and behavior rules:
+
+- The Owner of the parent project creates, edits, moves, and deletes notes.
+- An active Viewer may only read note list and detail.
+- Note content is never written to logs; unexpected failures return the standard
+  error envelope without echoing note text.
+- Creating, updating, moving, or deleting a note touches the parent scan and
+  project `updatedAt` in the same transaction.
+- A note cannot exist outside a scan. Deleting a scan or project makes its notes
+  inaccessible: scan endpoints filter notes on the non-deleted scan, and the
+  `notes` foreign key cascades when a scan row is physically removed.
+- Deleting a note is a physical delete that returns `204`.
+
+Error behavior:
+
+- `400 VALIDATION_ERROR`: invalid body, path parameters, or query parameters.
+- `401 UNAUTHORIZED`: missing/invalid access token or missing current user.
+- `404 SCAN_NOT_FOUND`: parent scan missing, deleted, or inaccessible.
+- `404 NOTE_NOT_FOUND`: note missing, deleted, or inaccessible through its
+  parent scan.
+- `409 MODEL_VERSION_MISMATCH`: submitted model version differs from the scan's
+  current model version.
+- `429 RATE_LIMIT_EXCEEDED`: API quota exceeded.
+- `500 INTERNAL_SERVER_ERROR`: unexpected failure without Prisma, SQL, note
+  content, or secret leakage.
 
 ## Health semantics
 

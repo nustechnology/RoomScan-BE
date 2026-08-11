@@ -16,6 +16,7 @@ export interface MinioStorageAdapterOptions {
   secretKey: string;
   useSSL?: boolean;
   region?: string;
+  displayBaseUrl?: string;
   client?: MinioClient;
 }
 
@@ -62,6 +63,7 @@ export class MinioStorageAdapter implements StorageAdapter {
   readonly #client: MinioClient;
   readonly #bucket: string;
   readonly #region: string | undefined;
+  readonly #displayBaseUrl: string;
   #ensureBucketPromise: Promise<void> | null = null;
 
   constructor(options: MinioStorageAdapterOptions) {
@@ -79,6 +81,9 @@ export class MinioStorageAdapter implements StorageAdapter {
       });
     this.#bucket = options.bucket;
     this.#region = options.region;
+    this.#displayBaseUrl = (
+      options.displayBaseUrl ?? `${useSSL ? 'https' : 'http'}://${endPoint}:${port ?? DEFAULT_PORT}`
+    ).replace(/\/+$/, '');
   }
 
   buildObjectKey(scanId: string, assetType: ScanAssetType): string {
@@ -150,5 +155,9 @@ export class MinioStorageAdapter implements StorageAdapter {
       stat.size === expected.sizeBytes &&
       metadataContentType(stat.metaData) === expected.contentType
     );
+  }
+
+  createDisplayUrl(objectKey: string): Promise<string> {
+    return Promise.resolve(`${this.#displayBaseUrl}/${this.#bucket}/${objectKey}`);
   }
 }

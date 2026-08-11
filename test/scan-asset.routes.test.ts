@@ -16,6 +16,7 @@ import type { AppConfig } from '../src/config/env.js';
 import type { DatabaseHealth } from '../src/infrastructure/database/database.js';
 import type { ProjectService } from '../src/modules/project/project.service.js';
 import type { ScanService } from '../src/modules/scan/scan.service.js';
+import type { NoteService } from '../src/modules/note/note.service.js';
 import {
   AssetMetadataResponseSchema,
   CreateUploadSessionResponseSchema,
@@ -70,6 +71,7 @@ const config: AppConfig = {
   storageUseSsl: false,
   storageUploadUrlTtlSeconds: 900,
   storageDownloadUrlTtlSeconds: 60,
+  assetMinModelSizeBytes: 10_000_000,
   assetMaxModelSizeBytes: 500_000_000,
   assetMaxThumbnailSizeBytes: 10_000_000,
 };
@@ -170,6 +172,14 @@ describe('Scan asset HTTP endpoints', () => {
     getDownloadUrl,
     failUpload,
   } as unknown as ScanAssetService;
+  const noteService = {
+    create: vi.fn(),
+    list: vi.fn(),
+    getById: vi.fn(),
+    update: vi.fn(),
+    move: vi.fn(),
+    delete: vi.fn(),
+  } as unknown as NoteService;
   const app = createApp({
     config,
     database,
@@ -179,6 +189,7 @@ describe('Scan asset HTTP endpoints', () => {
     projectService,
     scanService,
     scanAssetService,
+    noteService,
     accessTokenVerifier,
     currentUserRepository,
     rateLimiters,

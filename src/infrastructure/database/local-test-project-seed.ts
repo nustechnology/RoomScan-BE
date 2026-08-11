@@ -1,4 +1,5 @@
 import { AssetStatus, SyncStatus } from '../../generated/prisma/enums.js';
+import { Prisma } from '../../generated/prisma/client.js';
 import type { PrismaClient } from '../../generated/prisma/client.js';
 import { LOCAL_TEST_USER_ID } from '../../config/constants.js';
 
@@ -44,6 +45,45 @@ export const LOCAL_TEST_SCANS = [
   },
 ] as const;
 
+export const LOCAL_TEST_NOTES = [
+  {
+    id: '00000000-0000-4000-8000-000000000301',
+    scanId: '00000000-0000-4000-8000-000000000201',
+    content: 'Cabinet hinge on the island is loose',
+    color: 'YELLOW',
+    position: { x: 1.25, y: -0.5, z: 0.75 },
+    orientation: { x: 0, y: 0, z: 1 },
+    modelVersion: '1',
+  },
+  {
+    id: '00000000-0000-4000-8000-000000000302',
+    scanId: '00000000-0000-4000-8000-000000000201',
+    content: 'Replace the recessed downlights',
+    color: 'BLUE',
+    position: { x: 2.0, y: 1.5, z: 2.4 },
+    orientation: null,
+    modelVersion: '1',
+  },
+  {
+    id: '00000000-0000-4000-8000-000000000303',
+    scanId: '00000000-0000-4000-8000-000000000202',
+    content: 'Window handle needs tightening',
+    color: 'RED',
+    position: { x: -1.1, y: 0.2, z: 1.3 },
+    orientation: { x: 0, y: 0, z: 1 },
+    modelVersion: '1',
+  },
+  {
+    id: '00000000-0000-4000-8000-000000000304',
+    scanId: '00000000-0000-4000-8000-000000000203',
+    content: 'Consider an extra countertop outlet',
+    color: 'ORANGE',
+    position: { x: 0.4, y: -0.3, z: 0.9 },
+    orientation: null,
+    modelVersion: '1',
+  },
+] as const;
+
 type SeedClient = Pick<PrismaClient, '$transaction'>;
 
 export async function seedLocalTestProject(client: SeedClient): Promise<void> {
@@ -85,6 +125,30 @@ export async function seedLocalTestProject(client: SeedClient): Promise<void> {
           syncStatus: scan.syncStatus,
           modelVersion: scan.modelVersion,
           deletedAt: null,
+        },
+      });
+    }
+
+    for (const note of LOCAL_TEST_NOTES) {
+      await transaction.note.upsert({
+        where: { id: note.id },
+        create: {
+          id: note.id,
+          scanId: note.scanId,
+          createdById: LOCAL_TEST_USER_ID,
+          content: note.content,
+          color: note.color,
+          position: note.position,
+          orientation: note.orientation === null ? Prisma.JsonNull : note.orientation,
+          modelVersion: note.modelVersion,
+        },
+        update: {
+          scanId: note.scanId,
+          content: note.content,
+          color: note.color,
+          position: note.position,
+          orientation: note.orientation === null ? Prisma.JsonNull : note.orientation,
+          modelVersion: note.modelVersion,
         },
       });
     }

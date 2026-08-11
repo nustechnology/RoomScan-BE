@@ -180,4 +180,28 @@ describe('MinioStorageAdapter', () => {
       'connection refused',
     );
   });
+
+  it('returns a stable display URL derived from the endpoint', async () => {
+    const adapter = createAdapter();
+
+    await expect(adapter.createDisplayUrl('scans/scan-1/thumbnail')).resolves.toBe(
+      'http://localhost:9000/roomscan-assets/scans/scan-1/thumbnail',
+    );
+  });
+
+  it('honors a configured display base URL and HTTPS', async () => {
+    const adapter = new MinioStorageAdapter({
+      bucket: 'roomscan-assets',
+      endPoint: 'minio.internal:9000',
+      accessKey: 'access-key',
+      secretKey: 'secret-key',
+      useSSL: true,
+      displayBaseUrl: 'https://cdn.roomscan.dev',
+      client: createClient().client,
+    });
+
+    await expect(adapter.createDisplayUrl('scans/scan-1/thumbnail')).resolves.toBe(
+      'https://cdn.roomscan.dev/roomscan-assets/scans/scan-1/thumbnail',
+    );
+  });
 });

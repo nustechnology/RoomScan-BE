@@ -33,7 +33,7 @@ function createAssetRecord(overrides: Partial<ScanAssetRecord> = {}): ScanAssetR
     assetType: 'MODEL',
     status: 'PENDING',
     contentType: 'model/gltf-binary',
-    sizeBytes: 1024,
+    sizeBytes: 20_000_000,
     checksum: 'abc-checksum',
     modelVersion: '1',
     storageKey: `scans/${SCAN_ID}/model`,
@@ -51,9 +51,11 @@ function createHarness() {
   const updateAssetStatus = vi
     .fn<ScanRepository['updateAssetStatus']>()
     .mockResolvedValue(undefined);
+  const updateThumbnail = vi.fn<ScanRepository['updateThumbnail']>().mockResolvedValue(undefined);
   const scanRepository = {
     findProjectId,
     updateAssetStatus,
+    updateThumbnail,
   } as unknown as ScanRepository;
 
   const findById = vi.fn<ScanAssetRepository['findById']>().mockResolvedValue(createAssetRecord());
@@ -92,12 +94,16 @@ function createHarness() {
     .fn<StorageAdapter['createDownloadUrl']>()
     .mockResolvedValue({ url: 'http://storage/download', expiresAt: NOW });
   const verifyObject = vi.fn<StorageAdapter['verifyObject']>().mockResolvedValue(true);
+  const createDisplayUrl = vi
+    .fn<StorageAdapter['createDisplayUrl']>()
+    .mockResolvedValue('http://storage/thumbnail');
   const storage: StorageAdapter = {
     provider: 'local',
     buildObjectKey,
     createUploadUrl,
     createDownloadUrl,
     verifyObject,
+    createDisplayUrl,
   };
 
   const service = new ScanAssetService({
@@ -108,6 +114,7 @@ function createHarness() {
     clock: () => NOW,
     uploadUrlTtlSeconds: 900,
     downloadUrlTtlSeconds: 60,
+    minModelSizeBytes: 10_000_000,
     maxModelSizeBytes: 500_000_000,
     maxThumbnailSizeBytes: 10_000_000,
   });
@@ -115,6 +122,7 @@ function createHarness() {
   return {
     findProjectId,
     updateAssetStatus,
+    updateThumbnail,
     findById,
     findByScanAndType,
     create,
@@ -124,6 +132,7 @@ function createHarness() {
     createUploadUrl,
     createDownloadUrl,
     verifyObject,
+    createDisplayUrl,
     service,
   };
 }
@@ -135,7 +144,7 @@ describe('ScanAssetService', () => {
     const result = await service.createUploadSession(OWNER_ID, SCAN_ID, {
       assetType: 'MODEL',
       contentType: 'model/gltf-binary',
-      sizeBytes: 1024,
+      sizeBytes: 20_000_000,
       checksum: 'abc',
       modelVersion: '1',
     });
@@ -152,7 +161,7 @@ describe('ScanAssetService', () => {
     const result = await service.createUploadSession(OWNER_ID, SCAN_ID, {
       assetType: 'MODEL',
       contentType: 'model/gltf-binary',
-      sizeBytes: 1024,
+      sizeBytes: 20_000_000,
       checksum: 'abc',
       modelVersion: '1',
     });
@@ -171,7 +180,7 @@ describe('ScanAssetService', () => {
     const result = await service.createUploadSession(OWNER_ID, SCAN_ID, {
       assetType: 'MODEL',
       contentType: 'model/gltf-binary',
-      sizeBytes: 1024,
+      sizeBytes: 20_000_000,
       checksum: 'abc',
       modelVersion: '1',
     });
@@ -190,7 +199,7 @@ describe('ScanAssetService', () => {
     const payload = {
       assetType: 'MODEL' as const,
       contentType: 'model/gltf-binary',
-      sizeBytes: 1024,
+      sizeBytes: 20_000_000,
       checksum: 'abc',
       modelVersion: '1',
     };
@@ -213,7 +222,7 @@ describe('ScanAssetService', () => {
       service.createUploadSession(VIEWER_ID, SCAN_ID, {
         assetType: 'MODEL',
         contentType: 'model/gltf-binary',
-        sizeBytes: 1024,
+        sizeBytes: 20_000_000,
         checksum: 'abc',
         modelVersion: '1',
       }),
@@ -227,7 +236,7 @@ describe('ScanAssetService', () => {
       service.createUploadSession(OWNER_ID, SCAN_ID, {
         assetType: 'MODEL',
         contentType: 'text/plain',
-        sizeBytes: 1024,
+        sizeBytes: 20_000_000,
       }),
     ).rejects.toBeInstanceOf(InvalidAssetRequestError);
   });
@@ -240,7 +249,7 @@ describe('ScanAssetService', () => {
       service.createUploadSession(OWNER_ID, SCAN_ID, {
         assetType: 'MODEL',
         contentType: 'model/gltf-binary',
-        sizeBytes: 1024,
+        sizeBytes: 20_000_000,
         checksum: 'abc',
         modelVersion: '1',
       }),
@@ -259,6 +268,40 @@ describe('ScanAssetService', () => {
     ).rejects.toBeInstanceOf(InvalidAssetRequestError);
   });
 
+  it('rejects an undersized model asset', async () => {
+    const { service } = createHarness();
+
+    await expect(
+      service.createUploadSession(OWNER_ID, SCAN_ID, {
+        assetType: 'MODEL',
+        contentType: 'model/gltf-binary',
+        sizeBytes: 1_000_000,
+      }),
+    ).rejects.toBeInstanceOf(InvalidAssetRequestError);
+  });
+
+  it('completes a thumbnail upload and persists its display URL on the scan', async () => {
+    const { service, findById, update, updateThumbnail, createDisplayUrl } = createHarness();
+    findById.mockResolvedValueOnce(
+      createAssetRecord({ assetType: 'THUMBNAIL', storageKey: `scans/${SCAN_ID}/thumbnail` }),
+    );
+    update.mockResolvedValueOnce(
+      createAssetRecord({
+        assetType: 'THUMBNAIL',
+        storageKey: `scans/${SCAN_ID}/thumbnail`,
+        status: 'UPLOADED',
+        uploadedAt: NOW,
+      }),
+    );
+    createDisplayUrl.mockResolvedValueOnce('http://storage/display/thumbnail');
+
+    const result = await service.completeUpload(OWNER_ID, ASSET_ID, {});
+
+    expect(result.status).toBe('UPLOADED');
+    expect(createDisplayUrl).toHaveBeenCalledWith(`scans/${SCAN_ID}/thumbnail`);
+    expect(updateThumbnail).toHaveBeenCalledWith(SCAN_ID, 'http://storage/display/thumbnail');
+  });
+
   it('completes an upload and marks the model synced', async () => {
     const { service, update, updateAssetStatus, verifyObject } = createHarness();
     update.mockResolvedValueOnce(createAssetRecord({ status: 'UPLOADED', uploadedAt: NOW }));
@@ -268,7 +311,7 @@ describe('ScanAssetService', () => {
     expect(result.status).toBe('UPLOADED');
     expect(verifyObject).toHaveBeenCalledWith(`scans/${SCAN_ID}/model`, {
       contentType: 'model/gltf-binary',
-      sizeBytes: 1024,
+      sizeBytes: 20_000_000,
     });
     expect(updateAssetStatus).toHaveBeenCalledWith(SCAN_ID, {
       assetStatus: 'UPLOADED',

@@ -27,6 +27,8 @@ import { createScanRouter } from './modules/scan/scan.routes.js';
 import type { ScanService } from './modules/scan/scan.service.js';
 import { createScanAssetRouter } from './modules/scan-asset/scan-asset.routes.js';
 import type { ScanAssetService } from './modules/scan-asset/scan-asset.service.js';
+import { createNoteRouter } from './modules/note/note.routes.js';
+import type { NoteService } from './modules/note/note.service.js';
 import { createOpenApiDocument } from './openapi/document.js';
 
 export interface AppDependencies {
@@ -38,6 +40,7 @@ export interface AppDependencies {
   projectService: ProjectService;
   scanService: ScanService;
   scanAssetService: ScanAssetService;
+  noteService: NoteService;
   accessTokenVerifier: AccessTokenVerifier;
   currentUserRepository: CurrentUserRepository;
   rateLimiters: RateLimiters;
@@ -53,6 +56,7 @@ export function createApp({
   projectService,
   scanService,
   scanAssetService,
+  noteService,
   accessTokenVerifier,
   currentUserRepository,
   rateLimiters,
@@ -138,6 +142,7 @@ export function createApp({
     API_PREFIX,
     createScanRouter({
       scanService,
+      scanAssetService,
       accessTokenVerifier,
       currentUserRepository,
     }),
@@ -146,6 +151,14 @@ export function createApp({
     API_PREFIX,
     createScanAssetRouter({
       scanAssetService,
+      accessTokenVerifier,
+      currentUserRepository,
+    }),
+  );
+  app.use(
+    API_PREFIX,
+    createNoteRouter({
+      noteService,
       accessTokenVerifier,
       currentUserRepository,
     }),

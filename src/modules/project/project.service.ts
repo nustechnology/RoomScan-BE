@@ -36,6 +36,10 @@ function toResult(record: ProjectRecord, role: ProjectRole): ProjectResult {
     description: record.description,
     owner: record.owner,
     scanCount: record.scanCount,
+    scans: record.scans.map((scan) => ({
+      ...scan,
+      createdAt: scan.createdAt.toISOString(),
+    })),
     sharedCount: record.sharedCount,
     thumbnail: record.thumbnail,
     syncStatus: record.syncStatus,

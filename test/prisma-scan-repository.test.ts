@@ -31,6 +31,11 @@ const scanSelect = {
   deletedAt: true,
   createdAt: true,
   updatedAt: true,
+  _count: {
+    select: {
+      notes: true,
+    },
+  },
 };
 
 function createScanRow(overrides: Record<string, unknown> = {}) {
@@ -53,6 +58,7 @@ function createScanRow(overrides: Record<string, unknown> = {}) {
     createdAt: NOW,
     updatedAt: NOW,
     project: { ownerId: OWNER_ID },
+    _count: { notes: 2 },
     ...overrides,
   };
 }
@@ -419,6 +425,18 @@ describe('PrismaScanRepository', () => {
     await expect(
       repository.updateAssetStatus(SCAN_ID, { assetStatus: 'UPLOADED', syncStatus: 'SYNCED' }),
     ).resolves.toBeUndefined();
+  });
+
+  it('persists a thumbnail display URL on an active scan', async () => {
+    const { client, scan } = createClient();
+    const repository = new PrismaScanRepository(client);
+
+    await repository.updateThumbnail(SCAN_ID, 'http://storage/display/thumbnail');
+
+    expect(scan.updateMany).toHaveBeenCalledWith({
+      where: { id: SCAN_ID, deletedAt: null },
+      data: { thumbnail: 'http://storage/display/thumbnail' },
+    });
   });
 
   it('hides deletion from a Viewer or unrelated user', async () => {

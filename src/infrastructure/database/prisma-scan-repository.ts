@@ -31,6 +31,11 @@ const scanSelect = {
   deletedAt: true,
   createdAt: true,
   updatedAt: true,
+  _count: {
+    select: {
+      notes: true,
+    },
+  },
 } as const;
 
 interface ScanRow {
@@ -51,6 +56,9 @@ interface ScanRow {
   deletedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
+  _count: {
+    notes: number;
+  };
 }
 
 type SortDirection = 'asc' | 'desc';
@@ -70,7 +78,7 @@ function toScanRecord(row: ScanRow): ScanRecord {
     name: row.name,
     description: row.description,
     thumbnail: row.thumbnail,
-    noteCount: 0,
+    noteCount: row._count.notes,
     assetStatus: row.assetStatus,
     syncStatus: row.syncStatus,
     modelVersion: row.modelVersion,
@@ -316,6 +324,13 @@ export class PrismaScanRepository implements ScanRepository {
     await this.#client.scan.updateMany({
       where: { id: scanId, deletedAt: null },
       data,
+    });
+  }
+
+  async updateThumbnail(scanId: string, thumbnail: string | null): Promise<void> {
+    await this.#client.scan.updateMany({
+      where: { id: scanId, deletedAt: null },
+      data: { thumbnail },
     });
   }
 }

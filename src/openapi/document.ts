@@ -6,6 +6,7 @@ import { healthOpenApiRegistry } from '../modules/health/health.openapi.js';
 import { projectOpenApiRegistry } from '../modules/project/project.openapi.js';
 import { scanOpenApiRegistry } from '../modules/scan/scan.openapi.js';
 import { scanAssetOpenApiRegistry } from '../modules/scan-asset/scan-asset.openapi.js';
+import { noteOpenApiRegistry } from '../modules/note/note.openapi.js';
 
 export function createOpenApiDocument(): ReturnType<OpenApiGeneratorV31['generateDocument']> {
   const generator = new OpenApiGeneratorV31([
@@ -14,6 +15,7 @@ export function createOpenApiDocument(): ReturnType<OpenApiGeneratorV31['generat
     ...projectOpenApiRegistry.definitions,
     ...scanOpenApiRegistry.definitions,
     ...scanAssetOpenApiRegistry.definitions,
+    ...noteOpenApiRegistry.definitions,
   ]);
 
   return generator.generateDocument({
@@ -49,6 +51,10 @@ export function createOpenApiDocument(): ReturnType<OpenApiGeneratorV31['generat
       {
         name: 'Scan Assets',
         description: 'Model and thumbnail asset upload and download for a scan',
+      },
+      {
+        name: 'Notes',
+        description: 'Text notes anchored to 3D positions inside scan models',
       },
     ],
   });

@@ -19,6 +19,28 @@ const expectedProjectSelect = {
       email: true,
     },
   },
+  scans: {
+    where: {
+      deletedAt: null,
+    },
+    orderBy: {
+      createdAt: 'desc',
+    },
+    select: {
+      id: true,
+      name: true,
+      description: true,
+      thumbnail: true,
+      assetStatus: true,
+      syncStatus: true,
+      createdAt: true,
+      _count: {
+        select: {
+          notes: true,
+        },
+      },
+    },
+  },
   _count: {
     select: {
       accesses: {
@@ -48,6 +70,7 @@ function createRow() {
       id: OWNER_ID,
       email: 'owner@example.com',
     },
+    scans: [],
     _count: {
       accesses: 2,
       scans: 0,
@@ -113,10 +136,48 @@ describe('PrismaProjectRepository', () => {
         email: 'owner@example.com',
       },
       scanCount: 0,
+      scans: [],
       sharedCount: 2,
       thumbnail: null,
       syncStatus: null,
     });
+  });
+
+  it('maps nested scans with their note counts into project records', async () => {
+    const { client, project } = createClient();
+    project.findFirst.mockResolvedValueOnce({
+      ...createRow(),
+      _count: { accesses: 1, scans: 1 },
+      scans: [
+        {
+          id: 'f1e2d3c4-a5b6-7890-abcd-ef1234567890',
+          name: 'Living Room',
+          description: null,
+          thumbnail: 'http://storage.local/download/scans/scan/thumbnail',
+          assetStatus: 'UPLOADED',
+          syncStatus: 'SYNCED',
+          createdAt: NOW,
+          _count: { notes: 3 },
+        },
+      ],
+    });
+    const repository = new PrismaProjectRepository(client);
+
+    const result = await repository.findByIdForUser(PROJECT_ID, OWNER_ID);
+
+    expect(result?.record.scanCount).toBe(1);
+    expect(result?.record.scans).toEqual([
+      {
+        id: 'f1e2d3c4-a5b6-7890-abcd-ef1234567890',
+        name: 'Living Room',
+        description: null,
+        thumbnail: 'http://storage.local/download/scans/scan/thumbnail',
+        noteCount: 3,
+        assetStatus: 'UPLOADED',
+        syncStatus: 'SYNCED',
+        createdAt: NOW,
+      },
+    ]);
   });
 
   it('lists only active owned projects with search, offset pagination, and stable sorting', async () => {

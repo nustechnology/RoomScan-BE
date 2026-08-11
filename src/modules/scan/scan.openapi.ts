@@ -4,6 +4,7 @@ import { ErrorResponseSchema } from '../../common/schemas/error.js';
 import { ProjectIdParamSchema } from '../project/project.schemas.js';
 import {
   CreateScanBodySchema,
+  CreateScanResponseSchema,
   ListScansQuerySchema,
   ScanIdParamSchema,
   ScanListResponseSchema,
@@ -14,6 +15,10 @@ import {
 export const scanOpenApiRegistry = new OpenAPIRegistry();
 
 const scanResponse = scanOpenApiRegistry.register('ScanResponse', ScanResponseSchema);
+const createScanResponse = scanOpenApiRegistry.register(
+  'CreateScanResponse',
+  CreateScanResponseSchema,
+);
 const scanListResponse = scanOpenApiRegistry.register('ScanListResponse', ScanListResponseSchema);
 const createScanBody = scanOpenApiRegistry.register('CreateScanBody', CreateScanBodySchema);
 const updateScanBody = scanOpenApiRegistry.register('UpdateScanBody', UpdateScanBodySchema);
@@ -127,7 +132,7 @@ scanOpenApiRegistry.registerPath({
       headers: rateLimitHeaders,
       content: {
         'application/json': {
-          schema: scanResponse,
+          schema: createScanResponse,
         },
       },
     },
@@ -137,7 +142,7 @@ scanOpenApiRegistry.registerPath({
       headers: rateLimitHeaders,
       content: {
         'application/json': {
-          schema: scanResponse,
+          schema: createScanResponse,
         },
       },
     },

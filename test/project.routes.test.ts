@@ -23,6 +23,7 @@ import {
 import type { ProjectService } from '../src/modules/project/project.service.js';
 import type { ScanService } from '../src/modules/scan/scan.service.js';
 import type { ScanAssetService } from '../src/modules/scan-asset/scan-asset.service.js';
+import type { NoteService } from '../src/modules/note/note.service.js';
 import type { ProjectResult, ProjectRole } from '../src/modules/project/project.types.js';
 
 const ACCESS_SECRET = 'access-secret-that-is-at-least-32-characters';
@@ -59,6 +60,7 @@ const config: AppConfig = {
   storageUseSsl: false,
   storageUploadUrlTtlSeconds: 900,
   storageDownloadUrlTtlSeconds: 60,
+  assetMinModelSizeBytes: 10_000_000,
   assetMaxModelSizeBytes: 500_000_000,
   assetMaxThumbnailSizeBytes: 10_000_000,
 };
@@ -74,6 +76,7 @@ function projectResult(role: ProjectRole = 'OWNER'): ProjectResult {
       email: 'owner@example.com',
     },
     scanCount: 0,
+    scans: [],
     sharedCount: 1,
     thumbnail: null,
     syncStatus: null,
@@ -160,6 +163,14 @@ describe('Project HTTP endpoints', () => {
     getDownloadUrl: vi.fn(),
     failUpload: vi.fn(),
   } as unknown as ScanAssetService;
+  const noteService = {
+    create: vi.fn(),
+    list: vi.fn(),
+    getById: vi.fn(),
+    update: vi.fn(),
+    move: vi.fn(),
+    delete: vi.fn(),
+  } as unknown as NoteService;
   const app = createApp({
     config,
     database,
@@ -169,6 +180,7 @@ describe('Project HTTP endpoints', () => {
     projectService,
     scanService,
     scanAssetService,
+    noteService,
     accessTokenVerifier,
     currentUserRepository,
     rateLimiters,
@@ -298,6 +310,54 @@ describe('Project HTTP endpoints', () => {
         limit: 5,
         sort: 'updatedAt:desc',
       });
+    });
+
+    it('includes each project’s scans in the list response', async () => {
+      list.mockResolvedValue({
+        items: [
+          {
+            ...projectResult(),
+            scanCount: 1,
+            scans: [
+              {
+                id: 'f1e2d3c4-a5b6-7890-abcd-ef1234567890',
+                name: 'Living Room',
+                description: null,
+                thumbnail: 'http://storage.local/download/scans/scan/thumbnail',
+                noteCount: 3,
+                assetStatus: 'UPLOADED',
+                syncStatus: 'SYNCED',
+                createdAt: NOW.toISOString(),
+              },
+            ],
+          },
+        ],
+        pagination: {
+          page: 1,
+          limit: 5,
+          total: 1,
+          totalPages: 1,
+        },
+      });
+
+      const response = await request(app)
+        .get('/api/v1/projects')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(200);
+      const body = ProjectListResponseSchema.parse(response.body as unknown);
+
+      expect(body.items[0]?.scans).toEqual([
+        {
+          id: 'f1e2d3c4-a5b6-7890-abcd-ef1234567890',
+          name: 'Living Room',
+          description: null,
+          thumbnail: 'http://storage.local/download/scans/scan/thumbnail',
+          noteCount: 3,
+          assetStatus: 'UPLOADED',
+          syncStatus: 'SYNCED',
+          createdAt: NOW.toISOString(),
+        },
+      ]);
     });
 
     it('passes trimmed search, page, limit, and supported sort to the service', async () => {
