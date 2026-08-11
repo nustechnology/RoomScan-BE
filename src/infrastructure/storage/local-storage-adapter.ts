@@ -50,6 +50,10 @@ export class LocalStorageAdapter implements StorageAdapter {
     });
   }
 
+  createDisplayUrl(objectKey: string): Promise<string> {
+    return Promise.resolve(`${this.#baseUrl}/download/${objectKey}`);
+  }
+
   verifyObject(_objectKey: string, _expected: StorageVerifyOptions): Promise<boolean> {
     return Promise.resolve(true);
   }

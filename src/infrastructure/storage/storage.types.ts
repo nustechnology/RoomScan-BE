@@ -34,4 +34,5 @@ export interface StorageAdapter {
     options: StorageDownloadOptions,
   ): Promise<StorageDownloadUrl>;
   verifyObject(objectKey: string, expected: StorageVerifyOptions): Promise<boolean>;
+  createDisplayUrl(objectKey: string): Promise<string>;
 }

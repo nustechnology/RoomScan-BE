@@ -38,6 +38,15 @@ enum AssetType {
   THUMBNAIL
 }
 
+enum NoteColor {
+  YELLOW
+  RED
+  BLUE
+  GREEN
+  ORANGE
+  PURPLE
+}
+
 model User {
   id            String       @id @default(uuid()) @db.Uuid
   provider      AuthProvider
@@ -51,6 +60,7 @@ model User {
   projectAccesses ProjectAccess[]
   refreshTokens   RefreshToken[]
   scans           Scan[]
+  notes           Note[]
 
   @@unique([provider, providerId])
   @@map("users")
@@ -121,6 +131,7 @@ model Scan {
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
   creator User    @relation(fields: [createdById], references: [id], onDelete: Restrict)
   assets  ScanAsset[]
+  notes   Note[]
 
   @@unique([projectId, clientMutationId])
   @@index([projectId, deletedAt, createdAt, id])
@@ -150,4 +161,24 @@ model ScanAsset {
   @@unique([idempotencyKey])
   @@index([scanId, status])
   @@map("scan_assets")
+}
+
+model Note {
+  id           String    @id @default(uuid()) @db.Uuid
+  scanId       String    @db.Uuid
+  createdById  String    @db.Uuid
+  content      String    @db.VarChar(2000)
+  color        NoteColor
+  position     Json
+  orientation  Json?
+  modelVersion String    @db.VarChar(64)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  scan    Scan @relation(fields: [scanId], references: [id], onDelete: Cascade)
+  creator User @relation(fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([scanId, updatedAt, id])
+  @@index([createdById])
+  @@map("notes")
 }

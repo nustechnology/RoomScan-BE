@@ -37,6 +37,7 @@ export interface ScanAssetServiceDependencies {
   clock?: () => Date;
   uploadUrlTtlSeconds: number;
   downloadUrlTtlSeconds: number;
+  minModelSizeBytes: number;
   maxModelSizeBytes: number;
   maxThumbnailSizeBytes: number;
 }
@@ -67,6 +68,7 @@ export class ScanAssetService {
   readonly #clock: () => Date;
   readonly #uploadUrlTtlSeconds: number;
   readonly #downloadUrlTtlSeconds: number;
+  readonly #minModelSizeBytes: number;
   readonly #maxModelSizeBytes: number;
   readonly #maxThumbnailSizeBytes: number;
 
@@ -78,6 +80,7 @@ export class ScanAssetService {
     clock,
     uploadUrlTtlSeconds,
     downloadUrlTtlSeconds,
+    minModelSizeBytes,
     maxModelSizeBytes,
     maxThumbnailSizeBytes,
   }: ScanAssetServiceDependencies) {
@@ -88,6 +91,7 @@ export class ScanAssetService {
     this.#clock = clock ?? (() => new Date());
     this.#uploadUrlTtlSeconds = uploadUrlTtlSeconds;
     this.#downloadUrlTtlSeconds = downloadUrlTtlSeconds;
+    this.#minModelSizeBytes = minModelSizeBytes;
     this.#maxModelSizeBytes = maxModelSizeBytes;
     this.#maxThumbnailSizeBytes = maxThumbnailSizeBytes;
   }
@@ -133,6 +137,10 @@ export class ScanAssetService {
     if (sizeBytes > maxSize) {
       throw new InvalidAssetRequestError();
     }
+
+    if (assetType === 'MODEL' && sizeBytes < this.#minModelSizeBytes) {
+      throw new InvalidAssetRequestError();
+    }
   }
 
   async #mintUploadUrl(
@@ -144,6 +152,17 @@ export class ScanAssetService {
     } catch {
       throw new StorageUnavailableError();
     }
+  }
+
+  async #persistThumbnailUrl(asset: ScanAssetRecord): Promise<void> {
+    let displayUrl: string;
+    try {
+      displayUrl = await this.#storage.createDisplayUrl(asset.storageKey);
+    } catch {
+      throw new StorageUnavailableError();
+    }
+
+    await this.#scanRepository.updateThumbnail(asset.scanId, displayUrl);
   }
 
   async createUploadSession(
@@ -255,6 +274,8 @@ export class ScanAssetService {
           assetStatus: 'UPLOADED',
           syncStatus: 'SYNCED',
         });
+      } else {
+        await this.#persistThumbnailUrl(asset);
       }
       return toMetadata(asset);
     }
@@ -285,6 +306,10 @@ export class ScanAssetService {
       if (data.sizeBytes > maxSize) {
         throw new InvalidAssetRequestError();
       }
+
+      if (asset.assetType === 'MODEL' && data.sizeBytes < this.#minModelSizeBytes) {
+        throw new InvalidAssetRequestError();
+      }
     }
 
     const update: ScanAssetUpdateData = {
@@ -301,6 +326,8 @@ export class ScanAssetService {
         assetStatus: 'UPLOADED',
         syncStatus: 'SYNCED',
       });
+    } else {
+      await this.#persistThumbnailUrl(asset);
     }
 
     return toMetadata(updated);

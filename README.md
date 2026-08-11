@@ -112,6 +112,12 @@ the local PostgreSQL and MinIO data volumes.
 | `GET`    | `/api/v1/scans/:scanId/assets`                         | List scan asset metadata; Owner or active Viewer |
 | `GET`    | `/api/v1/scans/:scanId/assets/:assetType/download-url` | Download URL; Owner or active Viewer             |
 | `POST`   | `/api/v1/upload-sessions/:uploadSessionId/fail`        | Report an upload failure (Owner only)            |
+| `POST`   | `/api/v1/scans/:scanId/notes`                          | Create a note on a scan (Owner only)             |
+| `GET`    | `/api/v1/scans/:scanId/notes`                          | List notes; Owner or active Viewer               |
+| `GET`    | `/api/v1/notes/:noteId`                                | Get note detail; Owner or active Viewer          |
+| `PATCH`  | `/api/v1/notes/:noteId`                                | Update note content or color (Owner only)        |
+| `PATCH`  | `/api/v1/notes/:noteId/position`                       | Move a note to a new 3D position (Owner only)    |
+| `DELETE` | `/api/v1/notes/:noteId`                                | Delete a note (Owner only)                       |
 | `GET`    | `/api-doc`                                             | Interactive Swagger UI                           |
 | `GET`    | `/api-doc.json`                                        | Generated OpenAPI 3.1 document                   |
 
@@ -151,9 +157,10 @@ For local `yarn dev`, set `NODE_ENV=development` and
 `{"identityToken":"roomscan-local-test-user"}` to the same Apple endpoint skips
 Apple verification for `local-test@roomscan.dev` and returns normally signed
 RoomScan tokens. The seed also creates a demo project owned by that local user
-with room scans spanning several asset and sync states, ready to list and
-inspect. The flag is rejected in test, staging, and production; the
-production-style Compose API therefore cannot expose this shortcut.
+with room scans spanning several asset and sync states and text notes anchored
+to those scans, ready to list and inspect. The flag is rejected in test,
+staging, and production; the production-style Compose API therefore cannot
+expose this shortcut.
 
 To obtain an access token for the Swagger UI `Authorize` dialog and local API
 calls, request a token for the seeded local user and paste the returned
@@ -199,16 +206,41 @@ project `updatedAt`. Missing, deleted, or inaccessible scans are hidden behind
 The metadata endpoints do not accept model files; `assetStatus` and `syncStatus`
 start at `NONE` and `PENDING` respectively until the upload flow writes them.
 
+Create Scan can also return presigned upload URLs in the same response: optional
+`thumbnail` and `scanFile` descriptors (`contentType`, `sizeBytes`, and the
+`checksum`/`modelVersion` required for the scan file) make the API mint an
+upload session for each and return its `uploadUrl` under `uploads.thumbnail` /
+`uploads.scanFile`. The client then uploads the files directly to those URLs and
+marks each session complete.
+
 Scan assets use minted URLs: the Owner creates an upload session
 (`POST /api/v1/scans/:scanId/assets/upload-sessions`), the client uploads to the
 returned URL, then marks it complete
 (`POST /api/v1/upload-sessions/:uploadSessionId/complete`). Completion is
-idempotent and marks the parent scan synced. Owner and active Viewers can list
+idempotent and marks the parent scan synced. A model scan file must be between
+10 MB and 100 MB; a completed thumbnail upload persists a display URL onto the
+scan so project and scan responses show it. Owner and active Viewers can list
 metadata and request download URLs
 (`GET /api/v1/scans/:scanId/assets/:assetType/download-url`); revoked Viewers
 and deleted projects/scans are denied. The raw `storageKey` field is omitted
 from API responses, although the local provider's URLs embed the object key
 path.
+
+Project list and detail responses include each project's active scans under
+`scans`, with `id`, `name`, `description`, `thumbnail`, `noteCount`,
+`assetStatus`, `syncStatus`, and `createdAt`; the `scanCount` field is the
+number of active scans (the "N room scans" label).
+
+Notes are text annotations anchored to 3D positions inside a scan model. `POST`
+and `GET` at `/api/v1/scans/:scanId/notes` create and list notes; `GET`, `PATCH`,
+and `DELETE` at `/api/v1/notes/:noteId` read, edit, and delete a note, and
+`PATCH /api/v1/notes/:noteId/position` moves it. The project Owner creates,
+edits, moves, and deletes notes; an active Viewer may only list and read them.
+Content is required on create (1–2000
+trimmed characters), color is a preset (`YELLOW`, `RED`, `BLUE`, `GREEN`,
+`ORANGE`, `PURPLE`), position is a `{ x, y, z }` vector, and `modelVersion` must
+match the scan's current model version (`409` otherwise). Note content is never
+written to logs. Deleting a scan or project makes its notes inaccessible.
 
 For nonce-bound sign-in, the client generates a raw nonce, sends its lowercase
 hexadecimal SHA-256 digest to Apple, and sends the raw nonce in the request
@@ -251,7 +283,8 @@ and `x-request-id`.
 | `STORAGE_USE_SSL`                                        | No       | `false`       | Use HTTPS instead of HTTP for the MinIO endpoint                    |
 | `STORAGE_UPLOAD_URL_TTL_SECONDS`                         | No       | `900`         | Signed upload URL lifetime                                          |
 | `STORAGE_DOWNLOAD_URL_TTL_SECONDS`                       | No       | `60`          | Signed download URL lifetime                                        |
-| `ASSET_MAX_MODEL_SIZE_BYTES`                             | No       | `500000000`   | Maximum model asset size                                            |
+| `ASSET_MIN_MODEL_SIZE_BYTES`                             | No       | `10000000`    | Minimum model scan-file size (10 MB)                                |
+| `ASSET_MAX_MODEL_SIZE_BYTES`                             | No       | `100000000`   | Maximum model scan-file size (100 MB)                               |
 | `ASSET_MAX_THUMBNAIL_SIZE_BYTES`                         | No       | `10000000`    | Maximum thumbnail asset size                                        |
 
 The remaining PostgreSQL, MinIO and `ROOMSCAN_PORT` values in `.env.example`

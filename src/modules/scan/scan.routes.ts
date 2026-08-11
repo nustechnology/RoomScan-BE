@@ -9,17 +9,21 @@ import type {
 import { validateRequest } from '../../common/middleware/validate-request.js';
 import { ProjectIdParamSchema, type ProjectIdParam } from '../project/project.schemas.js';
 import { ProjectNotFoundError } from '../project/project.errors.js';
+import type { ScanAssetService } from '../scan-asset/scan-asset.service.js';
 import { ScanNotFoundError } from './scan.errors.js';
 import {
   CreateScanBodySchema,
+  CreateScanResponseSchema,
   ListScansQuerySchema,
   ScanIdParamSchema,
   ScanListResponseSchema,
   ScanResponseSchema,
+  ScanUploadUrlSchema,
   UpdateScanBodySchema,
   type CreateScanBody,
   type ListScansQuery,
   type ScanIdParam,
+  type ScanUploadUrl,
   type UpdateScanBody,
 } from './scan.schemas.js';
 import type { ScanService } from './scan.service.js';
@@ -27,6 +31,7 @@ import type { ScanCreateInput, ScanUpdateInput } from './scan.types.js';
 
 export interface ScanRouterDependencies {
   scanService: ScanService;
+  scanAssetService: ScanAssetService;
   accessTokenVerifier: AccessTokenVerifier;
   currentUserRepository: CurrentUserRepository;
 }
@@ -53,6 +58,7 @@ function notFoundToAppError(error: unknown): AppError | undefined {
 
 export function createScanRouter({
   scanService,
+  scanAssetService,
   accessTokenVerifier,
   currentUserRepository,
 }: ScanRouterDependencies): Router {
@@ -78,7 +84,42 @@ export function createScanRouter({
             : { clientMutationId: body.clientMutationId }),
         };
         const { scan, created } = await scanService.create(userId, params.projectId, data);
-        const responseBody = ScanResponseSchema.parse(scan);
+
+        const uploads: { thumbnail?: ScanUploadUrl; scanFile?: ScanUploadUrl } = {};
+        if (body.thumbnail !== undefined) {
+          const result = await scanAssetService.createUploadSession(userId, scan.id, {
+            assetType: 'THUMBNAIL',
+            contentType: body.thumbnail.contentType,
+            sizeBytes: body.thumbnail.sizeBytes,
+            ...(body.thumbnail.checksum === undefined ? {} : { checksum: body.thumbnail.checksum }),
+          });
+          uploads.thumbnail = ScanUploadUrlSchema.parse({
+            uploadSessionId: result.uploadSessionId,
+            assetId: result.assetId,
+            uploadUrl: result.uploadUrl,
+            uploadUrlExpiresAt: result.uploadUrlExpiresAt,
+          });
+        }
+        if (body.scanFile !== undefined) {
+          const result = await scanAssetService.createUploadSession(userId, scan.id, {
+            assetType: 'MODEL',
+            contentType: body.scanFile.contentType,
+            sizeBytes: body.scanFile.sizeBytes,
+            checksum: body.scanFile.checksum,
+            modelVersion: body.scanFile.modelVersion,
+          });
+          uploads.scanFile = ScanUploadUrlSchema.parse({
+            uploadSessionId: result.uploadSessionId,
+            assetId: result.assetId,
+            uploadUrl: result.uploadUrl,
+            uploadUrlExpiresAt: result.uploadUrlExpiresAt,
+          });
+        }
+
+        const hasUploads = body.thumbnail !== undefined || body.scanFile !== undefined;
+        const responseBody = hasUploads
+          ? CreateScanResponseSchema.parse({ ...scan, uploads })
+          : ScanResponseSchema.parse(scan);
 
         response.status(created ? 201 : 200).json(responseBody);
       } catch (error) {

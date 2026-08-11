@@ -46,7 +46,8 @@ describe('loadConfig', () => {
       storageUseSsl: false,
       storageUploadUrlTtlSeconds: 900,
       storageDownloadUrlTtlSeconds: 60,
-      assetMaxModelSizeBytes: 500_000_000,
+      assetMinModelSizeBytes: 10_000_000,
+      assetMaxModelSizeBytes: 100_000_000,
       assetMaxThumbnailSizeBytes: 10_000_000,
     });
   });
@@ -301,5 +302,26 @@ describe('loadConfig', () => {
         AUTH_REFRESH_TOKEN_TTL_SECONDS: '1200',
       }),
     ).toThrow(/greater than access token TTL/);
+  });
+
+  it('parses the configured model size bounds', () => {
+    const config = loadConfig({
+      ...validEnvironment,
+      ASSET_MIN_MODEL_SIZE_BYTES: '20000000',
+      ASSET_MAX_MODEL_SIZE_BYTES: '80000000',
+    });
+
+    expect(config.assetMinModelSizeBytes).toBe(20_000_000);
+    expect(config.assetMaxModelSizeBytes).toBe(80_000_000);
+  });
+
+  it('rejects a model size maximum that does not exceed the minimum', () => {
+    expect(() =>
+      loadConfig({
+        ...validEnvironment,
+        ASSET_MIN_MODEL_SIZE_BYTES: '50000000',
+        ASSET_MAX_MODEL_SIZE_BYTES: '50000000',
+      }),
+    ).toThrow(/greater than ASSET_MIN_MODEL_SIZE_BYTES/);
   });
 });

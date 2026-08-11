@@ -36,6 +36,14 @@ describe('LocalStorageAdapter', () => {
     expect(url.expiresAt).toEqual(expiresAt);
   });
 
+  it('returns a stable display URL for an object', async () => {
+    const adapter = new LocalStorageAdapter({ baseUrl: 'http://minio.local' });
+
+    await expect(adapter.createDisplayUrl('scans/scan-1/thumbnail')).resolves.toBe(
+      'http://minio.local/download/scans/scan-1/thumbnail',
+    );
+  });
+
   it('cannot verify objects independently and assumes the upload is valid', async () => {
     const adapter = new LocalStorageAdapter();
 
