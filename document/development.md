@@ -74,6 +74,14 @@ no additional service. `TRUST_PROXY` remains empty for direct local and Compose
 connections. Set it only when requests arrive exclusively through a known
 reverse-proxy topology.
 
+The `postman/` directory holds the operator-facing API test collection
+(`RoomScan - Staging.postman_collection.json`) and its environment
+(`RoomScan.postman_environment.json`). Keep both in sync with the public HTTP
+surface: whenever a public route, request field, or response shape changes, add
+or update the matching request in the collection on the same branch. The
+collection description documents setup, the sequential upload flow, and the
+invitation sharing flow (including the `409` states and token rotation).
+
 ## Before handoff
 
 First complete the branch documentation gate in

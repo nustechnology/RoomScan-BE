@@ -4,3 +4,6 @@ coverage
 .codegraph
 src/generated/prisma
 yarn.lock
+# Postman exports use Postman's native tab formatting; keep them as-is so
+# re-exporting from Postman does not create diff churn.
+postman

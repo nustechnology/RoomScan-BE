@@ -280,6 +280,13 @@ Health, readiness, Swagger and raw OpenAPI are exempt. Exceeded quotas return
 429 with `RATE_LIMIT_EXCEEDED`, `RateLimit`, `RateLimit-Policy`, `Retry-After`
 and `x-request-id`.
 
+A Postman collection covering the full API surface lives in `postman/`
+(`RoomScan - Staging.postman_collection.json` plus
+`RoomScan.postman_environment.json`). Import both into Postman, select the
+`RoomScan` environment, and follow the setup notes in the collection
+description. It includes the sharing and invitation endpoints, notes, scan
+assets, and upload flow.
+
 ## Environment variables
 
 | Variable                                                 | Required | Default                                     | Description                                                         |
