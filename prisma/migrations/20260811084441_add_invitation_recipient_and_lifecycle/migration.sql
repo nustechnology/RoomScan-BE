@@ -25,7 +25,7 @@ ADD COLUMN     "recipientEmail" VARCHAR(320);
 
 -- Revoke legacy PENDING invitations that have no recipient address so their
 -- links stop working, then backfill a placeholder and make the column required.
-UPDATE "invitations" SET "status" = 'REVOKED', "revokedAt" = NOW() WHERE "recipientEmail" IS NULL AND "status" = 'PENDING';
+UPDATE "invitations" SET "status" = 'REVOKED', "revokedAt" = NOW(), "updatedAt" = NOW() WHERE "recipientEmail" IS NULL AND "status" = 'PENDING';
 
 -- Backfill existing rows before making the column required.
 UPDATE "invitations" SET "recipientEmail" = '' WHERE "recipientEmail" IS NULL;

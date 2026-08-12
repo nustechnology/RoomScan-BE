@@ -225,6 +225,7 @@ export class PrismaShareRepository implements ShareRepository {
       const updated = await transaction.invitation.updateMany({
         where: {
           id: invitationId,
+          projectId,
           status: InvitationStatus.PENDING,
           expiresAt: { gt: acceptedAt },
         },

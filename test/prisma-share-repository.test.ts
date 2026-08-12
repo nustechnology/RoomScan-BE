@@ -299,7 +299,12 @@ describe('PrismaShareRepository', () => {
     expect(result?.status).toBe('ACCEPTED');
     expect(transaction).toHaveBeenCalledOnce();
     expect(invitation.updateMany).toHaveBeenCalledWith({
-      where: { id: INVITATION_ID, status: 'PENDING', expiresAt: { gt: NOW } },
+      where: {
+        id: INVITATION_ID,
+        projectId: PROJECT_ID,
+        status: 'PENDING',
+        expiresAt: { gt: NOW },
+      },
       data: { status: 'ACCEPTED', acceptedAt: NOW, acceptedByUserId: VIEWER_ID },
     });
     expect(projectAccess.upsert).toHaveBeenCalledWith({
@@ -328,6 +333,31 @@ describe('PrismaShareRepository', () => {
     await expect(
       new PrismaShareRepository(client).acceptInvitation(INVITATION_ID, PROJECT_ID, VIEWER_ID, NOW),
     ).resolves.toBeNull();
+  });
+
+  it('acceptInvitation returns null when the invitation belongs to a different project', async () => {
+    const { client, invitation, projectAccess } = createClient();
+    const otherProjectId = 'c1d2e3f4-5a6b-4780-9abc-def012345678';
+    invitation.updateMany.mockResolvedValue({ count: 0 });
+
+    await expect(
+      new PrismaShareRepository(client).acceptInvitation(
+        INVITATION_ID,
+        otherProjectId,
+        VIEWER_ID,
+        NOW,
+      ),
+    ).resolves.toBeNull();
+    expect(invitation.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: INVITATION_ID,
+        projectId: otherProjectId,
+        status: 'PENDING',
+        expiresAt: { gt: NOW },
+      },
+      data: { status: 'ACCEPTED', acceptedAt: NOW, acceptedByUserId: VIEWER_ID },
+    });
+    expect(projectAccess.upsert).not.toHaveBeenCalled();
   });
 
   it('declineInvitation marks the invitation DECLINED', async () => {

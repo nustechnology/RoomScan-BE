@@ -1,12 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import type { IncomingMessage } from 'node:http';
 
 import compression from 'compression';
 import cors from 'cors';
 import express, { type Express } from 'express';
 import helmet from 'helmet';
 import type { Logger } from 'pino';
-import { pinoHttp, stdSerializers } from 'pino-http';
+import { pinoHttp } from 'pino-http';
+import type { StdSerializedResults } from 'pino-http';
 import swaggerUi from 'swagger-ui-express';
 
 import { errorHandler } from './common/middleware/error-handler.js';
@@ -51,10 +51,19 @@ export interface AppDependencies {
   clock?: () => Date;
 }
 
-const INVITATION_TOKEN_URL_PATTERN = /\/api\/v1\/invitations\/[A-Za-z0-9_-]{43}/g;
+const INVITATION_TOKEN_PATTERN = /(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{43}(?![A-Za-z0-9_-])/gi;
 
-function redactInvitationToken(url: string): string {
-  return url.replace(INVITATION_TOKEN_URL_PATTERN, '/api/v1/invitations/[REDACTED]');
+export function redactInvitationToken(value: string): string {
+  return value.replace(INVITATION_TOKEN_PATTERN, '[REDACTED]');
+}
+
+function redactTokenFields(value: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(value).map(([key, entry]) => [
+      key,
+      typeof entry === 'string' ? redactInvitationToken(entry) : entry,
+    ]),
+  );
 }
 
 export function createApp({
@@ -93,11 +102,12 @@ export function createApp({
         return requestId;
       },
       serializers: {
-        req(request: IncomingMessage) {
-          const serialized = stdSerializers.req(request);
+        req(request: StdSerializedResults['req']) {
           return {
-            ...serialized,
-            url: redactInvitationToken(serialized.url ?? ''),
+            ...request,
+            url: redactInvitationToken(request.url ?? ''),
+            ...(request.query === undefined ? {} : { query: redactTokenFields(request.query) }),
+            ...(request.params === undefined ? {} : { params: redactTokenFields(request.params) }),
           };
         },
       },

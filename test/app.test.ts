@@ -3,7 +3,7 @@ import request from 'supertest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
-import { createApp } from '../src/app.js';
+import { createApp, redactInvitationToken } from '../src/app.js';
 import type {
   AccessTokenVerifier,
   CurrentUserRepository,
@@ -453,12 +453,20 @@ describe('RoomScan HTTP application', () => {
   });
 
   it('redacts the invitation token from request access logs', async () => {
-    const records: Array<{ req?: { url?: string } }> = [];
+    interface RequestLogRecord {
+      req?: {
+        url?: string;
+        query?: Record<string, unknown>;
+        remoteAddress?: string;
+        remotePort?: number;
+      };
+    }
+    const records: RequestLogRecord[] = [];
     const collectingLogger = pino(
       { level: 'info' },
       {
         write(chunk: string) {
-          records.push(JSON.parse(chunk) as { req?: { url?: string } });
+          records.push(JSON.parse(chunk) as RequestLogRecord);
         },
       },
     );
@@ -493,10 +501,51 @@ describe('RoomScan HTTP application', () => {
     });
 
     await request(loggingApp).get(`/api/v1/invitations/${token}`).expect(200);
+    await request(loggingApp).get(`/api/v1/invitations?token=${token}`).expect(404);
 
-    const accessLog = records.find((record) => record.req?.url !== undefined);
-    expect(accessLog?.req?.url).toBe('/api/v1/invitations/[REDACTED]');
-    expect(JSON.stringify(records)).not.toContain(token);
+    const pathLog = records.find((record) => record.req?.url?.startsWith('/api/v1/invitations/'));
+    expect(pathLog?.req?.url).toBe('/api/v1/invitations/[REDACTED]');
+    expect(pathLog?.req?.remoteAddress).toEqual(expect.any(String));
+    expect(pathLog?.req?.remotePort).toEqual(expect.any(Number));
+
+    const queryLog = records.find((record) => record.req?.url?.includes('?token='));
+    expect(queryLog?.req?.url).toBe('/api/v1/invitations?token=[REDACTED]');
+    expect(queryLog?.req?.query).toEqual({ token: '[REDACTED]' });
+
+    expect(JSON.stringify(records.map((record) => record.req))).not.toContain(token);
+  });
+
+  it('redacts only bounded 43-character base64url tokens', () => {
+    const token = 'AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-abXYZ';
+
+    expect(redactInvitationToken(`/api/v1/invitations/${token}`)).toBe(
+      '/api/v1/invitations/[REDACTED]',
+    );
+    expect(redactInvitationToken(`/API/V1/INVITATIONS/${token}`)).toBe(
+      '/API/V1/INVITATIONS/[REDACTED]',
+    );
+    expect(redactInvitationToken(`/api/v1/invitations/${token}/accept`)).toBe(
+      '/api/v1/invitations/[REDACTED]/accept',
+    );
+    expect(redactInvitationToken(`/api/v1/invitations/${token}/decline`)).toBe(
+      '/api/v1/invitations/[REDACTED]/decline',
+    );
+    expect(redactInvitationToken(`/api/v1/invitations/${token}?from=email`)).toBe(
+      '/api/v1/invitations/[REDACTED]?from=email',
+    );
+    expect(redactInvitationToken(`/api/v1/invitations?token=${token}`)).toBe(
+      '/api/v1/invitations?token=[REDACTED]',
+    );
+  });
+
+  it('does not partially redact an overlong token segment', () => {
+    const token = 'AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-abXYZ';
+    const overlong = `${token}x`;
+
+    expect(redactInvitationToken(`/api/v1/invitations/${overlong}`)).toBe(
+      `/api/v1/invitations/${overlong}`,
+    );
+    expect(redactInvitationToken(`/api/v1/invitations/${overlong}`)).not.toContain('[REDACTED]');
   });
 
   it('returns a safe internal error when authentication fails unexpectedly', async () => {
