@@ -168,6 +168,10 @@ describe('loadConfig', () => {
     const config = loadConfig({
       ...validEnvironment,
       NODE_ENV: 'staging',
+      MAIL_PROVIDER: 'smtp',
+      SMTP_HOST: 'sandbox.smtp.mailtrap.io',
+      SMTP_USER: 'mailtrap-user',
+      SMTP_PASS: 'mailtrap-pass',
     });
 
     expect(config.nodeEnv).toBe('staging');
@@ -394,19 +398,20 @@ describe('loadConfig', () => {
     ).toThrow(RegExp(`${name} is required when MAIL_PROVIDER=smtp`));
   });
 
-  it('rejects the log mail provider in production', () => {
+  it.each(['staging', 'production'])('rejects the log mail provider in NODE_ENV=%s', (nodeEnv) => {
     expect(() =>
       loadConfig({
         ...validEnvironment,
-        NODE_ENV: 'production',
+        NODE_ENV: nodeEnv,
         MAIL_PROVIDER: 'log',
       }),
-    ).toThrow(/MAIL_PROVIDER=log is not allowed when NODE_ENV=production/);
+    ).toThrow(/MAIL_PROVIDER=log is only allowed when NODE_ENV is development or test/);
   });
 
-  it('allows the log mail provider outside production', () => {
+  it.each(['development', 'test'])('allows the log mail provider in NODE_ENV=%s', (nodeEnv) => {
     const config = loadConfig({
       ...validEnvironment,
+      NODE_ENV: nodeEnv,
       MAIL_PROVIDER: 'log',
     });
 

@@ -78,9 +78,6 @@ function createService(overrides: Partial<ShareRepository> = {}) {
     findByTokenHash: vi
       .fn<ShareRepository['findByTokenHash']>()
       .mockResolvedValue(invitationWithProject()),
-    findByProjectAndEmail: vi
-      .fn<ShareRepository['findByProjectAndEmail']>()
-      .mockResolvedValue(null),
     findInvitationById: vi
       .fn<ShareRepository['findInvitationById']>()
       .mockResolvedValue(invitationRecord()),
@@ -215,15 +212,14 @@ describe('ShareService.createInvitation', () => {
     ).rejects.toBeInstanceOf(ProjectNotShareableError);
   });
 
-  it('rejects a duplicate pending invitation for the same email', async () => {
-    const { service, mocks } = createService({
-      findByProjectAndEmail: vi.fn().mockResolvedValue(invitationRecord()),
-    });
+  it('propagates a concurrent duplicate pending invitation as InvitationAlreadySentError', async () => {
+    const createInvitation = vi.fn().mockRejectedValue(new InvitationAlreadySentError());
+    const { service } = createService({ createInvitation });
 
     await expect(
       service.createInvitation(OWNER_ID, PROJECT_ID, { recipientEmail: RECIPIENT_EMAIL }),
     ).rejects.toBeInstanceOf(InvitationAlreadySentError);
-    expect(mocks.createInvitation).not.toHaveBeenCalled();
+    expect(createInvitation).toHaveBeenCalled();
   });
 
   it('still creates the invitation when the email fails to send', async () => {

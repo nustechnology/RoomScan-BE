@@ -251,10 +251,14 @@ An `Invitation` row is a per-recipient link record: `recipientEmail`, `tokenHash
 bytes encoded as base64url and the `invitationUrl` returned to the owner is
 `{INVITATION_BASE_URL}/invitations/{rawToken}`. Creating an invitation sends an
 AC5-style email built by `buildInvitationEmail` (project scope); a delivery
-failure is logged and never fails the request. One pending invitation is allowed
-per `(project, recipientEmail)`; a duplicate returns `409
-INVITATION_ALREADY_SENT`. Resending rotates the token, extends `expiresAt`,
-updates `sentAt`, and re-sends the email.
+failure is logged and never fails the request. A partial unique index on
+`(projectId, recipientEmail)` for `PENDING` rows enforces at most one pending
+link per recipient: the repository create revokes any expired pending link for
+the same `(project, recipientEmail)` and inserts the new link in one database
+transaction, so a concurrent duplicate raises the unique-constraint violation
+and is mapped to `409 INVITATION_ALREADY_SENT`. An expired link therefore does
+not block re-inviting the recipient. Resending rotates the token, extends
+`expiresAt`, updates `sentAt`, and re-sends the email.
 
 Acceptance is open: the first signed-in user to redeem a pending link makes it
 `ACCEPTED` (recording `acceptedAt` and `acceptedByUserId`) and receives an
@@ -287,13 +291,14 @@ which filters on active (`revokedAt: null`) access on every request.
 `src/infrastructure/mail` defines a narrow `Mailer` interface (`sendMail`), plus
 `LogMailer` and `SmtpMailer` adapters selected by `MAIL_PROVIDER` in the
 composition root. `LogMailer` writes message metadata to the application log and
-mirrors the `LocalStorageAdapter` pattern: `MAIL_PROVIDER=log` is rejected when
-`NODE_ENV=production`. `SmtpMailer` wraps an injected nodemailer transporter
-(`createNodemailerTransport` builds one from `SMTP_HOST`, `SMTP_PORT`,
-`SMTP_USER`, `SMTP_PASS`, and `SMTP_SECURE`) and sends with the configured
-`MAIL_FROM` address; the transporter is injected so tests use a fake and never
-touch the network. Module routes do not change when the provider changes, and
-`ShareService` treats a failed send as a logged warning.
+is only allowed when `NODE_ENV` is development or test; staging and production
+reject `MAIL_PROVIDER=log` and require the SMTP adapter. `SmtpMailer` wraps an
+injected nodemailer transporter (`createNodemailerTransport` builds one from
+`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, and `SMTP_SECURE`, with
+explicit connection, greeting, and socket timeouts) and sends with the
+configured `MAIL_FROM` address; the transporter is injected so tests use a fake
+and never touch the network. Module routes do not change when the provider
+changes, and `ShareService` treats a failed send as a logged warning.
 
 ## Storage
 

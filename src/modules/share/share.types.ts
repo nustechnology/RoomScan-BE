@@ -134,10 +134,6 @@ export interface ShareRepository {
     sentAt: Date;
   }): Promise<InvitationRecord>;
   findByTokenHash(tokenHash: string): Promise<InvitationWithProject | null>;
-  findByProjectAndEmail(
-    projectId: string,
-    recipientEmail: string,
-  ): Promise<InvitationRecord | null>;
   findInvitationById(id: string): Promise<InvitationRecord | null>;
   acceptInvitation(
     invitationId: string,

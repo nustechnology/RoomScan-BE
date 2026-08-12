@@ -254,9 +254,11 @@ Projects are shared through expiring invitation links addressed to a recipient
 email. The Owner creates an invitation (`POST /api/v1/projects/:projectId/invitations`,
 with `recipientEmail` and optional `expiresInSeconds`) only after the project
 has at least one scan with an uploaded model; the API returns an `invitationUrl`
-whose raw token is random and never stored (only its SHA-256 hash is), and sends
+whose raw token is random and never stored (only its SHA-256 hash is) and is
+redacted from request access logs, and sends
 an invitation email to the recipient. One pending invitation is allowed per
-`(project, email)` (`409` otherwise). Recipients can preview the link without
+`(project, email)` (`409` otherwise), and an expired link does not block
+re-inviting the recipient. Recipients can preview the link without
 signing in, then accept to gain Viewer access or decline; a pending link can be
 re-sent (`POST /api/v1/invitations/:invitationId/resend`), which rotates the
 token and extends the expiry. The Owner can list pending links and active
@@ -338,13 +340,14 @@ additional store. Before deploying behind a reverse proxy, set `TRUST_PROXY` to
 the exact proxy hop count or trusted IP/CIDR list. Never set it to `true`.
 
 Invitation email follows the same pattern: `MAIL_PROVIDER=log` (the default)
-writes messages to the application log for development and tests and is rejected
-in production, while `MAIL_PROVIDER=smtp` sends through SMTP (for example the
-Mailtrap sandbox) using `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, and
-`SMTP_SECURE`. The production-style Compose API defaults to `MAIL_PROVIDER=smtp`,
-so it requires `SMTP_HOST`, `SMTP_USER`, and `SMTP_PASS` in `.env` (like the
-MinIO credentials); without them the API container refuses to start. A failed
-email send is logged and never fails the invitation request.
+writes messages to the application log and is only allowed in development and
+test, while `MAIL_PROVIDER=smtp` sends through SMTP (for example the Mailtrap
+sandbox) using `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, and
+`SMTP_SECURE`. The production-style Compose API runs `NODE_ENV=production`,
+where `MAIL_PROVIDER=log` is rejected, so set `MAIL_PROVIDER=smtp` with
+`SMTP_HOST`, `SMTP_USER`, and `SMTP_PASS` in `.env` (like the MinIO
+credentials); without them the API container refuses to start. A failed email
+send is logged and never fails the invitation request.
 
 ## Project scripts
 

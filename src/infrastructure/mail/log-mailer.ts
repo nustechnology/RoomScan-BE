@@ -5,7 +5,7 @@ import type { Mailer, MailMessage } from './mailer.types.js';
 /**
  * Development-only mailer that writes the message metadata to the application
  * log instead of delivering it. It mirrors the LocalStorageAdapter pattern:
- * `MAIL_PROVIDER=log` is rejected when `NODE_ENV=production`.
+ * `MAIL_PROVIDER=log` is only allowed when `NODE_ENV` is development or test.
  */
 export class LogMailer implements Mailer {
   readonly #logger: Logger;

@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto';
+import type { IncomingMessage } from 'node:http';
 
 import compression from 'compression';
 import cors from 'cors';
 import express, { type Express } from 'express';
 import helmet from 'helmet';
 import type { Logger } from 'pino';
-import { pinoHttp } from 'pino-http';
+import { pinoHttp, stdSerializers } from 'pino-http';
 import swaggerUi from 'swagger-ui-express';
 
 import { errorHandler } from './common/middleware/error-handler.js';
@@ -50,6 +51,12 @@ export interface AppDependencies {
   clock?: () => Date;
 }
 
+const INVITATION_TOKEN_URL_PATTERN = /\/api\/v1\/invitations\/[A-Za-z0-9_-]{43}/g;
+
+function redactInvitationToken(url: string): string {
+  return url.replace(INVITATION_TOKEN_URL_PATTERN, '/api/v1/invitations/[REDACTED]');
+}
+
 export function createApp({
   config,
   database,
@@ -84,6 +91,15 @@ export function createApp({
 
         response.setHeader('x-request-id', requestId);
         return requestId;
+      },
+      serializers: {
+        req(request: IncomingMessage) {
+          const serialized = stdSerializers.req(request);
+          return {
+            ...serialized,
+            url: redactInvitationToken(serialized.url ?? ''),
+          };
+        },
       },
     }),
   );

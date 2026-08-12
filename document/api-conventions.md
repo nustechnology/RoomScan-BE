@@ -15,8 +15,9 @@
 - Notes are `POST` and `GET` at `/api/v1/scans/:scanId/notes`, and `GET`,
   `PATCH`, and `DELETE` at `/api/v1/notes/:noteId`, with the move operation at
   `PATCH /api/v1/notes/:noteId/position`.
-- Sharing creates and revokes invitation links at
-  `POST /api/v1/projects/:projectId/invitations` and
+- Sharing creates, resends, and revokes invitation links at
+  `POST /api/v1/projects/:projectId/invitations`,
+  `POST /api/v1/invitations/:invitationId/resend`, and
   `DELETE /api/v1/invitations/:invitationId`; recipients preview, accept, and
   decline at `GET`, `POST`, and `POST` under `/api/v1/invitations/:token`; and
   share management lists and revokes Viewer access at
@@ -623,9 +624,10 @@ signed-in user who possesses the link) accepts it and receives Viewer access.
 Each invitation is per-recipient: creating a second invitation for the same
 email while the first is still pending returns `409 INVITATION_ALREADY_SENT`.
 The raw token is an opaque, random base64url string of 32 bytes; only its
-SHA-256 hash is stored, so a leaked database never exposes a usable link. A
-project is shareable only when it has at least one non-deleted scan with an
-uploaded model (`assetStatus = UPLOADED`).
+SHA-256 hash is stored, so a leaked database never exposes a usable link. The
+token is also redacted from request access logs so it is never emitted to log
+shippers. A project is shareable only when it has at least one non-deleted scan
+with an uploaded model (`assetStatus = UPLOADED`).
 
 | Method   | Endpoint                                     | Result                                                      |
 | -------- | -------------------------------------------- | ----------------------------------------------------------- |
@@ -790,7 +792,10 @@ Business rules:
 - A project is shareable only after it has at least one uploaded scan model.
 - One pending invitation per `(project, recipientEmail)`: creating a duplicate
   returns `409 INVITATION_ALREADY_SENT`. Re-inviting an email whose earlier
-  invitation is revoked, declined, or accepted creates a fresh invitation.
+  invitation is revoked, declined, accepted, or expired creates a fresh
+  invitation. A partial unique index on `(projectId, recipientEmail)` for
+  `PENDING` rows makes creation atomic, so concurrent duplicates resolve to
+  `409` instead of creating a second pending link.
 - Invitations are per-recipient: the first acceptance marks the invitation
   `ACCEPTED`; an already accepted or declined invitation cannot be accepted
   again. Acceptance is open (any signed-in user with the link can accept)

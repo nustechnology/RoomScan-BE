@@ -170,11 +170,15 @@ export const environmentSchema = z
       });
     }
 
-    if (environment.NODE_ENV === 'production' && environment.MAIL_PROVIDER === 'log') {
+    if (
+      environment.MAIL_PROVIDER === 'log' &&
+      environment.NODE_ENV !== 'development' &&
+      environment.NODE_ENV !== 'test'
+    ) {
       context.addIssue({
         code: 'custom',
         path: ['MAIL_PROVIDER'],
-        message: 'MAIL_PROVIDER=log is not allowed when NODE_ENV=production',
+        message: 'MAIL_PROVIDER=log is only allowed when NODE_ENV is development or test',
       });
     }
 

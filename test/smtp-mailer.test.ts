@@ -5,6 +5,12 @@ import { SmtpMailer, createNodemailerTransport } from '../src/infrastructure/mai
 
 const FROM = 'RoomScan App <notifications@roomscan.app>';
 
+const { createTransport } = vi.hoisted(() => ({ createTransport: vi.fn() }));
+
+vi.mock('nodemailer', () => ({
+  default: { createTransport },
+}));
+
 describe('SmtpMailer', () => {
   it('forwards the message with the configured from address', async () => {
     const sendMail = vi.fn().mockResolvedValue({});
@@ -63,6 +69,9 @@ describe('SmtpMailer', () => {
 
 describe('createNodemailerTransport', () => {
   it('builds a transporter with a sendMail function', () => {
+    const sendMail = vi.fn();
+    createTransport.mockReturnValue({ sendMail });
+
     const transport = createNodemailerTransport({
       host: 'sandbox.smtp.mailtrap.io',
       port: 2525,
@@ -71,6 +80,30 @@ describe('createNodemailerTransport', () => {
       secure: false,
     });
 
-    expect(typeof transport.sendMail).toBe('function');
+    expect(transport.sendMail).toBe(sendMail);
+  });
+
+  it('sets explicit connection timeouts so a hung SMTP server cannot stall a request', () => {
+    createTransport.mockReturnValue({ sendMail: vi.fn() });
+
+    createNodemailerTransport({
+      host: 'sandbox.smtp.mailtrap.io',
+      port: 2525,
+      user: 'mailtrap-user',
+      pass: 'mailtrap-pass',
+      secure: false,
+    });
+
+    expect(createTransport).toHaveBeenCalledWith(
+      expect.objectContaining({
+        host: 'sandbox.smtp.mailtrap.io',
+        port: 2525,
+        secure: false,
+        auth: { user: 'mailtrap-user', pass: 'mailtrap-pass' },
+        connectionTimeout: 10_000,
+        greetingTimeout: 10_000,
+        socketTimeout: 10_000,
+      }),
+    );
   });
 });

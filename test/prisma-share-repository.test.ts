@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import type { PrismaClient } from '../src/generated/prisma/client.js';
+import { Prisma, type PrismaClient } from '../src/generated/prisma/client.js';
 import { PrismaShareRepository } from '../src/infrastructure/database/prisma-share-repository.js';
+import { InvitationAlreadySentError } from '../src/modules/share/share.errors.js';
 
 const PROJECT_ID = 'a1b2c3d4-e5f6-4890-abcd-ef1234567890';
 const OWNER_ID = 'eb5d278f-c857-45c7-887d-7be65288cb75';
@@ -64,12 +65,17 @@ function createClient() {
       operation as (tx: {
         invitation: {
           updateMany: typeof invitation.updateMany;
+          create: typeof invitation.create;
           findUnique: typeof invitation.findUnique;
         };
         projectAccess: { upsert: typeof projectAccess.upsert };
       }) => Promise<unknown>
     )({
-      invitation: { updateMany: invitation.updateMany, findUnique: invitation.findUnique },
+      invitation: {
+        updateMany: invitation.updateMany,
+        create: invitation.create,
+        findUnique: invitation.findUnique,
+      },
       projectAccess: { upsert: projectAccess.upsert },
     });
   });
@@ -154,7 +160,7 @@ describe('PrismaShareRepository', () => {
     );
   });
 
-  it('createInvitation stores the recipient and only the token hash', async () => {
+  it('createInvitation revokes expired pending invitations and stores the recipient', async () => {
     const { client, invitation } = createClient();
 
     await new PrismaShareRepository(client).createInvitation({
@@ -166,6 +172,15 @@ describe('PrismaShareRepository', () => {
       sentAt: NOW,
     });
 
+    expect(invitation.updateMany).toHaveBeenCalledWith({
+      where: {
+        projectId: PROJECT_ID,
+        recipientEmail: RECIPIENT_EMAIL,
+        status: 'PENDING',
+        expiresAt: { lte: NOW },
+      },
+      data: { status: 'REVOKED', revokedAt: NOW },
+    });
     expect(invitation.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: {
@@ -179,6 +194,43 @@ describe('PrismaShareRepository', () => {
         },
       }),
     );
+  });
+
+  it('createInvitation maps a concurrent duplicate to InvitationAlreadySentError', async () => {
+    const { client, invitation } = createClient();
+    const conflict = new Prisma.PrismaClientKnownRequestError('unique constraint', {
+      code: 'P2002',
+      clientVersion: 'test',
+      meta: { target: ['projectId', 'recipientEmail'] },
+    });
+    invitation.create.mockRejectedValueOnce(conflict);
+
+    await expect(
+      new PrismaShareRepository(client).createInvitation({
+        projectId: PROJECT_ID,
+        createdById: OWNER_ID,
+        recipientEmail: RECIPIENT_EMAIL,
+        tokenHash: TOKEN_HASH,
+        expiresAt: NOW,
+        sentAt: NOW,
+      }),
+    ).rejects.toBeInstanceOf(InvitationAlreadySentError);
+  });
+
+  it('createInvitation rethrows non-duplicate errors', async () => {
+    const { client, invitation } = createClient();
+    invitation.create.mockRejectedValueOnce(new Error('boom'));
+
+    await expect(
+      new PrismaShareRepository(client).createInvitation({
+        projectId: PROJECT_ID,
+        createdById: OWNER_ID,
+        recipientEmail: RECIPIENT_EMAIL,
+        tokenHash: TOKEN_HASH,
+        expiresAt: NOW,
+        sentAt: NOW,
+      }),
+    ).rejects.toThrow('boom');
   });
 
   it('findByTokenHash returns the invitation with its project summary', async () => {
@@ -218,23 +270,6 @@ describe('PrismaShareRepository', () => {
     await expect(new PrismaShareRepository(client).findByTokenHash(TOKEN_HASH)).resolves.toBeNull();
   });
 
-  it('findByProjectAndEmail returns the latest invitation for a recipient', async () => {
-    const { client, invitation } = createClient();
-
-    const result = await new PrismaShareRepository(client).findByProjectAndEmail(
-      PROJECT_ID,
-      RECIPIENT_EMAIL,
-    );
-
-    expect(result?.recipientEmail).toBe(RECIPIENT_EMAIL);
-    expect(invitation.findFirst).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { projectId: PROJECT_ID, recipientEmail: RECIPIENT_EMAIL },
-        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-      }),
-    );
-  });
-
   it('findInvitationById returns the stored invitation', async () => {
     const { client, invitation } = createClient();
 
@@ -264,7 +299,7 @@ describe('PrismaShareRepository', () => {
     expect(result?.status).toBe('ACCEPTED');
     expect(transaction).toHaveBeenCalledOnce();
     expect(invitation.updateMany).toHaveBeenCalledWith({
-      where: { id: INVITATION_ID, status: 'PENDING' },
+      where: { id: INVITATION_ID, status: 'PENDING', expiresAt: { gt: NOW } },
       data: { status: 'ACCEPTED', acceptedAt: NOW, acceptedByUserId: VIEWER_ID },
     });
     expect(projectAccess.upsert).toHaveBeenCalledWith({

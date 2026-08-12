@@ -21,6 +21,9 @@ export function createNodemailerTransport(
       user: options.user,
       pass: options.pass,
     },
+    connectionTimeout: 10_000,
+    greetingTimeout: 10_000,
+    socketTimeout: 10_000,
   });
 }
 

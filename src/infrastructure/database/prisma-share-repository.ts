@@ -1,9 +1,10 @@
-import type { PrismaClient } from '../../generated/prisma/client.js';
+import { Prisma, type PrismaClient } from '../../generated/prisma/client.js';
 import {
   AssetStatus,
   InvitationStatus,
   ProjectRole as PrismaProjectRole,
 } from '../../generated/prisma/enums.js';
+import { InvitationAlreadySentError } from '../../modules/share/share.errors.js';
 import type {
   InvitationRecord,
   InvitationWithProject,
@@ -129,19 +130,41 @@ export class PrismaShareRepository implements ShareRepository {
     expiresAt: Date;
     sentAt: Date;
   }): Promise<InvitationRecord> {
-    const row = await this.#client.invitation.create({
-      data: {
-        projectId: data.projectId,
-        createdById: data.createdById,
-        recipientEmail: data.recipientEmail,
-        tokenHash: data.tokenHash,
-        status: InvitationStatus.PENDING,
-        expiresAt: data.expiresAt,
-        sentAt: data.sentAt,
-      },
-      select: invitationSelect,
+    return await this.#client.$transaction(async (transaction) => {
+      await transaction.invitation.updateMany({
+        where: {
+          projectId: data.projectId,
+          recipientEmail: data.recipientEmail,
+          status: InvitationStatus.PENDING,
+          expiresAt: { lte: data.sentAt },
+        },
+        data: {
+          status: InvitationStatus.REVOKED,
+          revokedAt: data.sentAt,
+        },
+      });
+
+      try {
+        const row = await transaction.invitation.create({
+          data: {
+            projectId: data.projectId,
+            createdById: data.createdById,
+            recipientEmail: data.recipientEmail,
+            tokenHash: data.tokenHash,
+            status: InvitationStatus.PENDING,
+            expiresAt: data.expiresAt,
+            sentAt: data.sentAt,
+          },
+          select: invitationSelect,
+        });
+        return toInvitationRecord(row);
+      } catch (error) {
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+          throw new InvitationAlreadySentError();
+        }
+        throw error;
+      }
     });
-    return toInvitationRecord(row);
   }
 
   async findByTokenHash(tokenHash: string): Promise<InvitationWithProject | null> {
@@ -184,18 +207,6 @@ export class PrismaShareRepository implements ShareRepository {
     };
   }
 
-  async findByProjectAndEmail(
-    projectId: string,
-    recipientEmail: string,
-  ): Promise<InvitationRecord | null> {
-    const row = await this.#client.invitation.findFirst({
-      where: { projectId, recipientEmail },
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-      select: invitationSelect,
-    });
-    return row === null ? null : toInvitationRecord(row);
-  }
-
   async findInvitationById(id: string): Promise<InvitationRecord | null> {
     const row = await this.#client.invitation.findUnique({
       where: { id },
@@ -212,7 +223,11 @@ export class PrismaShareRepository implements ShareRepository {
   ): Promise<InvitationRecord | null> {
     return await this.#client.$transaction(async (transaction) => {
       const updated = await transaction.invitation.updateMany({
-        where: { id: invitationId, status: InvitationStatus.PENDING },
+        where: {
+          id: invitationId,
+          status: InvitationStatus.PENDING,
+          expiresAt: { gt: acceptedAt },
+        },
         data: {
           status: InvitationStatus.ACCEPTED,
           acceptedAt,

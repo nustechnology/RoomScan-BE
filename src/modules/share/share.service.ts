@@ -9,7 +9,6 @@ import {
   AccessAlreadyExistsError,
   CannotAcceptOwnInvitationError,
   InvitationAlreadyAcceptedError,
-  InvitationAlreadySentError,
   InvitationDeclinedError,
   InvitationExpiredError,
   InvitationNotFoundError,
@@ -166,11 +165,6 @@ export class ShareService {
     }
     if (!(await this.#repository.hasUploadedModel(projectId))) {
       throw new ProjectNotShareableError();
-    }
-
-    const existing = await this.#repository.findByProjectAndEmail(projectId, data.recipientEmail);
-    if (existing !== null && existing.status === 'PENDING') {
-      throw new InvitationAlreadySentError();
     }
 
     const now = this.#clock();

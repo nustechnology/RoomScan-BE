@@ -141,13 +141,17 @@ constraint, a unique `idempotencyKey`, and an index on `(scanId, status)`. The
 `createdById`. The `add_invitations` migration creates the `InvitationStatus`
 enum and the `invitations` table (unique `tokenHash`, `status`, `expiresAt`,
 `sentAt`, `revokedAt`, project and creator foreign keys), and extends
-`project_accesses` with `invitationId`, `acceptedAt`, and `declinedAt` columns
-so each recipient's acceptance or decline is recorded on the same row that
-grants access. The `add_invitation_recipient_and_lifecycle` migration extends
+`project_accesses` with `invitationId`, `acceptedAt`, and `declinedAt` columns.
+The `declinedAt` column was temporary and is removed by the subsequent
+migration. The `add_invitation_recipient_and_lifecycle` migration extends
 `InvitationStatus` with `ACCEPTED` and `DECLINED`, adds `recipientEmail`,
 `acceptedAt`, `declinedAt`, and `acceptedByUserId` to `invitations`, indexes
-`(projectId, recipientEmail)`, and drops the now-unused `declinedAt` column from
-`project_accesses` because decline tracking moved onto the invitation row.
+`(projectId, recipientEmail)`, adds a partial unique index on
+`(projectId, recipientEmail)` for `PENDING` rows so at most one pending link
+exists per recipient, and drops the now-unused `declinedAt` column from
+`project_accesses`. Final decline lifecycle data is stored on the invitation
+row (`status` and `declinedAt`); declined invitations never create project
+access rows.
 Tests use Prisma delegate doubles; native migration and endpoint verification
 use the PostgreSQL `db` container.
 
@@ -172,8 +176,10 @@ inject a fake client, so the quality gate never contacts a MinIO server.
 
 Transactional invitation email uses the pinned `nodemailer` client through the
 `SmtpMailer` adapter, which accepts an injected transporter so the quality gate
-never contacts an SMTP server. Development defaults to `MAIL_PROVIDER=log`,
-which writes messages to the application log instead of delivering them.
+never contacts an SMTP server. Development and test default to
+`MAIL_PROVIDER=log`, which writes messages to the application log instead of
+delivering them; `log` is rejected in staging and production, so those
+environments must set `MAIL_PROVIDER=smtp`.
 
 Update this document in the same branch whenever development commands, required
 tool versions, environment setup, tests, coverage, hooks, CI, Docker, Prisma

@@ -23,6 +23,10 @@ ADD COLUMN     "acceptedByUserId" UUID,
 ADD COLUMN     "declinedAt" TIMESTAMP(3),
 ADD COLUMN     "recipientEmail" VARCHAR(320);
 
+-- Revoke legacy PENDING invitations that have no recipient address so their
+-- links stop working, then backfill a placeholder and make the column required.
+UPDATE "invitations" SET "status" = 'REVOKED', "revokedAt" = NOW() WHERE "recipientEmail" IS NULL AND "status" = 'PENDING';
+
 -- Backfill existing rows before making the column required.
 UPDATE "invitations" SET "recipientEmail" = '' WHERE "recipientEmail" IS NULL;
 
@@ -33,6 +37,9 @@ ALTER TABLE "project_accesses" DROP COLUMN "declinedAt";
 
 -- CreateIndex
 CREATE INDEX "invitations_projectId_recipientEmail_idx" ON "invitations"("projectId", "recipientEmail");
+
+-- Partial unique index: at most one PENDING invitation per (project, recipient).
+CREATE UNIQUE INDEX "invitations_projectId_recipientEmail_pending_key" ON "invitations"("projectId", "recipientEmail") WHERE "status" = 'PENDING';
 
 -- AddForeignKey
 ALTER TABLE "invitations" ADD CONSTRAINT "invitations_acceptedByUserId_fkey" FOREIGN KEY ("acceptedByUserId") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;

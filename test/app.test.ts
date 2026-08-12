@@ -131,9 +131,10 @@ describe('RoomScan HTTP application', () => {
     move: vi.fn(),
     delete: vi.fn(),
   } as unknown as NoteService;
+  const previewInvitation = vi.fn<ShareService['previewInvitation']>();
   const shareService = {
     createInvitation: vi.fn(),
-    previewInvitation: vi.fn(),
+    previewInvitation,
     acceptInvitation: vi.fn(),
     declineInvitation: vi.fn(),
     revokeInvitation: vi.fn(),
@@ -449,6 +450,53 @@ describe('RoomScan HTTP application', () => {
       code: 'APPLE_IDENTITY_PROVIDER_UNAVAILABLE',
       message: 'Apple identity provider is unavailable',
     });
+  });
+
+  it('redacts the invitation token from request access logs', async () => {
+    const records: Array<{ req?: { url?: string } }> = [];
+    const collectingLogger = pino(
+      { level: 'info' },
+      {
+        write(chunk: string) {
+          records.push(JSON.parse(chunk) as { req?: { url?: string } });
+        },
+      },
+    );
+    const loggingApp = createApp({
+      config,
+      database,
+      logger: collectingLogger,
+      authService,
+      refreshTokenService,
+      projectService,
+      scanService,
+      scanAssetService,
+      noteService,
+      shareService,
+      accessTokenVerifier,
+      currentUserRepository,
+      rateLimiters,
+      clock,
+    });
+    const token = 'A'.repeat(43);
+    previewInvitation.mockResolvedValue({
+      project: {
+        id: 'a1b2c3d4-e5f6-4890-abcd-ef1234567890',
+        name: 'District 2 Apartment',
+        description: null,
+        thumbnail: null,
+      },
+      status: 'PENDING',
+      recipientEmail: 'recipient@example.com',
+      sentAt: '2026-07-29T10:00:00.000Z',
+      expiresAt: '2026-08-05T10:00:00.000Z',
+    });
+
+    await request(loggingApp).get(`/api/v1/invitations/${token}`).expect(200);
+
+    const accessLog = records.find((record) => record.req?.url !== undefined);
+    expect(accessLog?.req?.url).toBe('/api/v1/invitations/[REDACTED]');
+    expect(JSON.stringify(records)).not.toContain(token);
   });
 
   it('returns a safe internal error when authentication fails unexpectedly', async () => {
