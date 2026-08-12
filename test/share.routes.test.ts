@@ -38,6 +38,7 @@ import {
   ViewerRevokeResponseSchema,
 } from '../src/modules/share/share.schemas.js';
 import type { ShareService } from '../src/modules/share/share.service.js';
+import type { SharedProjectsService } from '../src/modules/shared-projects/shared-projects.service.js';
 import type { NoteService } from '../src/modules/note/note.service.js';
 import type { ProjectService } from '../src/modules/project/project.service.js';
 import type { ScanService } from '../src/modules/scan/scan.service.js';
@@ -183,6 +184,11 @@ describe('Share HTTP endpoints', () => {
     listShares,
     revokeViewer,
   } as unknown as ShareService;
+  const sharedProjectsService = {
+    list: vi.fn(),
+    detail: vi.fn(),
+    remove: vi.fn(),
+  } as unknown as SharedProjectsService;
   const app = createApp({
     config,
     database,
@@ -194,6 +200,7 @@ describe('Share HTTP endpoints', () => {
     scanAssetService,
     noteService,
     shareService,
+    sharedProjectsService,
     accessTokenVerifier,
     currentUserRepository,
     rateLimiters,

@@ -8,7 +8,8 @@ API tests deterministic and prevents them from opening network ports.
 The current product-facing scope contains health checks, Apple Sign-In
 authentication with refresh-token rotation, Owner/Viewer project management,
 room-scan metadata, scan asset upload/download, text notes anchored to scan
-models, and project sharing through expiring invitation links. The Prisma
+models, project sharing through expiring invitation links, and a Viewer-facing
+Shared With Me list. The Prisma
 schema owns the `User`, `RefreshToken`, `Project`, `ProjectAccess`, `Scan`,
 `ScanAsset`, `Note`, and `Invitation` models.
 
@@ -286,6 +287,35 @@ enforcement that revoked Viewers lose project, scan, note, and asset download
 access is inherited from the shared `ProjectPermissionService` access lookup,
 which filters on active (`revokedAt: null`) access on every request.
 
+## Shared With Me module
+
+The Shared With Me module is the Viewer-facing read side of sharing. It lists
+the projects the current user accepted as a Viewer, opens an active shared
+project read-only, and lets the user remove a project from their own list. It
+depends on a narrow `SharedProjectsRepository` interface and derives everything
+from existing rows: `ProjectAccess` membership, the `Project` row (including
+`deletedAt` and `updatedAt`), the `owner` relation, and a non-deleted scan
+count. No schema change was required for this phase.
+
+`SharedProjectsService` computes a `status` for each entry:
+`ACTIVE` (live project, active access), `REVOKED` (live project, revoked
+access), `PROJECT_DELETED` (deleted project whose access was revoked), and
+`TEMPORARILY_UNAVAILABLE` (a defensive state for an inconsistent record, such as
+a deleted project whose access is still active). List and detail map to a
+read-only response whose `permissions` always has `role: VIEWER` with `canView`
+true only for `ACTIVE`. Detail only returns a project while it is `ACTIVE`;
+revoked, deleted, and never-shared projects are hidden behind the standard
+`404 PROJECT_NOT_FOUND`.
+
+`PrismaSharedProjectsRepository` queries `project_accesses` by `userId` (with
+the `VIEWER` role filter), applies case-insensitive name search against the
+parent project, sorts by a to-one relation field with a stable project `id`
+tie-breaker, and paginates with an offset. Removal runs a guarded
+`updateMany` on the access row (`revokedAt: null`), so a concurrent removal or
+Owner revocation resolves to `409 NOT_IN_SHARED_WITH_ME` instead of succeeding.
+Owners never appear in the list, and a removal attempt by the project Owner
+returns `403 NOT_SHARED_PROJECT`.
+
 ## Mail
 
 `src/infrastructure/mail` defines a narrow `Mailer` interface (`sendMail`), plus
@@ -375,12 +405,13 @@ trusted IP/CIDR topology rather than trusting every proxy.
 The composition root creates one Prisma Client and injects it into the database
 health/lifecycle adapter, the Apple user repository, the current-user
 repository, the project repository, the scan repository, the scan-asset
-repository, the refresh-token repository, the note repository, and the share
-repository, plus the storage and mail adapters. It also creates the three
+repository, the refresh-token repository, the note repository, the share
+repository, and the shared-projects repository, plus the storage and mail
+adapters. It also creates the three
 rate-limit middleware instances, the access-token and refresh-token verifiers,
 the project permission service, the project service, the scan service, the
-scan-asset service, the refresh-token service, the note service, and the share
-service once per process. Product modules never import the Prisma client
+scan-asset service, the refresh-token service, the note service, the share
+service, and the shared-projects service once per process. Product modules never import the Prisma client
 directly. The unique provider identity constraint makes concurrent first-time
 Apple logins idempotent at the database boundary. The projects table has a
 foreign key to users with `onDelete: Restrict`; project access has unique

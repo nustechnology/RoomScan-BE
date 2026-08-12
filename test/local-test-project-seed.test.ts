@@ -7,6 +7,9 @@ import {
   LOCAL_TEST_NOTES,
   LOCAL_TEST_PROJECT_ID,
   LOCAL_TEST_PROJECTS,
+  LOCAL_TEST_SHARED_PROJECT_ID,
+  LOCAL_TEST_SHARED_PROJECT_NAME,
+  LOCAL_TEST_SHARED_SCAN_ID,
   seedLocalTestProject,
 } from '../src/infrastructure/database/local-test-project-seed.js';
 
@@ -41,7 +44,7 @@ describe('seedLocalTestProject', () => {
     const { invitationUrl } = await seedLocalTestProject(client);
     expect(invitationUrl).toContain('http://localhost:3000/invitations/');
 
-    expect(projectUpsert).toHaveBeenCalledTimes(LOCAL_TEST_PROJECTS.length);
+    expect(projectUpsert).toHaveBeenCalledTimes(LOCAL_TEST_PROJECTS.length + 1);
     for (const project of LOCAL_TEST_PROJECTS) {
       expect(projectUpsert).toHaveBeenCalledWith({
         where: { id: project.id },
@@ -58,12 +61,26 @@ describe('seedLocalTestProject', () => {
         },
       });
     }
+    expect(projectUpsert).toHaveBeenCalledWith({
+      where: { id: LOCAL_TEST_SHARED_PROJECT_ID },
+      create: {
+        id: LOCAL_TEST_SHARED_PROJECT_ID,
+        name: LOCAL_TEST_SHARED_PROJECT_NAME,
+        description: 'Shared demo project owned by the local test viewer',
+        ownerId: LOCAL_TEST_VIEWER_ID,
+      },
+      update: {
+        name: LOCAL_TEST_SHARED_PROJECT_NAME,
+        description: 'Shared demo project owned by the local test viewer',
+        deletedAt: null,
+      },
+    });
 
     const totalScans = LOCAL_TEST_PROJECTS.reduce(
       (count, project) => count + project.scans.length,
       0,
     );
-    expect(scanUpsert).toHaveBeenCalledTimes(totalScans);
+    expect(scanUpsert).toHaveBeenCalledTimes(totalScans + 1);
     for (const project of LOCAL_TEST_PROJECTS) {
       for (const scan of project.scans) {
         expect(scanUpsert).toHaveBeenCalledWith({
@@ -91,6 +108,29 @@ describe('seedLocalTestProject', () => {
         });
       }
     }
+    expect(scanUpsert).toHaveBeenCalledWith({
+      where: { id: LOCAL_TEST_SHARED_SCAN_ID },
+      create: {
+        id: LOCAL_TEST_SHARED_SCAN_ID,
+        projectId: LOCAL_TEST_SHARED_PROJECT_ID,
+        createdById: LOCAL_TEST_VIEWER_ID,
+        name: 'Garden Studio',
+        description: null,
+        thumbnail: null,
+        assetStatus: 'UPLOADED',
+        syncStatus: 'SYNCED',
+        modelVersion: 1,
+      },
+      update: {
+        name: 'Garden Studio',
+        description: null,
+        thumbnail: null,
+        assetStatus: 'UPLOADED',
+        syncStatus: 'SYNCED',
+        modelVersion: 1,
+        deletedAt: null,
+      },
+    });
 
     expect(noteUpsert).toHaveBeenCalledTimes(LOCAL_TEST_NOTES.length);
     for (const note of LOCAL_TEST_NOTES) {
@@ -127,25 +167,47 @@ describe('seedLocalTestProject', () => {
         },
       }),
     );
-    const accessCreate = (
-      projectAccessUpsert.mock.calls[0]?.[0] as {
-        create: {
-          projectId: string;
-          userId: string;
-          role: string;
-          acceptedAt: Date;
-          declinedAt: null;
-          revokedAt: null;
-        };
-      }
-    ).create;
-    expect(accessCreate).toMatchObject({
+    expect(projectAccessUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          projectId_userId: {
+            projectId: LOCAL_TEST_SHARED_PROJECT_ID,
+            userId: LOCAL_TEST_USER_ID,
+          },
+        },
+      }),
+    );
+    const accessCalls = projectAccessUpsert.mock.calls as unknown as Array<
+      [
+        {
+          create: {
+            projectId: string;
+            userId: string;
+            role: string;
+            acceptedAt: Date;
+            revokedAt: null;
+          };
+        },
+      ]
+    >;
+    const sharedAccessCreate = accessCalls[0]?.[0]?.create;
+    expect(sharedAccessCreate).toBeDefined();
+    expect(sharedAccessCreate).toMatchObject({
+      projectId: LOCAL_TEST_SHARED_PROJECT_ID,
+      userId: LOCAL_TEST_USER_ID,
+      role: 'VIEWER',
+      revokedAt: null,
+    });
+    expect(sharedAccessCreate?.acceptedAt).toBeInstanceOf(Date);
+    const viewerAccessCreate = accessCalls[1]?.[0]?.create;
+    expect(viewerAccessCreate).toBeDefined();
+    expect(viewerAccessCreate).toMatchObject({
       projectId: LOCAL_TEST_PROJECT_ID,
       userId: LOCAL_TEST_VIEWER_ID,
       role: 'VIEWER',
       revokedAt: null,
     });
-    expect(accessCreate.acceptedAt).toBeInstanceOf(Date);
+    expect(viewerAccessCreate?.acceptedAt).toBeInstanceOf(Date);
 
     expect(invitationUpsert).toHaveBeenCalledWith(
       expect.objectContaining({

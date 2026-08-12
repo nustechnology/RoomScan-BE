@@ -8,6 +8,9 @@ export const LOCAL_TEST_PROJECT_ID = '00000000-0000-4000-8000-000000000101';
 export const LOCAL_TEST_PROJECT_NAME = 'District 2 Apartment';
 export const LOCAL_TEST_INVITATION_ID = '00000000-0000-4000-8000-000000000401';
 export const LOCAL_TEST_PENDING_INVITE_EMAIL = 'pending-invite@roomscan.dev';
+export const LOCAL_TEST_SHARED_PROJECT_ID = '00000000-0000-4000-8000-000000000104';
+export const LOCAL_TEST_SHARED_PROJECT_NAME = 'Garden House';
+export const LOCAL_TEST_SHARED_SCAN_ID = '00000000-0000-4000-8000-000000000208';
 
 interface LocalTestProjectSeed {
   id: string;
@@ -221,6 +224,66 @@ export async function seedLocalTestProject(client: SeedClient): Promise<{ invita
         },
       });
     }
+
+    await transaction.project.upsert({
+      where: { id: LOCAL_TEST_SHARED_PROJECT_ID },
+      create: {
+        id: LOCAL_TEST_SHARED_PROJECT_ID,
+        name: LOCAL_TEST_SHARED_PROJECT_NAME,
+        description: 'Shared demo project owned by the local test viewer',
+        ownerId: LOCAL_TEST_VIEWER_ID,
+      },
+      update: {
+        name: LOCAL_TEST_SHARED_PROJECT_NAME,
+        description: 'Shared demo project owned by the local test viewer',
+        deletedAt: null,
+      },
+    });
+
+    await transaction.scan.upsert({
+      where: { id: LOCAL_TEST_SHARED_SCAN_ID },
+      create: {
+        id: LOCAL_TEST_SHARED_SCAN_ID,
+        projectId: LOCAL_TEST_SHARED_PROJECT_ID,
+        createdById: LOCAL_TEST_VIEWER_ID,
+        name: 'Garden Studio',
+        description: null,
+        thumbnail: null,
+        assetStatus: AssetStatus.UPLOADED,
+        syncStatus: SyncStatus.SYNCED,
+        modelVersion: 1,
+      },
+      update: {
+        name: 'Garden Studio',
+        description: null,
+        thumbnail: null,
+        assetStatus: AssetStatus.UPLOADED,
+        syncStatus: SyncStatus.SYNCED,
+        modelVersion: 1,
+        deletedAt: null,
+      },
+    });
+
+    await transaction.projectAccess.upsert({
+      where: {
+        projectId_userId: {
+          projectId: LOCAL_TEST_SHARED_PROJECT_ID,
+          userId: LOCAL_TEST_USER_ID,
+        },
+      },
+      create: {
+        projectId: LOCAL_TEST_SHARED_PROJECT_ID,
+        userId: LOCAL_TEST_USER_ID,
+        role: 'VIEWER',
+        acceptedAt: new Date(),
+        revokedAt: null,
+      },
+      update: {
+        role: 'VIEWER',
+        acceptedAt: new Date(),
+        revokedAt: null,
+      },
+    });
 
     await transaction.projectAccess.upsert({
       where: {

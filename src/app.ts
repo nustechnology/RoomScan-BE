@@ -32,6 +32,8 @@ import { createNoteRouter } from './modules/note/note.routes.js';
 import type { NoteService } from './modules/note/note.service.js';
 import { createShareRouter } from './modules/share/share.routes.js';
 import type { ShareService } from './modules/share/share.service.js';
+import { createSharedProjectsRouter } from './modules/shared-projects/shared-projects.routes.js';
+import type { SharedProjectsService } from './modules/shared-projects/shared-projects.service.js';
 import { createOpenApiDocument } from './openapi/document.js';
 
 export interface AppDependencies {
@@ -45,6 +47,7 @@ export interface AppDependencies {
   scanAssetService: ScanAssetService;
   noteService: NoteService;
   shareService: ShareService;
+  sharedProjectsService: SharedProjectsService;
   accessTokenVerifier: AccessTokenVerifier;
   currentUserRepository: CurrentUserRepository;
   rateLimiters: RateLimiters;
@@ -77,6 +80,7 @@ export function createApp({
   scanAssetService,
   noteService,
   shareService,
+  sharedProjectsService,
   accessTokenVerifier,
   currentUserRepository,
   rateLimiters,
@@ -197,6 +201,14 @@ export function createApp({
     API_PREFIX,
     createShareRouter({
       shareService,
+      accessTokenVerifier,
+      currentUserRepository,
+    }),
+  );
+  app.use(
+    API_PREFIX,
+    createSharedProjectsRouter({
+      sharedProjectsService,
       accessTokenVerifier,
       currentUserRepository,
     }),

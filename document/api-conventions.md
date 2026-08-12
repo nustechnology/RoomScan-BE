@@ -23,6 +23,10 @@
   share management lists and revokes Viewer access at
   `GET /api/v1/projects/:projectId/shares` and
   `DELETE /api/v1/projects/:projectId/shares/:userId`.
+- Shared With Me lists, opens, and self-removes accepted projects for the
+  current Viewer at `GET /api/v1/shared-projects`,
+  `GET /api/v1/shared-projects/:projectId`, and
+  `DELETE /api/v1/shared-projects/:projectId`.
 - Swagger UI remains at `/api-doc`; raw OpenAPI is `/api-doc.json`.
 - Resource paths use plural nouns and kebab-case when business modules arrive.
 
@@ -835,6 +839,136 @@ Error behavior:
 - `429 RATE_LIMIT_EXCEEDED`: API quota exceeded.
 - `500 INTERNAL_SERVER_ERROR`: unexpected failure without Prisma, SQL, token, or
   secret leakage.
+
+## Shared With Me
+
+Every Shared With Me endpoint requires a valid Bearer access token. The list
+contains every project the current user accepted an invitation for, each with a
+computed `status`; projects owned by the current user never appear. Removing a
+project revokes only the current user's own access row: the original project,
+the Owner, and other Viewers are never affected.
+
+| Method   | Endpoint                             | Result                                                |
+| -------- | ------------------------------------ | ----------------------------------------------------- |
+| `GET`    | `/api/v1/shared-projects`            | List projects shared with the current user; paginated |
+| `GET`    | `/api/v1/shared-projects/:projectId` | Get shared project detail; active Viewer only         |
+| `DELETE` | `/api/v1/shared-projects/:projectId` | Remove a project from the current user's list         |
+
+Shared project item (list and detail share the same shape):
+
+```json
+{
+  "id": "a1b2c3d4-e5f6-4890-abcd-ef1234567890",
+  "name": "District 2 Apartment",
+  "description": null,
+  "owner": {
+    "id": "eb5d278f-c857-45c7-887d-7be65288cb75",
+    "email": "owner@example.com"
+  },
+  "scanCount": 4,
+  "thumbnail": null,
+  "updatedAt": "2026-07-29T10:00:00.000Z",
+  "status": "ACTIVE",
+  "permissions": {
+    "role": "VIEWER",
+    "canView": true,
+    "canEdit": false,
+    "canDelete": false,
+    "canShare": false,
+    "canCreateScan": false
+  }
+}
+```
+
+`owner.email` is nullable. `scanCount` counts active (non-deleted) scans in the
+project. `thumbnail` is `null` until the thumbnail persistence feature is
+present. `permissions` is always `VIEWER` and read-only; `canView` is `true`
+only while the project is `ACTIVE`. `status` is one of:
+
+- `ACTIVE`: the access row is active and the project is not deleted; the project
+  can be opened.
+- `REVOKED`: the Owner revoked the Viewer, or the Viewer removed the project;
+  the project cannot be opened.
+- `PROJECT_DELETED`: the project was soft-deleted and its access rows were
+  revoked; the project cannot be opened.
+- `TEMPORARILY_UNAVAILABLE`: a defensive state for an inconsistent access record
+  (for example a deleted project whose access row is still active); the project
+  cannot be opened.
+
+The list supports case-insensitive name search and page-based pagination:
+
+```http
+GET /api/v1/shared-projects?search=apartment&page=1&limit=5&sort=updatedAt:desc
+```
+
+```json
+{
+  "items": [],
+  "pagination": {
+    "page": 1,
+    "limit": 5,
+    "total": 0,
+    "totalPages": 0
+  }
+}
+```
+
+Blank `search` values are treated as absent. `page` defaults to 1; `limit`
+defaults to 5 and may not exceed 100. `sort` defaults to `updatedAt:desc`.
+Supported values are the same allow-list as owned projects (`updatedAt`, `createdAt`,
+and `name`, each `:asc` or `:desc`), and every order uses the project `id` as its
+final stable tie-breaker.
+
+Detail `200` returns a shared project only while its status is `ACTIVE`;
+revoked, deleted, and never-shared projects are hidden behind
+`404 PROJECT_NOT_FOUND`.
+
+Remove `200`:
+
+```json
+{
+  "projectId": "a1b2c3d4-e5f6-4890-abcd-ef1234567890",
+  "removedAt": "2026-07-29T10:00:00.000Z"
+}
+```
+
+Validation rules:
+
+- `projectId`: UUID.
+- `search`: optional trimmed string, maximum 50 characters; blank treated as
+  absent.
+- `page` and `limit`: positive integers, `limit` at most 100.
+- `sort`: allow-listed values only; unknown values are rejected.
+
+Business rules:
+
+- Shared With Me lists projects accepted by the current user; owned projects
+  never appear, so the Owner of a project cannot open or remove it here.
+- An active Viewer can open a shared project read-only. Deeper navigation
+  (scans, notes, assets) uses the canonical project and scan endpoints, which
+  already authorize active Viewers.
+- Revoking a Viewer (Owner action) or deleting the project leaves the entry in
+  the Viewer's list with `status` `REVOKED` or `PROJECT_DELETED`, but the
+  project can no longer be opened.
+- Removing a project is a Viewer-only self-service action: it sets `revokedAt`
+  on the current user's access row only, never the Owner's project, and never
+  other Viewers' access.
+- Removing an entry that is not in Shared With Me (already removed, Owner-revoked,
+  or never shared) returns `409`.
+
+Error behavior:
+
+- `400 VALIDATION_ERROR`: invalid path or query parameters.
+- `401 UNAUTHORIZED`: missing/invalid access token or missing current user.
+- `403 NOT_SHARED_PROJECT`: the current user owns the project, so it can never be
+  in their Shared With Me list (removal only).
+- `404 PROJECT_NOT_FOUND`: the project is missing, revoked, deleted, or
+  inaccessible to the current user (detail only).
+- `409 NOT_IN_SHARED_WITH_ME`: the project is not in the current user's Shared
+  With Me list (removal only).
+- `429 RATE_LIMIT_EXCEEDED`: API quota exceeded.
+- `500 INTERNAL_SERVER_ERROR`: unexpected failure without Prisma, SQL, or secret
+  leakage.
 
 ## Health semantics
 
