@@ -6,13 +6,12 @@ import {
   LOCAL_TEST_INVITATION_ID,
   LOCAL_TEST_NOTES,
   LOCAL_TEST_PROJECT_ID,
-  LOCAL_TEST_PROJECT_NAME,
-  LOCAL_TEST_SCANS,
+  LOCAL_TEST_PROJECTS,
   seedLocalTestProject,
 } from '../src/infrastructure/database/local-test-project-seed.js';
 
 describe('seedLocalTestProject', () => {
-  it('idempotently created or refreshes a demo project owned by the local user', async () => {
+  it('idempotently creates or refreshes three demo projects owned by the local user', async () => {
     const projectUpsert = vi.fn().mockResolvedValue({});
     const scanUpsert = vi.fn().mockResolvedValue({});
     const noteUpsert = vi.fn().mockResolvedValue({});
@@ -42,46 +41,55 @@ describe('seedLocalTestProject', () => {
     const { invitationUrl } = await seedLocalTestProject(client);
     expect(invitationUrl).toContain('http://localhost:3000/invitations/');
 
-    expect(projectUpsert).toHaveBeenCalledWith({
-      where: { id: LOCAL_TEST_PROJECT_ID },
-      create: {
-        id: LOCAL_TEST_PROJECT_ID,
-        name: LOCAL_TEST_PROJECT_NAME,
-        description: 'Survey apartment for the local development demo',
-        ownerId: LOCAL_TEST_USER_ID,
-      },
-      update: {
-        name: LOCAL_TEST_PROJECT_NAME,
-        description: 'Survey apartment for the local development demo',
-        deletedAt: null,
-      },
-    });
-
-    expect(scanUpsert).toHaveBeenCalledTimes(LOCAL_TEST_SCANS.length);
-    for (const scan of LOCAL_TEST_SCANS) {
-      expect(scanUpsert).toHaveBeenCalledWith({
-        where: { id: scan.id },
+    expect(projectUpsert).toHaveBeenCalledTimes(LOCAL_TEST_PROJECTS.length);
+    for (const project of LOCAL_TEST_PROJECTS) {
+      expect(projectUpsert).toHaveBeenCalledWith({
+        where: { id: project.id },
         create: {
-          id: scan.id,
-          projectId: LOCAL_TEST_PROJECT_ID,
-          createdById: LOCAL_TEST_USER_ID,
-          name: scan.name,
-          description: scan.description,
-          thumbnail: scan.thumbnail,
-          assetStatus: scan.assetStatus,
-          syncStatus: scan.syncStatus,
-          modelVersion: scan.modelVersion,
+          id: project.id,
+          name: project.name,
+          description: project.description,
+          ownerId: LOCAL_TEST_USER_ID,
         },
         update: {
-          name: scan.name,
-          description: scan.description,
-          thumbnail: scan.thumbnail,
-          assetStatus: scan.assetStatus,
-          syncStatus: scan.syncStatus,
-          modelVersion: scan.modelVersion,
+          name: project.name,
+          description: project.description,
           deletedAt: null,
         },
       });
+    }
+
+    const totalScans = LOCAL_TEST_PROJECTS.reduce(
+      (count, project) => count + project.scans.length,
+      0,
+    );
+    expect(scanUpsert).toHaveBeenCalledTimes(totalScans);
+    for (const project of LOCAL_TEST_PROJECTS) {
+      for (const scan of project.scans) {
+        expect(scanUpsert).toHaveBeenCalledWith({
+          where: { id: scan.id },
+          create: {
+            id: scan.id,
+            projectId: project.id,
+            createdById: LOCAL_TEST_USER_ID,
+            name: scan.name,
+            description: scan.description,
+            thumbnail: scan.thumbnail,
+            assetStatus: scan.assetStatus,
+            syncStatus: scan.syncStatus,
+            modelVersion: scan.modelVersion,
+          },
+          update: {
+            name: scan.name,
+            description: scan.description,
+            thumbnail: scan.thumbnail,
+            assetStatus: scan.assetStatus,
+            syncStatus: scan.syncStatus,
+            modelVersion: scan.modelVersion,
+            deletedAt: null,
+          },
+        });
+      }
     }
 
     expect(noteUpsert).toHaveBeenCalledTimes(LOCAL_TEST_NOTES.length);

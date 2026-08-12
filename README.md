@@ -164,11 +164,11 @@ For local `yarn dev`, set `NODE_ENV=development` and
 `LOCAL_TEST_AUTH_ENABLED=true`, then run `yarn seed:local`. Sending
 `{"identityToken":"roomscan-local-test-user"}` to the same Apple endpoint skips
 Apple verification for `local-test@roomscan.dev` and returns normally signed
-RoomScan tokens. The seed also creates a demo project owned by that local user
-with room scans spanning several asset and sync states and text notes anchored
-to those scans, ready to list and inspect. The flag is rejected in test,
-staging, and production; the production-style Compose API therefore cannot
-expose this shortcut.
+RoomScan tokens. The seed also creates three demo projects owned by that local
+user with room scans spanning several asset and sync states and text notes
+anchored to those scans, ready to list, paginate, sort, and inspect. The flag is
+rejected in test, staging, and production; the production-style Compose API
+therefore cannot expose this shortcut.
 
 To obtain an access token for the Swagger UI `Authorize` dialog and local API
 calls, request a token for the seeded local user and paste the returned
@@ -362,23 +362,23 @@ send is logged and never fails the invitation request.
 
 ## Project scripts
 
-| Command                             | Description                                                              |
-| ----------------------------------- | ------------------------------------------------------------------------ |
-| `yarn dev`                          | Run the API with TSX watch mode                                          |
-| `yarn build`                        | Generate Prisma Client and compile production JavaScript                 |
-| `yarn start`                        | Run the compiled API                                                     |
-| `yarn lint` / `yarn lint:fix`       | Check or fix lint errors                                                 |
-| `yarn format` / `yarn format:check` | Write or verify Prettier formatting                                      |
-| `yarn typecheck`                    | Run strict TypeScript checks without emitting                            |
-| `yarn test`                         | Run Vitest in watch mode                                                 |
-| `yarn test:run`                     | Run unit/API tests once                                                  |
-| `yarn test:coverage`                | Run tests and enforce coverage thresholds                                |
-| `yarn validate`                     | Run the complete local pre-commit quality gate                           |
-| `yarn prisma:generate`              | Regenerate the ignored Prisma Client                                     |
-| `yarn prisma:migrate:dev`           | Create/apply a development migration                                     |
-| `yarn prisma:migrate:deploy`        | Apply committed migrations                                               |
-| `yarn prisma:studio`                | Open Prisma Studio                                                       |
-| `yarn seed:local`                   | Create or refresh the development-only login user and demo project/scans |
+| Command                             | Description                                                               |
+| ----------------------------------- | ------------------------------------------------------------------------- |
+| `yarn dev`                          | Run the API with TSX watch mode                                           |
+| `yarn build`                        | Generate Prisma Client and compile production JavaScript                  |
+| `yarn start`                        | Run the compiled API                                                      |
+| `yarn lint` / `yarn lint:fix`       | Check or fix lint errors                                                  |
+| `yarn format` / `yarn format:check` | Write or verify Prettier formatting                                       |
+| `yarn typecheck`                    | Run strict TypeScript checks without emitting                             |
+| `yarn test`                         | Run Vitest in watch mode                                                  |
+| `yarn test:run`                     | Run unit/API tests once                                                   |
+| `yarn test:coverage`                | Run tests and enforce coverage thresholds                                 |
+| `yarn validate`                     | Run the complete local pre-commit quality gate                            |
+| `yarn prisma:generate`              | Regenerate the ignored Prisma Client                                      |
+| `yarn prisma:migrate:dev`           | Create/apply a development migration                                      |
+| `yarn prisma:migrate:deploy`        | Apply committed migrations                                                |
+| `yarn prisma:studio`                | Open Prisma Studio                                                        |
+| `yarn seed:local`                   | Create or refresh the development-only login user and demo projects/scans |
 
 ## Quality gates
 

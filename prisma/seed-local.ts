@@ -22,7 +22,7 @@ try {
   const viewer = await seedLocalTestViewer(client);
   console.info(`Local test viewer ready: ${viewer.id}`);
   const { invitationUrl } = await seedLocalTestProject(client);
-  console.info('Local test project and scans ready');
+  console.info('Local test projects and scans ready');
   console.info(`Demo invitation link: ${invitationUrl}`);
 } finally {
   await client.$disconnect();

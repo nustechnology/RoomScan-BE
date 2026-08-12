@@ -9,44 +9,107 @@ export const LOCAL_TEST_PROJECT_NAME = 'District 2 Apartment';
 export const LOCAL_TEST_INVITATION_ID = '00000000-0000-4000-8000-000000000401';
 export const LOCAL_TEST_PENDING_INVITE_EMAIL = 'pending-invite@roomscan.dev';
 
-export const LOCAL_TEST_SCANS = [
+interface LocalTestProjectSeed {
+  id: string;
+  name: string;
+  description: string;
+  scans: Array<{
+    id: string;
+    name: string;
+    description: string | null;
+    thumbnail: string | null;
+    assetStatus: AssetStatus;
+    syncStatus: SyncStatus;
+    modelVersion: number;
+  }>;
+}
+
+export const LOCAL_TEST_PROJECTS: LocalTestProjectSeed[] = [
   {
-    id: '00000000-0000-4000-8000-000000000201',
-    name: 'Living Room',
-    description: 'Open-plan living and dining area',
-    thumbnail: null,
-    assetStatus: AssetStatus.UPLOADED,
-    syncStatus: SyncStatus.SYNCED,
-    modelVersion: 1,
+    id: LOCAL_TEST_PROJECT_ID,
+    name: LOCAL_TEST_PROJECT_NAME,
+    description: 'Survey apartment for the local development demo',
+    scans: [
+      {
+        id: '00000000-0000-4000-8000-000000000201',
+        name: 'Living Room',
+        description: 'Open-plan living and dining area',
+        thumbnail: null,
+        assetStatus: AssetStatus.UPLOADED,
+        syncStatus: SyncStatus.SYNCED,
+        modelVersion: 1,
+      },
+      {
+        id: '00000000-0000-4000-8000-000000000202',
+        name: 'Main Bedroom',
+        description: 'Master bedroom with balcony access',
+        thumbnail: null,
+        assetStatus: AssetStatus.UPLOADING,
+        syncStatus: SyncStatus.SYNCING,
+        modelVersion: 1,
+      },
+      {
+        id: '00000000-0000-4000-8000-000000000203',
+        name: 'Kitchen',
+        description: null,
+        thumbnail: null,
+        assetStatus: AssetStatus.UPLOADED,
+        syncStatus: SyncStatus.SYNCED,
+        modelVersion: 1,
+      },
+      {
+        id: '00000000-0000-4000-8000-000000000204',
+        name: 'Balcony',
+        description: null,
+        thumbnail: null,
+        assetStatus: AssetStatus.FAILED,
+        syncStatus: SyncStatus.FAILED,
+        modelVersion: 1,
+      },
+    ],
   },
   {
-    id: '00000000-0000-4000-8000-000000000202',
-    name: 'Main Bedroom',
-    description: 'Master bedroom with balcony access',
-    thumbnail: null,
-    assetStatus: AssetStatus.UPLOADING,
-    syncStatus: SyncStatus.SYNCING,
-    modelVersion: 1,
+    id: '00000000-0000-4000-8000-000000000102',
+    name: 'Riverside Loft',
+    description: 'Industrial loft conversion for the local development demo',
+    scans: [
+      {
+        id: '00000000-0000-4000-8000-000000000205',
+        name: 'Open Kitchen',
+        description: 'Kitchen island with exposed brick',
+        thumbnail: null,
+        assetStatus: AssetStatus.UPLOADED,
+        syncStatus: SyncStatus.SYNCED,
+        modelVersion: 1,
+      },
+      {
+        id: '00000000-0000-4000-8000-000000000206',
+        name: 'Mezzanine',
+        description: null,
+        thumbnail: null,
+        assetStatus: AssetStatus.NONE,
+        syncStatus: SyncStatus.PENDING,
+        modelVersion: 1,
+      },
+    ],
   },
   {
-    id: '00000000-0000-4000-8000-000000000203',
-    name: 'Kitchen',
-    description: null,
-    thumbnail: null,
-    assetStatus: AssetStatus.UPLOADED,
-    syncStatus: SyncStatus.SYNCED,
-    modelVersion: 1,
+    id: '00000000-0000-4000-8000-000000000103',
+    name: 'Harbor View Studio',
+    description: 'Compact studio by the waterfront for the local development demo',
+    scans: [
+      {
+        id: '00000000-0000-4000-8000-000000000207',
+        name: 'Main Studio',
+        description: null,
+        thumbnail: null,
+        assetStatus: AssetStatus.UPLOADED,
+        syncStatus: SyncStatus.SYNCED,
+        modelVersion: 1,
+      },
+    ],
   },
-  {
-    id: '00000000-0000-4000-8000-000000000204',
-    name: 'Balcony',
-    description: null,
-    thumbnail: null,
-    assetStatus: AssetStatus.FAILED,
-    syncStatus: SyncStatus.FAILED,
-    modelVersion: 1,
-  },
-] as const;
+];
 
 export const LOCAL_TEST_NOTES = [
   {
@@ -92,45 +155,47 @@ type SeedClient = Pick<PrismaClient, '$transaction'>;
 export async function seedLocalTestProject(client: SeedClient): Promise<{ invitationUrl: string }> {
   let invitationUrl = '';
   await client.$transaction(async (transaction) => {
-    await transaction.project.upsert({
-      where: { id: LOCAL_TEST_PROJECT_ID },
-      create: {
-        id: LOCAL_TEST_PROJECT_ID,
-        name: LOCAL_TEST_PROJECT_NAME,
-        description: 'Survey apartment for the local development demo',
-        ownerId: LOCAL_TEST_USER_ID,
-      },
-      update: {
-        name: LOCAL_TEST_PROJECT_NAME,
-        description: 'Survey apartment for the local development demo',
-        deletedAt: null,
-      },
-    });
-
-    for (const scan of LOCAL_TEST_SCANS) {
-      await transaction.scan.upsert({
-        where: { id: scan.id },
+    for (const project of LOCAL_TEST_PROJECTS) {
+      await transaction.project.upsert({
+        where: { id: project.id },
         create: {
-          id: scan.id,
-          projectId: LOCAL_TEST_PROJECT_ID,
-          createdById: LOCAL_TEST_USER_ID,
-          name: scan.name,
-          description: scan.description,
-          thumbnail: scan.thumbnail,
-          assetStatus: scan.assetStatus,
-          syncStatus: scan.syncStatus,
-          modelVersion: scan.modelVersion,
+          id: project.id,
+          name: project.name,
+          description: project.description,
+          ownerId: LOCAL_TEST_USER_ID,
         },
         update: {
-          name: scan.name,
-          description: scan.description,
-          thumbnail: scan.thumbnail,
-          assetStatus: scan.assetStatus,
-          syncStatus: scan.syncStatus,
-          modelVersion: scan.modelVersion,
+          name: project.name,
+          description: project.description,
           deletedAt: null,
         },
       });
+
+      for (const scan of project.scans) {
+        await transaction.scan.upsert({
+          where: { id: scan.id },
+          create: {
+            id: scan.id,
+            projectId: project.id,
+            createdById: LOCAL_TEST_USER_ID,
+            name: scan.name,
+            description: scan.description,
+            thumbnail: scan.thumbnail,
+            assetStatus: scan.assetStatus,
+            syncStatus: scan.syncStatus,
+            modelVersion: scan.modelVersion,
+          },
+          update: {
+            name: scan.name,
+            description: scan.description,
+            thumbnail: scan.thumbnail,
+            assetStatus: scan.assetStatus,
+            syncStatus: scan.syncStatus,
+            modelVersion: scan.modelVersion,
+            deletedAt: null,
+          },
+        });
+      }
     }
 
     for (const note of LOCAL_TEST_NOTES) {
