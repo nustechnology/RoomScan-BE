@@ -615,7 +615,7 @@
 						"body": {
 							"mode": "file",
 							"file": {
-								"src": "/home/vutq/Downloads/park.usdz"
+								"src": null
 							}
 						},
 						"url": {
@@ -624,7 +624,7 @@
 								"{{uploadUrl}}"
 							]
 						},
-						"description": "Uploads the model file directly to the presigned PUT URL. Auth is deliberately set to **No Auth** (an extra Authorization header would break the S3 signature).\n\n- In the Body tab, select your model file (the `src` placeholder must be updated).\n- Use a file/binary body, NOT form-data.\n- The `Content-Type` header must match the descriptor's `contentType` exactly.\n- The file byte size must equal `sizeBytes` exactly.\n- Run this promptly: the presigned URL expires after the configured TTL."
+						"description": "Uploads the model file directly to the presigned PUT URL. Auth is deliberately set to **No Auth** (an extra Authorization header would break the S3 signature).\n\n- In the Body tab, select your model file (Postman prompts for the file because `src` is unset).\n- Use a file/binary body, NOT form-data.\n- The `Content-Type` header must match the descriptor's `contentType` exactly.\n- The file byte size must equal `sizeBytes` exactly.\n- Run this promptly: the presigned URL expires after the configured TTL."
 					},
 					"response": []
 				},
@@ -693,7 +693,7 @@
 						"body": {
 							"mode": "file",
 							"file": {
-								"src": "/home/vutq/Downloads/2.5oz_lime_juice.jpg"
+								"src": null
 							}
 						},
 						"url": {
@@ -1293,10 +1293,10 @@
 				},
 				{
 					"name": "Preview Invitation",
-					"auth": {
-						"type": "noauth"
-					},
 					"request": {
+						"auth": {
+							"type": "noauth"
+						},
 						"method": "GET",
 						"header": [],
 						"url": {
