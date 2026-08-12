@@ -12,6 +12,67 @@ export const LOCAL_TEST_SHARED_PROJECT_ID = '00000000-0000-4000-8000-00000000010
 export const LOCAL_TEST_SHARED_PROJECT_NAME = 'Garden House';
 export const LOCAL_TEST_SHARED_SCAN_ID = '00000000-0000-4000-8000-000000000208';
 
+const LOCAL_TEST_DELETED_AT = new Date('2026-08-01T00:00:00.000Z');
+
+interface LocalTestSharedProjectSeed {
+  id: string;
+  name: string;
+  description: string;
+  projectDeletedAt: Date | null;
+  accessRevokedAt: Date | null;
+  scan: {
+    id: string;
+    name: string;
+  };
+}
+
+export const LOCAL_TEST_SHARED_PROJECTS: LocalTestSharedProjectSeed[] = [
+  {
+    id: LOCAL_TEST_SHARED_PROJECT_ID,
+    name: LOCAL_TEST_SHARED_PROJECT_NAME,
+    description: 'Shared demo project owned by the local test viewer',
+    projectDeletedAt: null,
+    accessRevokedAt: null,
+    scan: {
+      id: LOCAL_TEST_SHARED_SCAN_ID,
+      name: 'Garden Studio',
+    },
+  },
+  {
+    id: '00000000-0000-4000-8000-000000000105',
+    name: 'Maple Cottage',
+    description: 'Shared demo project whose access was revoked by the owner',
+    projectDeletedAt: null,
+    accessRevokedAt: LOCAL_TEST_DELETED_AT,
+    scan: {
+      id: '00000000-0000-4000-8000-000000000209',
+      name: 'Cottage Living Room',
+    },
+  },
+  {
+    id: '00000000-0000-4000-8000-000000000106',
+    name: 'Willow Townhouse',
+    description: 'Shared demo project that was deleted by its owner',
+    projectDeletedAt: LOCAL_TEST_DELETED_AT,
+    accessRevokedAt: LOCAL_TEST_DELETED_AT,
+    scan: {
+      id: '00000000-0000-4000-8000-000000000210',
+      name: 'Townhouse Study',
+    },
+  },
+  {
+    id: '00000000-0000-4000-8000-000000000107',
+    name: 'Cedar Bungalow',
+    description: 'Shared demo project in an inconsistent deleted-with-active-access state',
+    projectDeletedAt: LOCAL_TEST_DELETED_AT,
+    accessRevokedAt: null,
+    scan: {
+      id: '00000000-0000-4000-8000-000000000211',
+      name: 'Bungalow Conservatory',
+    },
+  },
+];
+
 interface LocalTestProjectSeed {
   id: string;
   name: string;
@@ -225,65 +286,68 @@ export async function seedLocalTestProject(client: SeedClient): Promise<{ invita
       });
     }
 
-    await transaction.project.upsert({
-      where: { id: LOCAL_TEST_SHARED_PROJECT_ID },
-      create: {
-        id: LOCAL_TEST_SHARED_PROJECT_ID,
-        name: LOCAL_TEST_SHARED_PROJECT_NAME,
-        description: 'Shared demo project owned by the local test viewer',
-        ownerId: LOCAL_TEST_VIEWER_ID,
-      },
-      update: {
-        name: LOCAL_TEST_SHARED_PROJECT_NAME,
-        description: 'Shared demo project owned by the local test viewer',
-        deletedAt: null,
-      },
-    });
-
-    await transaction.scan.upsert({
-      where: { id: LOCAL_TEST_SHARED_SCAN_ID },
-      create: {
-        id: LOCAL_TEST_SHARED_SCAN_ID,
-        projectId: LOCAL_TEST_SHARED_PROJECT_ID,
-        createdById: LOCAL_TEST_VIEWER_ID,
-        name: 'Garden Studio',
-        description: null,
-        thumbnail: null,
-        assetStatus: AssetStatus.UPLOADED,
-        syncStatus: SyncStatus.SYNCED,
-        modelVersion: 1,
-      },
-      update: {
-        name: 'Garden Studio',
-        description: null,
-        thumbnail: null,
-        assetStatus: AssetStatus.UPLOADED,
-        syncStatus: SyncStatus.SYNCED,
-        modelVersion: 1,
-        deletedAt: null,
-      },
-    });
-
-    await transaction.projectAccess.upsert({
-      where: {
-        projectId_userId: {
-          projectId: LOCAL_TEST_SHARED_PROJECT_ID,
-          userId: LOCAL_TEST_USER_ID,
+    for (const shared of LOCAL_TEST_SHARED_PROJECTS) {
+      await transaction.project.upsert({
+        where: { id: shared.id },
+        create: {
+          id: shared.id,
+          name: shared.name,
+          description: shared.description,
+          ownerId: LOCAL_TEST_VIEWER_ID,
+          deletedAt: shared.projectDeletedAt,
         },
-      },
-      create: {
-        projectId: LOCAL_TEST_SHARED_PROJECT_ID,
-        userId: LOCAL_TEST_USER_ID,
-        role: 'VIEWER',
-        acceptedAt: new Date(),
-        revokedAt: null,
-      },
-      update: {
-        role: 'VIEWER',
-        acceptedAt: new Date(),
-        revokedAt: null,
-      },
-    });
+        update: {
+          name: shared.name,
+          description: shared.description,
+          deletedAt: shared.projectDeletedAt,
+        },
+      });
+
+      await transaction.scan.upsert({
+        where: { id: shared.scan.id },
+        create: {
+          id: shared.scan.id,
+          projectId: shared.id,
+          createdById: LOCAL_TEST_VIEWER_ID,
+          name: shared.scan.name,
+          description: null,
+          thumbnail: null,
+          assetStatus: AssetStatus.UPLOADED,
+          syncStatus: SyncStatus.SYNCED,
+          modelVersion: 1,
+        },
+        update: {
+          name: shared.scan.name,
+          description: null,
+          thumbnail: null,
+          assetStatus: AssetStatus.UPLOADED,
+          syncStatus: SyncStatus.SYNCED,
+          modelVersion: 1,
+          deletedAt: null,
+        },
+      });
+
+      await transaction.projectAccess.upsert({
+        where: {
+          projectId_userId: {
+            projectId: shared.id,
+            userId: LOCAL_TEST_USER_ID,
+          },
+        },
+        create: {
+          projectId: shared.id,
+          userId: LOCAL_TEST_USER_ID,
+          role: 'VIEWER',
+          acceptedAt: new Date(),
+          revokedAt: shared.accessRevokedAt,
+        },
+        update: {
+          role: 'VIEWER',
+          acceptedAt: new Date(),
+          revokedAt: shared.accessRevokedAt,
+        },
+      });
+    }
 
     await transaction.projectAccess.upsert({
       where: {

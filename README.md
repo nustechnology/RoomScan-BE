@@ -169,10 +169,12 @@ For local `yarn dev`, set `NODE_ENV=development` and
 Apple verification for `local-test@roomscan.dev` and returns normally signed
 RoomScan tokens. The seed also creates three demo projects owned by that local
 user with room scans spanning several asset and sync states and text notes
-anchored to those scans, ready to list, paginate, sort, and inspect, plus a
-fourth project ("Garden House") owned by the seeded local viewer user that the
-local user has accepted as a Viewer — so the Shared With Me list is non-empty
-and the owner/share-viewer flows can both be tried. The flag is
+anchored to those scans, ready to list, paginate, sort, and inspect, plus four
+viewer-owned shared demo projects that the local user accepted (or was granted)
+as a Viewer — "Garden House" (`ACTIVE`), "Maple Cottage" (`REVOKED`), "Willow
+Townhouse" (`PROJECT_DELETED`), and "Cedar Bungalow"
+(`TEMPORARILY_UNAVAILABLE`) — so the Shared With Me list exercises every
+status and the owner/share-viewer flows can both be tried. The flag is
 rejected in test, staging, and production; the production-style Compose API
 therefore cannot expose this shortcut.
 

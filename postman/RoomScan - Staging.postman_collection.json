@@ -1450,9 +1450,11 @@
 									"  pm.response.to.have.status(200);",
 									"  pm.expect(json.items).to.be.an('array');",
 									"});",
-									"const first = (json.items || [])[0];",
-									"if (first && first.id) {",
-									"  pm.environment.set(\"sharedProjectId\", first.id);",
+									"const items = json.items || [];",
+									"const active = items.find((i) => i.status === \"ACTIVE\");",
+									"const target = active || items[0];",
+									"if (target && target.id) {",
+									"  pm.environment.set(\"sharedProjectId\", target.id);",
 									"}"
 								]
 							}
