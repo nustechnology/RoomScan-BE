@@ -280,12 +280,16 @@ Health, readiness, Swagger and raw OpenAPI are exempt. Exceeded quotas return
 429 with `RATE_LIMIT_EXCEEDED`, `RateLimit`, `RateLimit-Policy`, `Retry-After`
 and `x-request-id`.
 
-A Postman collection covering the full API surface lives in `postman/`
-(`RoomScan - Staging.postman_collection.json` plus
-`RoomScan.postman_environment.json`). Import both into Postman, select the
-`RoomScan` environment, and follow the setup notes in the collection
-description. It includes the sharing and invitation endpoints, notes, scan
-assets, and upload flow.
+Postman files covering the full API surface live in `postman/`: the
+`RoomScan - Staging.postman_collection.json` collection plus the
+`RoomScan - Staging.postman_environment.json` and
+`RoomScan - Local.postman_environment.json` environments. Import them into
+Postman and select the environment matching the API you target. The local
+environment signs in through the seeded test user
+(`LOCAL_TEST_AUTH_ENABLED=true` with the `roomscan-local-test-user` identity
+token) at `http://localhost:3000`; the staging environment targets the deployed
+API. Follow the setup notes in the collection description; it includes the
+sharing and invitation endpoints, notes, scan assets, and upload flow.
 
 ## Environment variables
 

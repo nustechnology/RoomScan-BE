@@ -75,12 +75,14 @@ connections. Set it only when requests arrive exclusively through a known
 reverse-proxy topology.
 
 The `postman/` directory holds the operator-facing API test collection
-(`RoomScan - Staging.postman_collection.json`) and its environment
-(`RoomScan.postman_environment.json`). Keep both in sync with the public HTTP
-surface: whenever a public route, request field, or response shape changes, add
-or update the matching request in the collection on the same branch. The
-collection description documents setup, the sequential upload flow, and the
-invitation sharing flow (including the `409` states and token rotation).
+(`RoomScan - Staging.postman_collection.json`) and its environments
+(`RoomScan - Staging.postman_environment.json` for the deployed API and
+`RoomScan - Local.postman_environment.json` for the locally seeded API). Keep
+them in sync with the public HTTP surface: whenever a public route, request
+field, or response shape changes, add or update the matching request in the
+collection on the same branch. The collection description documents setup, the
+sequential upload flow, and the invitation sharing flow (including the `409`
+states and token rotation).
 
 ## Before handoff
 
