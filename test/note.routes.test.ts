@@ -1,3 +1,4 @@
+import type { RequestHandler } from 'express';
 import { SignJWT, jwtVerify } from 'jose';
 import pino from 'pino';
 import request from 'supertest';
@@ -5,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
 import { createApp } from '../src/app.js';
+import type { SyncService } from '../src/modules/sync/sync.service.js';
 import type {
   AccessTokenVerifier,
   CurrentUserRepository,
@@ -64,6 +66,7 @@ const config: AppConfig = {
   assetMaxModelSizeBytes: 500_000_000,
   assetMaxThumbnailSizeBytes: 10_000_000,
   invitationTtlSeconds: 604_800,
+  idempotencyKeyTtlSeconds: 86_400,
   invitationBaseUrl: 'http://localhost:3000',
   mailProvider: 'log',
   smtpHost: '',
@@ -83,6 +86,7 @@ function noteResult(overrides: Partial<NoteResult> = {}): NoteResult {
     position: { x: 1.5, y: -2, z: 3.25 },
     orientation: { x: 0, y: 0, z: 1 },
     modelVersion: '1',
+    revision: 1,
     creator: {
       id: USER_A,
       email: 'owner@example.com',
@@ -187,6 +191,12 @@ describe('Note HTTP endpoints', () => {
     detail: vi.fn(),
     remove: vi.fn(),
   } as unknown as SharedProjectsService;
+  const syncService = {
+    listChanges: vi.fn(),
+    listStatus: vi.fn(),
+    getProjectStatus: vi.fn(),
+  } as unknown as SyncService;
+  const idempotencyMiddleware: RequestHandler = (_request, _response, next) => next();
   const app = createApp({
     config,
     database,
@@ -199,6 +209,8 @@ describe('Note HTTP endpoints', () => {
     noteService,
     shareService,
     sharedProjectsService,
+    syncService,
+    idempotencyMiddleware,
     accessTokenVerifier,
     currentUserRepository,
     rateLimiters,

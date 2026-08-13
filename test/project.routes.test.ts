@@ -1,3 +1,4 @@
+import type { RequestHandler } from 'express';
 import { SignJWT, jwtVerify } from 'jose';
 import pino from 'pino';
 import request from 'supertest';
@@ -26,6 +27,7 @@ import type { ScanAssetService } from '../src/modules/scan-asset/scan-asset.serv
 import type { NoteService } from '../src/modules/note/note.service.js';
 import type { ShareService } from '../src/modules/share/share.service.js';
 import type { SharedProjectsService } from '../src/modules/shared-projects/shared-projects.service.js';
+import type { SyncService } from '../src/modules/sync/sync.service.js';
 import type { ProjectResult, ProjectRole } from '../src/modules/project/project.types.js';
 
 const ACCESS_SECRET = 'access-secret-that-is-at-least-32-characters';
@@ -66,6 +68,7 @@ const config: AppConfig = {
   assetMaxModelSizeBytes: 500_000_000,
   assetMaxThumbnailSizeBytes: 10_000_000,
   invitationTtlSeconds: 604_800,
+  idempotencyKeyTtlSeconds: 86_400,
   invitationBaseUrl: 'http://localhost:3000',
   mailProvider: 'log',
   smtpHost: '',
@@ -91,6 +94,7 @@ function projectResult(role: ProjectRole = 'OWNER'): ProjectResult {
     sharedCount: 1,
     thumbnail: null,
     syncStatus: null,
+    revision: 1,
     createdAt: NOW.toISOString(),
     updatedAt: NOW.toISOString(),
     permissions: {
@@ -196,6 +200,12 @@ describe('Project HTTP endpoints', () => {
     detail: vi.fn(),
     remove: vi.fn(),
   } as unknown as SharedProjectsService;
+  const syncService = {
+    listChanges: vi.fn(),
+    listStatus: vi.fn(),
+    getProjectStatus: vi.fn(),
+  } as unknown as SyncService;
+  const idempotencyMiddleware: RequestHandler = (_request, _response, next) => next();
   const app = createApp({
     config,
     database,
@@ -208,6 +218,8 @@ describe('Project HTTP endpoints', () => {
     noteService,
     shareService,
     sharedProjectsService,
+    syncService,
+    idempotencyMiddleware,
     accessTokenVerifier,
     currentUserRepository,
     rateLimiters,

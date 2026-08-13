@@ -29,6 +29,7 @@ const scanSelect = {
   modelVersion: true,
   clientMutationId: true,
   deletedAt: true,
+  revision: true,
   createdAt: true,
   updatedAt: true,
   _count: {
@@ -55,6 +56,7 @@ function createScanRow(overrides: Record<string, unknown> = {}) {
     modelVersion: 1,
     clientMutationId: null,
     deletedAt: null,
+    revision: 1,
     createdAt: NOW,
     updatedAt: NOW,
     project: { ownerId: OWNER_ID },
@@ -353,21 +355,25 @@ describe('PrismaScanRepository', () => {
     expect(scan.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: SCAN_ID, deletedAt: null, project: { ownerId: OWNER_ID, deletedAt: null } },
-        data: { name: 'Updated Room' },
+        data: { name: 'Updated Room', revision: { increment: 1 } },
       }),
     );
     expect(transaction).toHaveBeenCalledOnce();
   });
 
-  it('throws a hidden not-found error when an update affects no rows', async () => {
+  it('throws a hidden not-found error when an update affects no rows and the scan is gone', async () => {
     const { client, scan } = createClient();
     scan.updateMany.mockResolvedValue({ count: 0 });
+    scan.findFirst.mockResolvedValue(null);
     const repository = new PrismaScanRepository(client);
 
     await expect(
       repository.update(SCAN_ID, OWNER_ID, { name: 'Updated Room' }),
     ).rejects.toBeInstanceOf(ScanNotFoundError);
-    expect(scan.findFirst).not.toHaveBeenCalled();
+    expect(scan.findFirst).toHaveBeenCalledWith({
+      where: { id: SCAN_ID, deletedAt: null, project: { ownerId: OWNER_ID, deletedAt: null } },
+      select: { revision: true },
+    });
   });
 
   it('soft-deletes a scan and touches the parent project updatedAt', async () => {

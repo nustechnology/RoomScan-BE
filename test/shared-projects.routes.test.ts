@@ -1,9 +1,11 @@
+import type { RequestHandler } from 'express';
 import { SignJWT, jwtVerify } from 'jose';
 import pino from 'pino';
 import request from 'supertest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createApp } from '../src/app.js';
+import type { SyncService } from '../src/modules/sync/sync.service.js';
 import type {
   AccessTokenVerifier,
   CurrentUserRepository,
@@ -68,6 +70,7 @@ const config: AppConfig = {
   assetMaxModelSizeBytes: 500_000_000,
   assetMaxThumbnailSizeBytes: 10_000_000,
   invitationTtlSeconds: 604_800,
+  idempotencyKeyTtlSeconds: 86_400,
   invitationBaseUrl: 'https://invite.roomscan.dev',
   mailProvider: 'log',
   smtpHost: '',
@@ -164,6 +167,12 @@ describe('Shared With Me HTTP endpoints', () => {
     detail,
     remove,
   } as unknown as SharedProjectsService;
+  const syncService = {
+    listChanges: vi.fn(),
+    listStatus: vi.fn(),
+    getProjectStatus: vi.fn(),
+  } as unknown as SyncService;
+  const idempotencyMiddleware: RequestHandler = (_request, _response, next) => next();
   const app = createApp({
     config,
     database,
@@ -176,6 +185,8 @@ describe('Shared With Me HTTP endpoints', () => {
     noteService,
     shareService,
     sharedProjectsService,
+    syncService,
+    idempotencyMiddleware,
     accessTokenVerifier,
     currentUserRepository,
     rateLimiters,

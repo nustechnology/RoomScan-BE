@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import type { RequestHandler } from 'express';
 
 import { AppError } from '../../common/errors/app-error.js';
 import { authenticate, getUserId } from '../../common/middleware/authenticate.js';
@@ -40,6 +41,7 @@ export interface ScanAssetRouterDependencies {
   scanAssetService: ScanAssetService;
   accessTokenVerifier: AccessTokenVerifier;
   currentUserRepository: CurrentUserRepository;
+  idempotency: RequestHandler;
 }
 
 function mapError(error: unknown): AppError | undefined {
@@ -102,6 +104,7 @@ export function createScanAssetRouter({
   scanAssetService,
   accessTokenVerifier,
   currentUserRepository,
+  idempotency,
 }: ScanAssetRouterDependencies): Router {
   const router = Router();
   const requireAuth = authenticate(accessTokenVerifier, currentUserRepository);
@@ -110,6 +113,7 @@ export function createScanAssetRouter({
     '/scans/:scanId/assets/upload-sessions',
     requireAuth,
     validateRequest({ body: CreateUploadSessionBodySchema, params: ScanIdParamSchema }),
+    idempotency,
     async (request, response, next) => {
       try {
         const userId = getUserId(request);

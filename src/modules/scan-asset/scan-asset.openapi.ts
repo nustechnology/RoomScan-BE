@@ -1,6 +1,7 @@
 import { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
 
 import { ErrorResponseSchema } from '../../common/schemas/error.js';
+import { IdempotencyKeyHeaderSchema } from '../../common/schemas/request-headers.js';
 import { ScanIdParamSchema } from '../scan/scan.schemas.js';
 import {
   AssetMetadataResponseSchema,
@@ -172,6 +173,16 @@ const storageUnavailableResponse = {
   },
 };
 
+const idempotencyConflictResponse = {
+  description: 'The Idempotency-Key was already used with a different request body',
+  headers: rateLimitHeaders,
+  content: {
+    'application/json': {
+      schema: errorResponse,
+    },
+  },
+};
+
 const downloadUrlParams = ScanIdParamSchema.merge(AssetTypeParamSchema);
 
 scanAssetOpenApiRegistry.registerPath({
@@ -190,6 +201,7 @@ scanAssetOpenApiRegistry.registerPath({
         },
       },
     },
+    headers: IdempotencyKeyHeaderSchema,
   },
   responses: {
     201: {
@@ -212,6 +224,7 @@ scanAssetOpenApiRegistry.registerPath({
     },
     ...commonErrorResponses,
     404: scanNotFoundResponse,
+    409: idempotencyConflictResponse,
   },
 });
 

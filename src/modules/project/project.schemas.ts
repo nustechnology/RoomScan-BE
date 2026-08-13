@@ -37,6 +37,7 @@ export const ProjectResponseSchema = z.object({
   sharedCount: z.number().int().nonnegative(),
   thumbnail: z.url().nullable(),
   syncStatus: ProjectSyncStatusSchema,
+  revision: z.number().int().positive(),
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
   permissions: ProjectPermissionsSchema,

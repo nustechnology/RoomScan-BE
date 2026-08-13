@@ -2,6 +2,10 @@ import { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
 
 import { ErrorResponseSchema } from '../../common/schemas/error.js';
 import {
+  IdempotencyKeyHeaderSchema,
+  IfMatchHeaderSchema,
+} from '../../common/schemas/request-headers.js';
+import {
   CreateProjectBodySchema,
   ListProjectsQuerySchema,
   ProjectIdParamSchema,
@@ -106,6 +110,16 @@ const projectNotFoundResponse = {
   },
 };
 
+const conflictResponse = {
+  description: 'The client state conflicts with the server (stale revision or idempotency key)',
+  headers: rateLimitHeaders,
+  content: {
+    'application/json': {
+      schema: errorResponse,
+    },
+  },
+};
+
 projectOpenApiRegistry.registerPath({
   method: 'post',
   path: '/api/v1/projects',
@@ -121,6 +135,7 @@ projectOpenApiRegistry.registerPath({
         },
       },
     },
+    headers: IdempotencyKeyHeaderSchema,
   },
   responses: {
     201: {
@@ -133,6 +148,7 @@ projectOpenApiRegistry.registerPath({
       },
     },
     ...commonErrorResponses,
+    409: conflictResponse,
   },
 });
 
@@ -199,6 +215,7 @@ projectOpenApiRegistry.registerPath({
         },
       },
     },
+    headers: IfMatchHeaderSchema,
   },
   responses: {
     200: {
@@ -212,6 +229,7 @@ projectOpenApiRegistry.registerPath({
     },
     ...commonErrorResponses,
     404: projectNotFoundResponse,
+    409: conflictResponse,
   },
 });
 

@@ -39,6 +39,7 @@ export interface ProjectRecord {
   sharedCount: number;
   thumbnail: string | null;
   syncStatus: ProjectSyncStatus | null;
+  revision: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -62,6 +63,7 @@ export interface ProjectResult {
   sharedCount: number;
   thumbnail: string | null;
   syncStatus: ProjectSyncStatus | null;
+  revision: number;
   createdAt: string;
   updatedAt: string;
   permissions: ProjectPermissions;
@@ -108,6 +110,11 @@ export interface ProjectRepository {
     userId: string,
   ): Promise<{ record: ProjectRecord; role: ProjectRole } | null>;
   findAccessRole(id: string, userId: string): Promise<ProjectRole | null>;
-  update(id: string, ownerId: string, data: ProjectUpdateInput): Promise<ProjectRecord>;
+  update(
+    id: string,
+    ownerId: string,
+    data: ProjectUpdateInput,
+    expectedRevision?: number,
+  ): Promise<ProjectRecord>;
   softDelete(id: string, ownerId: string): Promise<void>;
 }

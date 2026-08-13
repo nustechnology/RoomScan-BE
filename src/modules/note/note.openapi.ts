@@ -1,6 +1,10 @@
 import { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
 
 import { ErrorResponseSchema } from '../../common/schemas/error.js';
+import {
+  IdempotencyKeyHeaderSchema,
+  IfMatchHeaderSchema,
+} from '../../common/schemas/request-headers.js';
 import { ScanIdParamSchema } from '../scan/scan.schemas.js';
 import {
   CreateNoteBodySchema,
@@ -116,6 +120,27 @@ const modelVersionMismatchResponse = {
   },
 };
 
+const revisionConflictResponse = {
+  description: 'The note has changed since the client last read it',
+  headers: rateLimitHeaders,
+  content: {
+    'application/json': {
+      schema: errorResponse,
+    },
+  },
+};
+
+const revisionOrModelConflictResponse = {
+  description:
+    'The note has changed since the client last read it, or the model version does not match the scan model version',
+  headers: rateLimitHeaders,
+  content: {
+    'application/json': {
+      schema: errorResponse,
+    },
+  },
+};
+
 noteOpenApiRegistry.registerPath({
   method: 'post',
   path: '/api/v1/scans/{scanId}/notes',
@@ -132,6 +157,7 @@ noteOpenApiRegistry.registerPath({
         },
       },
     },
+    headers: IdempotencyKeyHeaderSchema,
   },
   responses: {
     201: {
@@ -214,6 +240,7 @@ noteOpenApiRegistry.registerPath({
         },
       },
     },
+    headers: IfMatchHeaderSchema,
   },
   responses: {
     200: {
@@ -227,6 +254,7 @@ noteOpenApiRegistry.registerPath({
     },
     ...commonErrorResponses,
     404: noteNotFoundResponse,
+    409: revisionConflictResponse,
   },
 });
 
@@ -246,6 +274,7 @@ noteOpenApiRegistry.registerPath({
         },
       },
     },
+    headers: IfMatchHeaderSchema,
   },
   responses: {
     200: {
@@ -259,7 +288,7 @@ noteOpenApiRegistry.registerPath({
     },
     ...commonErrorResponses,
     404: noteNotFoundResponse,
-    409: modelVersionMismatchResponse,
+    409: revisionOrModelConflictResponse,
   },
 });
 

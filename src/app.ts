@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 
 import compression from 'compression';
 import cors from 'cors';
-import express, { type Express } from 'express';
+import express, { type Express, type RequestHandler } from 'express';
 import helmet from 'helmet';
 import type { Logger } from 'pino';
 import { pinoHttp } from 'pino-http';
@@ -34,6 +34,8 @@ import { createShareRouter } from './modules/share/share.routes.js';
 import type { ShareService } from './modules/share/share.service.js';
 import { createSharedProjectsRouter } from './modules/shared-projects/shared-projects.routes.js';
 import type { SharedProjectsService } from './modules/shared-projects/shared-projects.service.js';
+import { createSyncRouter } from './modules/sync/sync.routes.js';
+import type { SyncService } from './modules/sync/sync.service.js';
 import { createOpenApiDocument } from './openapi/document.js';
 
 export interface AppDependencies {
@@ -48,6 +50,8 @@ export interface AppDependencies {
   noteService: NoteService;
   shareService: ShareService;
   sharedProjectsService: SharedProjectsService;
+  syncService: SyncService;
+  idempotencyMiddleware: RequestHandler;
   accessTokenVerifier: AccessTokenVerifier;
   currentUserRepository: CurrentUserRepository;
   rateLimiters: RateLimiters;
@@ -81,6 +85,8 @@ export function createApp({
   noteService,
   shareService,
   sharedProjectsService,
+  syncService,
+  idempotencyMiddleware,
   accessTokenVerifier,
   currentUserRepository,
   rateLimiters,
@@ -170,6 +176,7 @@ export function createApp({
       projectService,
       accessTokenVerifier,
       currentUserRepository,
+      idempotency: idempotencyMiddleware,
     }),
   );
   app.use(
@@ -179,6 +186,7 @@ export function createApp({
       scanAssetService,
       accessTokenVerifier,
       currentUserRepository,
+      idempotency: idempotencyMiddleware,
     }),
   );
   app.use(
@@ -187,6 +195,7 @@ export function createApp({
       scanAssetService,
       accessTokenVerifier,
       currentUserRepository,
+      idempotency: idempotencyMiddleware,
     }),
   );
   app.use(
@@ -195,6 +204,7 @@ export function createApp({
       noteService,
       accessTokenVerifier,
       currentUserRepository,
+      idempotency: idempotencyMiddleware,
     }),
   );
   app.use(
@@ -203,12 +213,21 @@ export function createApp({
       shareService,
       accessTokenVerifier,
       currentUserRepository,
+      idempotency: idempotencyMiddleware,
     }),
   );
   app.use(
     API_PREFIX,
     createSharedProjectsRouter({
       sharedProjectsService,
+      accessTokenVerifier,
+      currentUserRepository,
+    }),
+  );
+  app.use(
+    API_PREFIX,
+    createSyncRouter({
+      syncService,
       accessTokenVerifier,
       currentUserRepository,
     }),

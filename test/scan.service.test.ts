@@ -30,6 +30,7 @@ function createRecord(overrides: Partial<ScanRecord> = {}): ScanRecord {
     modelVersion: 1,
     clientMutationId: null,
     deletedAt: null,
+    revision: 1,
     createdAt: NOW,
     updatedAt: NOW,
     ...overrides,

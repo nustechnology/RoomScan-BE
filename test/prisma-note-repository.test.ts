@@ -26,6 +26,8 @@ const noteSelect = {
   position: true,
   orientation: true,
   modelVersion: true,
+  deletedAt: true,
+  revision: true,
   createdAt: true,
   updatedAt: true,
 };
@@ -44,6 +46,8 @@ function createNoteRow(overrides: Record<string, unknown> = {}) {
     position: { x: 1.5, y: -2, z: 3.25 },
     orientation: { x: 0, y: 0, z: 1 },
     modelVersion: '1',
+    deletedAt: null,
+    revision: 1,
     createdAt: NOW,
     updatedAt: NOW,
     scan: {
@@ -62,6 +66,7 @@ function createClient() {
     findMany: vi.fn().mockResolvedValue([createNoteRow()]),
     count: vi.fn().mockResolvedValue(1),
     update: vi.fn().mockResolvedValue(createNoteRow()),
+    updateMany: vi.fn().mockResolvedValue({ count: 1 }),
     delete: vi.fn().mockResolvedValue({}),
   };
   const scan = {
@@ -126,6 +131,7 @@ describe('PrismaNoteRepository', () => {
     expect(note.findFirst).toHaveBeenCalledWith({
       where: {
         id: NOTE_ID,
+        deletedAt: null,
         scan: {
           deletedAt: null,
           project: { deletedAt: null },
@@ -206,14 +212,14 @@ describe('PrismaNoteRepository', () => {
 
     expect(note.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { scanId: SCAN_ID, scan: { deletedAt: null } },
+        where: { scanId: SCAN_ID, deletedAt: null, scan: { deletedAt: null } },
         orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
         skip: 0,
         take: 20,
       }),
     );
     expect(note.count).toHaveBeenCalledWith({
-      where: { scanId: SCAN_ID, scan: { deletedAt: null } },
+      where: { scanId: SCAN_ID, deletedAt: null, scan: { deletedAt: null } },
     });
     expect(result.total).toBe(3);
     expect(result.items).toHaveLength(1);
@@ -243,6 +249,7 @@ describe('PrismaNoteRepository', () => {
     expect(note.findFirst).toHaveBeenCalledWith({
       where: {
         id: NOTE_ID,
+        deletedAt: null,
         scan: {
           deletedAt: null,
           project: {
@@ -291,19 +298,25 @@ describe('PrismaNoteRepository', () => {
 
   it('updates content and color as the Owner and touches activity', async () => {
     const { client, note, scan, project } = createClient();
-    note.findFirst.mockResolvedValueOnce({ scanId: SCAN_ID });
-    note.update.mockResolvedValueOnce(createNoteRow({ content: 'Updated content' }));
+    note.findFirst.mockResolvedValue(createNoteRow({ content: 'Updated content' }));
     const repository = new PrismaNoteRepository(client);
 
     const result = await repository.update(NOTE_ID, OWNER_ID, {
       content: 'Updated content',
     });
 
-    expect(note.update).toHaveBeenCalledWith({
-      where: { id: NOTE_ID },
-      data: { content: 'Updated content' },
-      select: noteSelect,
+    expect(note.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: NOTE_ID,
+        deletedAt: null,
+        scan: {
+          deletedAt: null,
+          project: { ownerId: OWNER_ID, deletedAt: null },
+        },
+      },
+      data: { content: 'Updated content', revision: { increment: 1 } },
     });
+    expect(note.update).not.toHaveBeenCalled();
     expect(scan.update).toHaveBeenCalledOnce();
     expect(project.update).toHaveBeenCalledOnce();
     expect(result.content).toBe('Updated content');
@@ -311,6 +324,7 @@ describe('PrismaNoteRepository', () => {
 
   it('hides update from a Viewer or unrelated user', async () => {
     const { client, note } = createClient();
+    note.updateMany.mockResolvedValueOnce({ count: 0 });
     note.findFirst.mockResolvedValueOnce(null);
     const repository = new PrismaNoteRepository(client);
 
@@ -322,8 +336,7 @@ describe('PrismaNoteRepository', () => {
 
   it('moves a note to a new position as the Owner', async () => {
     const { client, note } = createClient();
-    note.findFirst.mockResolvedValueOnce({ scanId: SCAN_ID });
-    note.update.mockResolvedValueOnce(
+    note.findFirst.mockResolvedValue(
       createNoteRow({ position: { x: 9, y: 8, z: 7 }, orientation: null }),
     );
     const repository = new PrismaNoteRepository(client);
@@ -334,15 +347,22 @@ describe('PrismaNoteRepository', () => {
       modelVersion: '1',
     });
 
-    expect(note.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: {
-          position: { x: 9, y: 8, z: 7 },
-          orientation: Prisma.JsonNull,
-          modelVersion: '1',
+    expect(note.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: NOTE_ID,
+        deletedAt: null,
+        scan: {
+          deletedAt: null,
+          project: { ownerId: OWNER_ID, deletedAt: null },
         },
-      }),
-    );
+      },
+      data: {
+        position: { x: 9, y: 8, z: 7 },
+        orientation: Prisma.JsonNull,
+        modelVersion: '1',
+        revision: { increment: 1 },
+      },
+    });
     expect(result.position).toEqual({ x: 9, y: 8, z: 7 });
   });
 
@@ -353,7 +373,13 @@ describe('PrismaNoteRepository', () => {
 
     await repository.delete(NOTE_ID, OWNER_ID);
 
-    expect(note.delete).toHaveBeenCalledWith({ where: { id: NOTE_ID } });
+    expect(note.delete).not.toHaveBeenCalled();
+    expect(note.update).toHaveBeenCalledTimes(1);
+    const noteUpdate = note.update.mock.calls[0]?.[0] as
+      { where: { id: string }; data: { deletedAt: unknown; revision: unknown } } | undefined;
+    expect(noteUpdate?.where).toEqual({ id: NOTE_ID });
+    expect(noteUpdate?.data.deletedAt).toBeInstanceOf(Date);
+    expect(noteUpdate?.data.revision).toEqual({ increment: 1 });
     expect(scan.update).toHaveBeenCalledOnce();
     expect(project.update).toHaveBeenCalledOnce();
   });
@@ -364,6 +390,6 @@ describe('PrismaNoteRepository', () => {
     const repository = new PrismaNoteRepository(client);
 
     await expect(repository.delete(NOTE_ID, VIEWER_ID)).rejects.toBeInstanceOf(NoteNotFoundError);
-    expect(note.delete).not.toHaveBeenCalled();
+    expect(note.update).not.toHaveBeenCalled();
   });
 });

@@ -36,6 +36,7 @@ function makeConfig(logLevel: AppConfig['logLevel']): AppConfig {
     assetMaxModelSizeBytes: 500_000_000,
     assetMaxThumbnailSizeBytes: 10_000_000,
     invitationTtlSeconds: 604_800,
+    idempotencyKeyTtlSeconds: 86_400,
     invitationBaseUrl: 'http://localhost:3000',
     mailProvider: 'log',
     smtpHost: '',

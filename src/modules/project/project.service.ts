@@ -43,6 +43,7 @@ function toResult(record: ProjectRecord, role: ProjectRole): ProjectResult {
     sharedCount: record.sharedCount,
     thumbnail: record.thumbnail,
     syncStatus: record.syncStatus,
+    revision: record.revision,
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString(),
     permissions: permissionsFor(role),
@@ -88,9 +89,13 @@ export class ProjectService {
     ownerId: string,
     projectId: string,
     data: ProjectUpdateInput,
+    expectedRevision?: number,
   ): Promise<ProjectResult> {
     await this.#permissions.requireOwner(projectId, ownerId);
-    const record = await this.#repository.update(projectId, ownerId, data);
+    const record =
+      expectedRevision === undefined
+        ? await this.#repository.update(projectId, ownerId, data)
+        : await this.#repository.update(projectId, ownerId, data, expectedRevision);
     return toResult(record, 'OWNER');
   }
 

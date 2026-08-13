@@ -1,5 +1,6 @@
 import { Prisma, type PrismaClient } from '../../generated/prisma/client.js';
 import { ProjectRole as PrismaProjectRole } from '../../generated/prisma/enums.js';
+import { RevisionConflictError } from '../../common/errors/revision-conflict.js';
 import { ScanNotFoundError } from '../../modules/scan/scan.errors.js';
 import type {
   ScanCreateInput,
@@ -29,6 +30,7 @@ const scanSelect = {
   modelVersion: true,
   clientMutationId: true,
   deletedAt: true,
+  revision: true,
   createdAt: true,
   updatedAt: true,
   _count: {
@@ -54,6 +56,7 @@ interface ScanRow {
   modelVersion: number;
   clientMutationId: string | null;
   deletedAt: Date | null;
+  revision: number;
   createdAt: Date;
   updatedAt: Date;
   _count: {
@@ -84,6 +87,7 @@ function toScanRecord(row: ScanRow): ScanRecord {
     modelVersion: row.modelVersion,
     clientMutationId: row.clientMutationId,
     deletedAt: row.deletedAt,
+    revision: row.revision,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -266,15 +270,35 @@ export class PrismaScanRepository implements ScanRepository {
     };
   }
 
-  async update(id: string, ownerId: string, data: ScanUpdateInput): Promise<ScanRecord> {
+  async update(
+    id: string,
+    ownerId: string,
+    data: ScanUpdateInput,
+    expectedRevision?: number,
+  ): Promise<ScanRecord> {
     return await this.#client.$transaction(async (transaction) => {
       const result = await transaction.scan.updateMany({
-        where: { id, deletedAt: null, project: { ownerId, deletedAt: null } },
-        data,
+        where: {
+          id,
+          deletedAt: null,
+          project: { ownerId, deletedAt: null },
+          ...(expectedRevision === undefined ? {} : { revision: expectedRevision }),
+        },
+        data: {
+          ...data,
+          revision: { increment: 1 },
+        },
       });
 
       if (result.count === 0) {
-        throw new ScanNotFoundError();
+        const existing = await transaction.scan.findFirst({
+          where: { id, deletedAt: null, project: { ownerId, deletedAt: null } },
+          select: { revision: true },
+        });
+        if (existing === null) {
+          throw new ScanNotFoundError();
+        }
+        throw new RevisionConflictError();
       }
 
       const row = await transaction.scan.findFirst({

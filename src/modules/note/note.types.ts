@@ -23,6 +23,8 @@ export interface NoteRecord {
   position: Vector3;
   orientation: Vector3 | null;
   modelVersion: string;
+  deletedAt: Date | null;
+  revision: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -42,6 +44,7 @@ export interface NoteResult {
   position: Vector3;
   orientation: Vector3 | null;
   modelVersion: string;
+  revision: number;
   creator: NoteCreator;
   createdAt: string;
   updatedAt: string;
@@ -103,11 +106,17 @@ export interface NoteRepository {
     noteId: string,
     userId: string,
   ): Promise<{ record: NoteRecord; role: NoteRole } | null>;
-  update(noteId: string, ownerId: string, data: NoteUpdateInput): Promise<NoteRecord>;
+  update(
+    noteId: string,
+    ownerId: string,
+    data: NoteUpdateInput,
+    expectedRevision?: number,
+  ): Promise<NoteRecord>;
   updatePosition(
     noteId: string,
     ownerId: string,
     data: NotePositionUpdateInput,
+    expectedRevision?: number,
   ): Promise<NoteRecord>;
   delete(noteId: string, ownerId: string): Promise<void>;
 }

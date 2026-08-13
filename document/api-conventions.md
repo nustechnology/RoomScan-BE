@@ -27,6 +27,8 @@
   current Viewer at `GET /api/v1/shared-projects`,
   `GET /api/v1/shared-projects/:projectId`, and
   `DELETE /api/v1/shared-projects/:projectId`.
+- Sync pulls changed resources at `GET /api/v1/sync/changes` and reports sync
+  status at `GET /api/v1/sync/status`.
 - Swagger UI remains at `/api-doc`; raw OpenAPI is `/api-doc.json`.
 - Resource paths use plural nouns and kebab-case when business modules arrive.
 
@@ -66,6 +68,38 @@ dependencies.
 Every response includes a request correlation ID in the `x-request-id` header.
 Error responses also include it in the `requestId` field. A non-empty incoming
 `x-request-id` may be reused; otherwise the application generates one.
+
+## Idempotency-Key and optimistic concurrency
+
+Two cross-cutting mechanisms make offline-client retries safe:
+
+- **`Idempotency-Key` header** — the mutation endpoints below accept an optional
+  `Idempotency-Key` header (1–128 characters). The first request reserves the
+  key (scoped to the current user) and stores a SHA-256 hash of the method,
+  path, and body. A retry with the same key and body replays the original
+  status code and body without performing the mutation again. Reusing a key
+  with a different body returns `409 IDEMPOTENCY_KEY_MISMATCH`. A concurrent
+  request with the same key that is still being processed returns `409
+IDEMPOTENCY_KEY_IN_PROGRESS`. Only successful (`2xx`) responses are cached; a
+  failed request releases the key so the same key can retry the mutation. Keys
+  are honored for `IDEMPOTENCY_KEY_TTL_SECONDS` (24 hours by default); an
+  expired key is treated as unused. Applied to `POST /api/v1/projects`,
+  `POST /api/v1/projects/:projectId/scans`,
+  `POST /api/v1/scans/:scanId/notes`,
+  `POST /api/v1/scans/:scanId/assets/upload-sessions`, and
+  `POST /api/v1/projects/:projectId/invitations`.
+- **`revision` and `If-Match` header** — every `project`, `scan`, and `note`
+  response exposes an integer `revision` that increments on each mutation.
+  `PATCH /api/v1/projects/:projectId`, `PATCH /api/v1/scans/:scanId`,
+  `PATCH /api/v1/notes/:noteId`, and `PATCH /api/v1/notes/:noteId/position`
+  accept an optional `If-Match` header containing the last-read revision.
+  A mismatch returns `409 REVISION_CONFLICT`; a malformed header returns
+  `400 VALIDATION_ERROR`; an absent header falls back to last-write-wins.
+  Delete always wins: a stale update against a deleted or inaccessible resource
+  returns the standard hidden 404 and never restores the record.
+
+Idempotency records live in the `idempotency_records` table and are scoped to
+the acting user, so two different users can safely reuse the same key value.
 
 ## Rate limiting
 
@@ -228,6 +262,7 @@ Project response:
   "sharedCount": 0,
   "thumbnail": null,
   "syncStatus": null,
+  "revision": 3,
   "createdAt": "2026-07-29T10:00:00.000Z",
   "updatedAt": "2026-07-29T10:00:00.000Z",
   "permissions": {
@@ -241,7 +276,8 @@ Project response:
 }
 ```
 
-`owner.email` is nullable. An active Viewer receives role `VIEWER` with only
+`owner.email` is nullable. `revision` increments on every Owner update and is
+used for optimistic concurrency through the `If-Match` header. An active Viewer receives role `VIEWER` with only
 `canView: true`. `sharedCount` counts active Viewer access records.
 `scanCount` counts active (non-deleted) scans in the project, and `scans` lists
 those scans ordered by newest `createdAt` first with `id`, `name`,
@@ -295,9 +331,14 @@ Authorization and deletion rules:
 
 Error behavior:
 
-- `400 VALIDATION_ERROR`: invalid body, path parameters, or query parameters.
+- `400 VALIDATION_ERROR`: invalid body, path parameters, query parameters, or
+  `If-Match` header.
 - `401 UNAUTHORIZED`: missing/invalid access token or missing current user.
 - `404 PROJECT_NOT_FOUND`: project missing, deleted, revoked, or inaccessible.
+- `409 REVISION_CONFLICT`: `If-Match` does not match the project's revision.
+- `409 IDEMPOTENCY_KEY_MISMATCH` or `IDEMPOTENCY_KEY_IN_PROGRESS`: the
+  `Idempotency-Key` was reused with a different body or is still processing
+  (create only).
 - `429 RATE_LIMIT_EXCEEDED`: API quota exceeded.
 - `500 INTERNAL_SERVER_ERROR`: unexpected failure without Prisma, SQL, or secret
   leakage.
@@ -334,6 +375,7 @@ Scan response:
   "assetStatus": "NONE",
   "syncStatus": "PENDING",
   "modelVersion": 1,
+  "revision": 1,
   "createdAt": "2026-07-29T10:00:00.000Z",
   "updatedAt": "2026-07-29T10:00:00.000Z",
   "permissions": {
@@ -348,9 +390,11 @@ Scan response:
 `creator.email` is nullable. `noteCount` counts active notes attached to the
 scan. `assetStatus` uses `NONE | PENDING | UPLOADING | UPLOADED | FAILED` and
 starts `NONE` for a metadata-only scan; `syncStatus` uses `PENDING | SYNCING |
-SYNCED | FAILED | CONFLICT` and starts `PENDING`. The metadata endpoints never
-accept model-file bytes; the asset and sync status write path is the
-responsibility of the scan-asset module.
+SYNCED | FAILED | CONFLICT` and starts `PENDING`. `revision` increments on
+every Owner update and is used for optimistic concurrency through the
+`If-Match` header. The metadata endpoints never accept model-file bytes; the
+asset and sync status write path is the responsibility of the scan-asset
+module.
 
 Create Scan accepts optional `thumbnail` and `scanFile` upload descriptors. When
 present, the API creates the scan and mints an upload session for each
@@ -447,11 +491,16 @@ Authorization and deletion rules:
 
 Error behavior:
 
-- `400 VALIDATION_ERROR`: invalid body, path parameters, or query parameters.
+- `400 VALIDATION_ERROR`: invalid body, path parameters, query parameters, or
+  `If-Match` header.
 - `401 UNAUTHORIZED`: missing/invalid access token or missing current user.
 - `404 PROJECT_NOT_FOUND`: parent project missing, deleted, or inaccessible.
 - `404 SCAN_NOT_FOUND`: scan missing, deleted, or inaccessible through its
   parent project.
+- `409 REVISION_CONFLICT`: `If-Match` does not match the scan's revision.
+- `409 IDEMPOTENCY_KEY_MISMATCH` or `IDEMPOTENCY_KEY_IN_PROGRESS`: the
+  `Idempotency-Key` was reused with a different body or is still processing
+  (create only).
 - `429 RATE_LIMIT_EXCEEDED`: API quota exceeded.
 - `500 INTERNAL_SERVER_ERROR`: unexpected failure without Prisma, SQL, or secret
   leakage.
@@ -526,6 +575,9 @@ Error behavior:
 - `409 UPLOAD_SESSION_EXPIRED`: upload session expired before completion.
 - `409 ASSET_UPLOAD_FAILED`: the uploaded object is missing or its stored size
   or content type does not match the session.
+- `409 IDEMPOTENCY_KEY_MISMATCH` or `IDEMPOTENCY_KEY_IN_PROGRESS`: the
+  `Idempotency-Key` was reused with a different body or is still processing
+  (upload-session create only).
 - `503 STORAGE_UNAVAILABLE`: the storage provider is unavailable.
 - `429 RATE_LIMIT_EXCEEDED`: API quota exceeded.
 - `500 INTERNAL_SERVER_ERROR`: unexpected failure without Prisma, SQL, or secret
@@ -558,6 +610,7 @@ Note response:
   "position": { "x": 1.5, "y": -2, "z": 3.25 },
   "orientation": { "x": 0, "y": 0, "z": 1 },
   "modelVersion": "1",
+  "revision": 2,
   "creator": {
     "id": "eb5d278f-c857-45c7-887d-7be65288cb75",
     "email": "owner@example.com"
@@ -610,17 +663,27 @@ Authorization and behavior rules:
 - A note cannot exist outside a scan. Deleting a scan or project makes its notes
   inaccessible: scan endpoints filter notes on the non-deleted scan, and the
   `notes` foreign key cascades when a scan row is physically removed.
-- Deleting a note is a physical delete that returns `204`.
+- Deleting a note is a soft delete that sets `deletedAt` and returns `204`;
+  repeated deletion is idempotent. Soft-deleted notes stay out of list and
+  detail responses but remain visible to sync so a client can reconcile.
+- `PATCH /api/v1/notes/:noteId` and `PATCH /api/v1/notes/:noteId/position`
+  accept an optional `If-Match` header; a stale revision returns `409
+REVISION_CONFLICT` and a deleted note returns the hidden `404`.
 
 Error behavior:
 
-- `400 VALIDATION_ERROR`: invalid body, path parameters, or query parameters.
+- `400 VALIDATION_ERROR`: invalid body, path parameters, query parameters, or
+  `If-Match` header.
 - `401 UNAUTHORIZED`: missing/invalid access token or missing current user.
 - `404 SCAN_NOT_FOUND`: parent scan missing, deleted, or inaccessible.
 - `404 NOTE_NOT_FOUND`: note missing, deleted, or inaccessible through its
   parent scan.
 - `409 MODEL_VERSION_MISMATCH`: submitted model version differs from the scan's
   current model version.
+- `409 REVISION_CONFLICT`: `If-Match` does not match the note's revision.
+- `409 IDEMPOTENCY_KEY_MISMATCH` or `IDEMPOTENCY_KEY_IN_PROGRESS`: the
+  `Idempotency-Key` was reused with a different body or is still processing
+  (create only).
 - `429 RATE_LIMIT_EXCEEDED`: API quota exceeded.
 - `500 INTERNAL_SERVER_ERROR`: unexpected failure without Prisma, SQL, note
   content, or secret leakage.
@@ -975,6 +1038,84 @@ Error behavior:
 - `429 RATE_LIMIT_EXCEEDED`: API quota exceeded.
 - `500 INTERNAL_SERVER_ERROR`: unexpected failure without Prisma, SQL, or secret
   leakage.
+
+## Sync
+
+Both sync endpoints require a valid Bearer access token and expose only
+resources visible to the current user: projects they own or where they have an
+active (`revokedAt` null) Viewer access. A revoked Viewer therefore receives no
+new changes after revocation.
+
+### `GET /api/v1/sync/changes`
+
+Query parameters:
+
+- `since`: optional ISO-8601 timestamp; return resources changed after it.
+- `cursor`: optional opaque string from a previous response's `nextCursor` (or
+  from any change item's `cursor`); takes precedence over `since`.
+- `limit`: optional integer 1–100, default 20.
+
+`since` and `cursor` are mutually exclusive. Malformed `since`, `limit`, or a
+cursor that cannot be decoded returns `400`. Success `200`:
+
+```json
+{
+  "changes": [
+    {
+      "resourceType": "project",
+      "resourceId": "a1b2c3d4-e5f6-4890-abcd-ef1234567890",
+      "operation": "UPDATE",
+      "revision": 3,
+      "syncStatus": null,
+      "changedAt": "2026-07-29T10:00:00.000Z",
+      "deletedAt": null,
+      "cursor": "opaque-cursor"
+    }
+  ],
+  "nextCursor": "opaque-cursor"
+}
+```
+
+Each change item has:
+
+- `resourceType`: `project`, `scan`, or `note`.
+- `operation`: `CREATE`, `UPDATE`, or `DELETE`. `DELETE` is set when `deletedAt`
+  is present; otherwise `CREATE` when `revision` is 1 and `UPDATE` when greater.
+- `revision`: the resource's current revision.
+- `syncStatus`: the scan's `syncStatus` for scan changes; `null` otherwise.
+- `changedAt`: the resource's `updatedAt`.
+- `deletedAt`: present for delete tombstones.
+- `cursor`: an opaque cursor that resumes the feed after this item.
+
+`nextCursor` is the last item's cursor when more changes exist and `null`
+otherwise. Deleted resources remain visible to the Owner as tombstones; an
+active Viewer still receives scan and note deletions inside projects they can
+access.
+
+### `GET /api/v1/sync/status`
+
+Query parameter `projectId` is optional. Without it the endpoint returns
+`{ "items": [...] }` for every visible project; with it, a single status object
+(projects the user cannot access are hidden behind `404 PROJECT_NOT_FOUND`).
+Each status has `projectId`, `syncStatus`, `pendingCount`, `syncingCount`,
+`failedCount`, `conflictCount`, `lastSyncedAt`, and `requiredAssetsUploaded`.
+`syncStatus` uses the precedence `CONFLICT` > `FAILED` > `SYNCING` > `PENDING` >
+`SYNCED`, and a project with no active scans is `PENDING`.
+`requiredAssetsUploaded` is true only when every active scan has its `MODEL`
+asset uploaded, so a project is fully synced only when it is `SYNCED` and its
+required assets are uploaded. `lastSyncedAt` is the latest `updatedAt` among
+`SYNCED` scans, or `null`.
+
+### Error behavior
+
+- `400 VALIDATION_ERROR`: malformed `since`, `limit`, `projectId`, or both
+  `since` and `cursor`.
+- `400 INVALID_CURSOR`: an undecodable cursor.
+- `401 UNAUTHORIZED`: missing/invalid access token.
+- `404 PROJECT_NOT_FOUND`: the requested project is missing, deleted, or
+  inaccessible (status with `projectId`).
+- `429 RATE_LIMIT_EXCEEDED`: API quota exceeded.
+- `500 INTERNAL_SERVER_ERROR`: unexpected failure.
 
 ## Health semantics
 

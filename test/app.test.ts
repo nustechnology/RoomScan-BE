@@ -1,9 +1,11 @@
+import type { RequestHandler } from 'express';
 import pino from 'pino';
 import request from 'supertest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
 import { createApp, redactInvitationToken } from '../src/app.js';
+import type { SyncService } from '../src/modules/sync/sync.service.js';
 import type {
   AccessTokenVerifier,
   CurrentUserRepository,
@@ -65,6 +67,7 @@ const config: AppConfig = {
   assetMaxModelSizeBytes: 500_000_000,
   assetMaxThumbnailSizeBytes: 10_000_000,
   invitationTtlSeconds: 604_800,
+  idempotencyKeyTtlSeconds: 86_400,
   invitationBaseUrl: 'http://localhost:3000',
   mailProvider: 'log',
   smtpHost: '',
@@ -147,6 +150,12 @@ describe('RoomScan HTTP application', () => {
     detail: vi.fn(),
     remove: vi.fn(),
   } as unknown as SharedProjectsService;
+  const syncService = {
+    listChanges: vi.fn(),
+    listStatus: vi.fn(),
+    getProjectStatus: vi.fn(),
+  } as unknown as SyncService;
+  const idempotencyMiddleware: RequestHandler = (_request, _response, next) => next();
 
   const app = createApp({
     config,
@@ -160,6 +169,8 @@ describe('RoomScan HTTP application', () => {
     noteService,
     shareService,
     sharedProjectsService,
+    syncService,
+    idempotencyMiddleware,
     accessTokenVerifier,
     currentUserRepository,
     rateLimiters,
@@ -210,6 +221,8 @@ describe('RoomScan HTTP application', () => {
       noteService,
       shareService,
       sharedProjectsService,
+      syncService,
+      idempotencyMiddleware,
       accessTokenVerifier,
       currentUserRepository,
       rateLimiters,
@@ -490,6 +503,8 @@ describe('RoomScan HTTP application', () => {
       noteService,
       shareService,
       sharedProjectsService,
+      syncService,
+      idempotencyMiddleware,
       accessTokenVerifier,
       currentUserRepository,
       rateLimiters,

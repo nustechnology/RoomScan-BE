@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import { createApp } from './app.js';
+import { idempotencyMiddleware } from './common/idempotency/idempotency.middleware.js';
 import { createRateLimiters } from './common/middleware/rate-limit.js';
 import { loadConfig } from './config/env.js';
 import { AppleIdentityTokenVerifier } from './infrastructure/auth/apple-identity-verifier.js';
@@ -17,6 +18,8 @@ import { PrismaScanAssetRepository } from './infrastructure/database/prisma-scan
 import { PrismaNoteRepository } from './infrastructure/database/prisma-note-repository.js';
 import { PrismaShareRepository } from './infrastructure/database/prisma-share-repository.js';
 import { PrismaSharedProjectsRepository } from './infrastructure/database/prisma-shared-projects-repository.js';
+import { PrismaIdempotencyRepository } from './infrastructure/database/prisma-idempotency-repository.js';
+import { PrismaSyncRepository } from './infrastructure/database/prisma-sync-repository.js';
 import { LocalStorageAdapter } from './infrastructure/storage/local-storage-adapter.js';
 import { MinioStorageAdapter } from './infrastructure/storage/minio-storage-adapter.js';
 import type { StorageAdapter } from './infrastructure/storage/storage.types.js';
@@ -32,6 +35,7 @@ import { ScanAssetService } from './modules/scan-asset/scan-asset.service.js';
 import { NoteService } from './modules/note/note.service.js';
 import { ShareService } from './modules/share/share.service.js';
 import { SharedProjectsService } from './modules/shared-projects/shared-projects.service.js';
+import { SyncService } from './modules/sync/sync.service.js';
 
 const config = loadConfig();
 const logger = createLogger(config);
@@ -45,6 +49,8 @@ const scanAssetRepository = new PrismaScanAssetRepository(prismaClient);
 const noteRepository = new PrismaNoteRepository(prismaClient);
 const shareRepository = new PrismaShareRepository(prismaClient);
 const sharedProjectsRepository = new PrismaSharedProjectsRepository(prismaClient);
+const idempotencyRepository = new PrismaIdempotencyRepository(prismaClient);
+const syncRepository = new PrismaSyncRepository(prismaClient);
 function createStorageAdapter(): StorageAdapter {
   if (config.storageProvider === 'minio') {
     return new MinioStorageAdapter({
@@ -137,6 +143,13 @@ const shareService = new ShareService({
 const sharedProjectsService = new SharedProjectsService({
   repository: sharedProjectsRepository,
 });
+const syncService = new SyncService({
+  repository: syncRepository,
+});
+const idempotency = idempotencyMiddleware({
+  repository: idempotencyRepository,
+  ttlSeconds: config.idempotencyKeyTtlSeconds,
+});
 const rateLimiters = createRateLimiters(config, logger);
 const app = createApp({
   config,
@@ -150,6 +163,8 @@ const app = createApp({
   noteService,
   shareService,
   sharedProjectsService,
+  syncService,
+  idempotencyMiddleware: idempotency,
   accessTokenVerifier,
   currentUserRepository,
   rateLimiters,

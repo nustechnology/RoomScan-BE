@@ -25,6 +25,7 @@ function createRecord(overrides: Partial<ProjectRecord> = {}): ProjectRecord {
     sharedCount: 1,
     thumbnail: null,
     syncStatus: null,
+    revision: 1,
     createdAt: NOW,
     updatedAt: NOW,
     ...overrides,
@@ -74,6 +75,7 @@ describe('ProjectService', () => {
       sharedCount: 1,
       thumbnail: null,
       syncStatus: null,
+      revision: 1,
       createdAt: NOW.toISOString(),
       updatedAt: NOW.toISOString(),
       permissions: {

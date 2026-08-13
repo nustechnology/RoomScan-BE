@@ -1,5 +1,6 @@
 import type { PrismaClient } from '../../generated/prisma/client.js';
 import { ProjectRole as PrismaProjectRole } from '../../generated/prisma/enums.js';
+import { RevisionConflictError } from '../../common/errors/revision-conflict.js';
 import { ProjectNotFoundError } from '../../modules/project/project.errors.js';
 import type {
   ProjectCreateInput,
@@ -59,6 +60,7 @@ const projectSelect = {
       },
     },
   },
+  revision: true,
   createdAt: true,
   updatedAt: true,
 } as const;
@@ -90,6 +92,7 @@ interface ProjectRow {
     accesses: number;
     scans: number;
   };
+  revision: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -123,6 +126,7 @@ function toProjectRecord(row: ProjectRow): ProjectRecord {
     sharedCount: row._count.accesses,
     thumbnail: null,
     syncStatus: null,
+    revision: row.revision,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -240,15 +244,35 @@ export class PrismaProjectRepository implements ProjectRepository {
     return project.ownerId === userId ? 'OWNER' : 'VIEWER';
   }
 
-  async update(id: string, ownerId: string, data: ProjectUpdateInput): Promise<ProjectRecord> {
+  async update(
+    id: string,
+    ownerId: string,
+    data: ProjectUpdateInput,
+    expectedRevision?: number,
+  ): Promise<ProjectRecord> {
     return await this.#client.$transaction(async (transaction) => {
       const result = await transaction.project.updateMany({
-        where: { id, ownerId, deletedAt: null },
-        data,
+        where: {
+          id,
+          ownerId,
+          deletedAt: null,
+          ...(expectedRevision === undefined ? {} : { revision: expectedRevision }),
+        },
+        data: {
+          ...data,
+          revision: { increment: 1 },
+        },
       });
 
       if (result.count === 0) {
-        throw new ProjectNotFoundError();
+        const existing = await transaction.project.findFirst({
+          where: { id, ownerId, deletedAt: null },
+          select: { revision: true },
+        });
+        if (existing === null) {
+          throw new ProjectNotFoundError();
+        }
+        throw new RevisionConflictError();
       }
 
       const row = await transaction.project.findFirst({

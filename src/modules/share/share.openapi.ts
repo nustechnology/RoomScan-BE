@@ -1,6 +1,7 @@
 import { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
 
 import { ErrorResponseSchema } from '../../common/schemas/error.js';
+import { IdempotencyKeyHeaderSchema } from '../../common/schemas/request-headers.js';
 import { ProjectIdParamSchema } from '../project/project.schemas.js';
 import {
   InvitationAcceptResponseSchema,
@@ -117,7 +118,7 @@ const errorResponses = {
   },
   409: {
     description:
-      'The invitation or access state is final: already sent to this email, already accepted, expired, revoked, declined, already has access, or the project is not shareable',
+      'The invitation or access state is final (already sent to this email, already accepted, expired, revoked, declined, already has access, or the project is not shareable), or the Idempotency-Key was reused with a different request body',
     headers: rateLimitHeaders,
     content: {
       'application/json': {
@@ -172,6 +173,7 @@ shareOpenApiRegistry.registerPath({
         },
       },
     },
+    headers: IdempotencyKeyHeaderSchema,
   },
   responses: {
     201: {

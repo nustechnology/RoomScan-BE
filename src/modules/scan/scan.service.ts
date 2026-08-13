@@ -45,6 +45,7 @@ function toResult(record: ScanRecord, role: ScanRole): ScanResult {
     assetStatus: record.assetStatus,
     syncStatus: record.syncStatus,
     modelVersion: record.modelVersion,
+    revision: record.revision,
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString(),
     permissions: permissionsFor(role),
@@ -113,7 +114,12 @@ export class ScanService {
     return toResult(result.record, result.role);
   }
 
-  async update(userId: string, scanId: string, data: ScanUpdateInput): Promise<ScanResult> {
+  async update(
+    userId: string,
+    scanId: string,
+    data: ScanUpdateInput,
+    expectedRevision?: number,
+  ): Promise<ScanResult> {
     const projectId = await this.#repository.findProjectId(scanId);
 
     if (projectId === null) {
@@ -129,7 +135,10 @@ export class ScanService {
       throw error;
     }
 
-    const record = await this.#repository.update(scanId, userId, data);
+    const record =
+      expectedRevision === undefined
+        ? await this.#repository.update(scanId, userId, data)
+        : await this.#repository.update(scanId, userId, data, expectedRevision);
     return toResult(record, 'OWNER');
   }
 

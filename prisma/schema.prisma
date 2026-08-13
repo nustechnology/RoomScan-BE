@@ -70,6 +70,7 @@ model User {
   notes           Note[]
   invitations     Invitation[] @relation("InvitationCreator")
   acceptedInvitations Invitation[] @relation("InvitationAcceptor")
+  idempotencyRecords IdempotencyRecord[]
 
   @@unique([provider, providerId])
   @@map("users")
@@ -95,6 +96,7 @@ model Project {
   description String?   @db.VarChar(500)
   ownerId     String    @db.Uuid
   deletedAt   DateTime?
+  revision    Int       @default(1)
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
@@ -164,6 +166,7 @@ model Scan {
   modelVersion     Int         @default(1)
   clientMutationId String?     @db.VarChar(128)
   deletedAt        DateTime?
+  revision         Int         @default(1)
   createdAt        DateTime    @default(now())
   updatedAt        DateTime    @updatedAt
 
@@ -174,6 +177,7 @@ model Scan {
 
   @@unique([projectId, clientMutationId])
   @@index([projectId, deletedAt, createdAt, id])
+  @@index([projectId, updatedAt, id])
   @@index([createdById])
   @@map("scans")
 }
@@ -211,13 +215,32 @@ model Note {
   position     Json
   orientation  Json?
   modelVersion String    @db.VarChar(64)
+  deletedAt    DateTime?
+  revision     Int       @default(1)
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
   scan    Scan @relation(fields: [scanId], references: [id], onDelete: Cascade)
   creator User @relation(fields: [createdById], references: [id], onDelete: Restrict)
 
-  @@index([scanId, updatedAt, id])
+  @@index([scanId, deletedAt, updatedAt, id])
   @@index([createdById])
   @@map("notes")
+}
+
+model IdempotencyRecord {
+  id           String   @id @default(uuid()) @db.Uuid
+  userId       String   @db.Uuid
+  key          String   @db.VarChar(128)
+  requestHash  String   @db.VarChar(64)
+  statusCode   Int      @default(0)
+  responseBody Json?
+  createdAt    DateTime @default(now())
+  expiresAt    DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, key])
+  @@index([expiresAt])
+  @@map("idempotency_records")
 }

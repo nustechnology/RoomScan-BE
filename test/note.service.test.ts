@@ -28,6 +28,8 @@ function createRecord(overrides: Partial<NoteRecord> = {}): NoteRecord {
     position: { x: 1.5, y: -2, z: 3.25 },
     orientation: { x: 0, y: 0, z: 1 },
     modelVersion: '1',
+    deletedAt: null,
+    revision: 1,
     createdAt: NOW,
     updatedAt: NOW,
     ...overrides,

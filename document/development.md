@@ -190,7 +190,13 @@ migration. The `add_invitation_recipient_and_lifecycle` migration extends
 exists per recipient, and drops the now-unused `declinedAt` column from
 `project_accesses`. Final decline lifecycle data is stored on the invitation
 row (`status` and `declinedAt`); declined invitations never create project
-access rows.
+access rows. The `add_sync_idempotency_revision` migration adds an integer
+`revision` (default 1) to `projects`, `scans`, and `notes`; adds a nullable
+`deletedAt` to `notes` so notes are soft-deletable; creates the
+`idempotency_records` table with a unique `(userId, key)` pair, a SHA-256
+`requestHash`, a finalized `statusCode`/`responseBody`, and an `expiresAt`; and
+adds `(updatedAt, id)` ordering indexes to `scans` and `notes` for the sync
+change feed.
 Tests use Prisma delegate doubles; native migration and endpoint verification
 use the PostgreSQL `db` container.
 

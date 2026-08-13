@@ -1,5 +1,6 @@
 import { Prisma, type PrismaClient } from '../../generated/prisma/client.js';
 import { ProjectRole as PrismaProjectRole } from '../../generated/prisma/enums.js';
+import { RevisionConflictError } from '../../common/errors/revision-conflict.js';
 import { NoteNotFoundError } from '../../modules/note/note.errors.js';
 import type {
   NoteCreateInput,
@@ -52,6 +53,8 @@ const noteSelect = {
   position: true,
   orientation: true,
   modelVersion: true,
+  deletedAt: true,
+  revision: true,
   createdAt: true,
   updatedAt: true,
 } as const;
@@ -69,6 +72,8 @@ type NoteRow = {
   position: Prisma.JsonValue;
   orientation: Prisma.JsonValue;
   modelVersion: string;
+  deletedAt: Date | null;
+  revision: number;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -84,6 +89,8 @@ function toNoteRecord(row: NoteRow): NoteRecord {
     position: parseVector3(row.position),
     orientation: row.orientation === null ? null : parseVector3(row.orientation),
     modelVersion: row.modelVersion,
+    deletedAt: row.deletedAt,
+    revision: row.revision,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -105,6 +112,7 @@ function orderByFor(sort: NoteListOptions['sort']): NoteOrderBy[] {
 function viewableNoteWhere(noteId: string, userId: string) {
   return {
     id: noteId,
+    deletedAt: null,
     scan: {
       deletedAt: null,
       project: {
@@ -148,6 +156,7 @@ export class PrismaNoteRepository implements NoteRepository {
     const row = await this.#client.note.findFirst({
       where: {
         id: noteId,
+        deletedAt: null,
         scan: {
           deletedAt: null,
           project: { deletedAt: null },
@@ -200,6 +209,7 @@ export class PrismaNoteRepository implements NoteRepository {
   ): Promise<{ items: NoteRecord[]; total: number }> {
     const where = {
       scanId,
+      deletedAt: null,
       scan: {
         deletedAt: null,
       },
@@ -244,21 +254,47 @@ export class PrismaNoteRepository implements NoteRepository {
     };
   }
 
-  async update(noteId: string, ownerId: string, data: NoteUpdateInput): Promise<NoteRecord> {
+  async update(
+    noteId: string,
+    ownerId: string,
+    data: NoteUpdateInput,
+    expectedRevision?: number,
+  ): Promise<NoteRecord> {
     return await this.#client.$transaction(async (transaction) => {
-      const note = await this.#findOwnedNote(transaction, noteId, ownerId);
+      const result = await transaction.note.updateMany({
+        where: {
+          id: noteId,
+          deletedAt: null,
+          scan: {
+            deletedAt: null,
+            project: { ownerId, deletedAt: null },
+          },
+          ...(expectedRevision === undefined ? {} : { revision: expectedRevision }),
+        },
+        data: {
+          ...data,
+          revision: { increment: 1 },
+        },
+      });
 
-      if (note === null) {
-        throw new NoteNotFoundError();
+      if (result.count === 0) {
+        const note = await this.#findOwnedNote(transaction, noteId, ownerId);
+        if (note === null) {
+          throw new NoteNotFoundError();
+        }
+        throw new RevisionConflictError();
       }
 
-      const row = await transaction.note.update({
-        where: { id: noteId },
-        data,
+      const row = await transaction.note.findFirst({
+        where: { id: noteId, deletedAt: null },
         select: noteSelect,
       });
 
-      await this.#touchActivity(transaction, note.scanId, row.updatedAt);
+      if (row === null) {
+        throw new NoteNotFoundError();
+      }
+
+      await this.#touchActivity(transaction, row.scanId, row.updatedAt);
 
       return toNoteRecord(row);
     });
@@ -268,16 +304,19 @@ export class PrismaNoteRepository implements NoteRepository {
     noteId: string,
     ownerId: string,
     data: NotePositionUpdateInput,
+    expectedRevision?: number,
   ): Promise<NoteRecord> {
     return await this.#client.$transaction(async (transaction) => {
-      const note = await this.#findOwnedNote(transaction, noteId, ownerId);
-
-      if (note === null) {
-        throw new NoteNotFoundError();
-      }
-
-      const row = await transaction.note.update({
-        where: { id: noteId },
+      const result = await transaction.note.updateMany({
+        where: {
+          id: noteId,
+          deletedAt: null,
+          scan: {
+            deletedAt: null,
+            project: { ownerId, deletedAt: null },
+          },
+          ...(expectedRevision === undefined ? {} : { revision: expectedRevision }),
+        },
         data: {
           position: data.position as unknown as Prisma.InputJsonValue,
           orientation:
@@ -285,11 +324,28 @@ export class PrismaNoteRepository implements NoteRepository {
               ? Prisma.JsonNull
               : (data.orientation as unknown as Prisma.InputJsonValue),
           modelVersion: data.modelVersion,
+          revision: { increment: 1 },
         },
+      });
+
+      if (result.count === 0) {
+        const note = await this.#findOwnedNote(transaction, noteId, ownerId);
+        if (note === null) {
+          throw new NoteNotFoundError();
+        }
+        throw new RevisionConflictError();
+      }
+
+      const row = await transaction.note.findFirst({
+        where: { id: noteId, deletedAt: null },
         select: noteSelect,
       });
 
-      await this.#touchActivity(transaction, note.scanId, row.updatedAt);
+      if (row === null) {
+        throw new NoteNotFoundError();
+      }
+
+      await this.#touchActivity(transaction, row.scanId, row.updatedAt);
 
       return toNoteRecord(row);
     });
@@ -304,7 +360,10 @@ export class PrismaNoteRepository implements NoteRepository {
       }
 
       const deletedAt = new Date();
-      await transaction.note.delete({ where: { id: noteId } });
+      await transaction.note.update({
+        where: { id: noteId },
+        data: { deletedAt, revision: { increment: 1 } },
+      });
       await this.#touchActivity(transaction, note.scanId, deletedAt);
     });
   }
@@ -317,6 +376,7 @@ export class PrismaNoteRepository implements NoteRepository {
     return await transaction.note.findFirst({
       where: {
         id: noteId,
+        deletedAt: null,
         scan: {
           deletedAt: null,
           project: { ownerId, deletedAt: null },

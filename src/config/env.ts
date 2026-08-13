@@ -130,6 +130,7 @@ export const environmentSchema = z
     ASSET_MAX_MODEL_SIZE_BYTES: z.coerce.number().int().positive().default(200_000_000),
     ASSET_MAX_THUMBNAIL_SIZE_BYTES: z.coerce.number().int().positive().default(10_000_000),
     INVITATION_TTL_SECONDS: z.coerce.number().int().positive().default(604_800),
+    IDEMPOTENCY_KEY_TTL_SECONDS: z.coerce.number().int().positive().default(86_400),
     INVITATION_BASE_URL: z
       .string()
       .trim()
@@ -258,6 +259,7 @@ export interface AppConfig {
   assetMaxModelSizeBytes: number;
   assetMaxThumbnailSizeBytes: number;
   invitationTtlSeconds: number;
+  idempotencyKeyTtlSeconds: number;
   invitationBaseUrl: string;
   mailProvider: 'log' | 'smtp';
   smtpHost: string;
@@ -309,6 +311,7 @@ export function loadConfig(input: NodeJS.ProcessEnv = process.env): AppConfig {
     assetMaxModelSizeBytes: environment.ASSET_MAX_MODEL_SIZE_BYTES,
     assetMaxThumbnailSizeBytes: environment.ASSET_MAX_THUMBNAIL_SIZE_BYTES,
     invitationTtlSeconds: environment.INVITATION_TTL_SECONDS,
+    idempotencyKeyTtlSeconds: environment.IDEMPOTENCY_KEY_TTL_SECONDS,
     invitationBaseUrl: environment.INVITATION_BASE_URL,
     mailProvider: environment.MAIL_PROVIDER,
     smtpHost: environment.SMTP_HOST,

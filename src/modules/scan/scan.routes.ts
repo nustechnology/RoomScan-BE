@@ -1,6 +1,9 @@
 import { Router } from 'express';
+import type { RequestHandler } from 'express';
 
 import { AppError } from '../../common/errors/app-error.js';
+import { RevisionConflictError } from '../../common/errors/revision-conflict.js';
+import { parseIfMatch } from '../../common/http/if-match.js';
 import { authenticate, getUserId } from '../../common/middleware/authenticate.js';
 import type {
   AccessTokenVerifier,
@@ -34,6 +37,7 @@ export interface ScanRouterDependencies {
   scanAssetService: ScanAssetService;
   accessTokenVerifier: AccessTokenVerifier;
   currentUserRepository: CurrentUserRepository;
+  idempotency: RequestHandler;
 }
 
 function notFoundToAppError(error: unknown): AppError | undefined {
@@ -56,11 +60,23 @@ function notFoundToAppError(error: unknown): AppError | undefined {
   return undefined;
 }
 
+function errorToAppError(error: unknown): AppError | undefined {
+  if (error instanceof RevisionConflictError) {
+    return new AppError({
+      statusCode: 409,
+      code: 'REVISION_CONFLICT',
+      message: 'The resource has changed since the client last read it',
+    });
+  }
+  return notFoundToAppError(error);
+}
+
 export function createScanRouter({
   scanService,
   scanAssetService,
   accessTokenVerifier,
   currentUserRepository,
+  idempotency,
 }: ScanRouterDependencies): Router {
   const router = Router();
   const requireAuth = authenticate(accessTokenVerifier, currentUserRepository);
@@ -69,6 +85,7 @@ export function createScanRouter({
     '/projects/:projectId/scans',
     requireAuth,
     validateRequest({ body: CreateScanBodySchema, params: ProjectIdParamSchema }),
+    idempotency,
     async (request, response, next) => {
       try {
         const userId = getUserId(request);
@@ -189,12 +206,16 @@ export function createScanRouter({
         if (body.description !== undefined) {
           data.description = body.description;
         }
-        const result = await scanService.update(userId, params.scanId, data);
+        const expectedRevision = parseIfMatch(request.headers['if-match']);
+        const result =
+          expectedRevision === undefined
+            ? await scanService.update(userId, params.scanId, data)
+            : await scanService.update(userId, params.scanId, data, expectedRevision);
         const responseBody = ScanResponseSchema.parse(result);
 
         response.status(200).json(responseBody);
       } catch (error) {
-        next(notFoundToAppError(error) ?? error);
+        next(errorToAppError(error) ?? error);
       }
     },
   );

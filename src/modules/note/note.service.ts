@@ -39,6 +39,7 @@ function toResult(record: NoteRecord, role: NoteRole): NoteResult {
     position: record.position,
     orientation: record.orientation,
     modelVersion: record.modelVersion,
+    revision: record.revision,
     creator: record.creator,
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString(),
@@ -146,20 +147,36 @@ export class NoteService {
     return toResult(result.record, result.role);
   }
 
-  async update(userId: string, noteId: string, data: NoteUpdateInput): Promise<NoteResult> {
+  async update(
+    userId: string,
+    noteId: string,
+    data: NoteUpdateInput,
+    expectedRevision?: number,
+  ): Promise<NoteResult> {
     await this.#requireNoteOwner(noteId, userId);
-    const record = await this.#repository.update(noteId, userId, data);
+    const record =
+      expectedRevision === undefined
+        ? await this.#repository.update(noteId, userId, data)
+        : await this.#repository.update(noteId, userId, data, expectedRevision);
     return toResult(record, 'OWNER');
   }
 
-  async move(userId: string, noteId: string, data: NotePositionUpdateInput): Promise<NoteResult> {
+  async move(
+    userId: string,
+    noteId: string,
+    data: NotePositionUpdateInput,
+    expectedRevision?: number,
+  ): Promise<NoteResult> {
     const scanModelVersion = await this.#requireNoteOwner(noteId, userId);
 
     if (data.modelVersion !== scanModelVersion) {
       throw new ModelVersionMismatchError();
     }
 
-    const record = await this.#repository.updatePosition(noteId, userId, data);
+    const record =
+      expectedRevision === undefined
+        ? await this.#repository.updatePosition(noteId, userId, data)
+        : await this.#repository.updatePosition(noteId, userId, data, expectedRevision);
     return toResult(record, 'OWNER');
   }
 

@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import type { RequestHandler } from 'express';
 
 import { AppError } from '../../common/errors/app-error.js';
 import {
@@ -50,6 +51,7 @@ export interface ShareRouterDependencies {
   shareService: ShareService;
   accessTokenVerifier: AccessTokenVerifier;
   currentUserRepository: CurrentUserRepository;
+  idempotency: RequestHandler;
 }
 
 function mapError(error: unknown): AppError | undefined {
@@ -144,6 +146,7 @@ export function createShareRouter({
   shareService,
   accessTokenVerifier,
   currentUserRepository,
+  idempotency,
 }: ShareRouterDependencies): Router {
   const router = Router();
   const requireAuth = authenticate(accessTokenVerifier, currentUserRepository);
@@ -153,6 +156,7 @@ export function createShareRouter({
     '/projects/:projectId/invitations',
     requireAuth,
     validateRequest({ body: InvitationCreateBodySchema, params: ProjectIdParamSchema }),
+    idempotency,
     async (request, response, next) => {
       try {
         const userId = getUserId(request);

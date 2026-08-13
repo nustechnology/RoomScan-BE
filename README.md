@@ -129,8 +129,35 @@ the local PostgreSQL and MinIO data volumes.
 | `GET`    | `/api/v1/shared-projects`                              | List projects shared with the current user                 |
 | `GET`    | `/api/v1/shared-projects/:projectId`                   | Get a shared project read-only                             |
 | `DELETE` | `/api/v1/shared-projects/:projectId`                   | Remove a project from the user's Shared With Me list       |
+| `GET`    | `/api/v1/sync/changes`                                 | Pull resources changed since a timestamp or cursor         |
+| `GET`    | `/api/v1/sync/status`                                  | Get sync status for all projects or a single project       |
 | `GET`    | `/api-doc`                                             | Interactive Swagger UI                                     |
 | `GET`    | `/api-doc.json`                                        | Generated OpenAPI 3.1 document                             |
+
+### Offline-first sync
+
+Offline clients pull changed resources through `GET /api/v1/sync/changes`, which
+returns a keyset-paginated change feed (`since`, `cursor`, and `limit` query
+parameters) of `project`, `scan`, and `note` resources visible to the current
+user. Each change carries `resourceType`, `resourceId`, `operation` (`CREATE`,
+`UPDATE`, or `DELETE`), `revision`, `syncStatus`, `changedAt`, `deletedAt`, and a
+`cursor` for resuming. `GET /api/v1/sync/status` reports a per-project sync
+summary (`syncStatus`, `pendingCount`, `syncingCount`, `failedCount`,
+`conflictCount`, `lastSyncedAt`, `requiredAssetsUploaded`) for every visible
+project, or for one project when `projectId` is supplied.
+
+Client retries are safe through the `Idempotency-Key` header on the mutation
+endpoints listed below: retrying the same key and body returns the original
+result, while reusing a key with a different body returns `409
+IDEMPOTENCY_KEY_MISMATCH`. Records are kept for `IDEMPOTENCY_KEY_TTL_SECONDS`.
+
+Optimistic concurrency uses an integer `revision` that every `project`, `scan`,
+and `note` response exposes. `PATCH` requests on those resources accept an
+`If-Match` header with the last-read revision; a mismatch returns `409
+REVISION_CONFLICT`, and a missing header falls back to last-write-wins. Delete
+always wins over a stale update, so a stale write can never restore a deleted
+project, scan, or note. Notes are soft-deleted so sync can surface delete
+tombstones.
 
 Errors use a stable envelope:
 
@@ -258,7 +285,9 @@ Content is required on create (1–2000
 trimmed characters), color is a preset (`YELLOW`, `RED`, `BLUE`, `GREEN`,
 `ORANGE`, `PURPLE`), position is a `{ x, y, z }` vector, and `modelVersion` must
 match the scan's current model version (`409` otherwise). Note content is never
-written to logs. Deleting a scan or project makes its notes inaccessible.
+written to logs. Deleting a note is a soft delete (it sets `deletedAt`), so sync
+can surface the deletion and a stale update can never restore it. Deleting a
+scan or project makes its notes inaccessible.
 
 Projects are shared through expiring invitation links addressed to a recipient
 email. The Owner creates an invitation (`POST /api/v1/projects/:projectId/invitations`,
@@ -344,6 +373,7 @@ assets, and the upload flow.
 | `ASSET_MAX_MODEL_SIZE_BYTES`                             | No       | `200000000`                                 | Maximum model scan-file size (200 MB)                               |
 | `ASSET_MAX_THUMBNAIL_SIZE_BYTES`                         | No       | `10000000`                                  | Maximum thumbnail asset size                                        |
 | `INVITATION_TTL_SECONDS`                                 | No       | `604800`                                    | Default invitation-link lifetime (7 days)                           |
+| `IDEMPOTENCY_KEY_TTL_SECONDS`                            | No       | `86400`                                     | How long `Idempotency-Key` records are honored (24 hours)           |
 | `INVITATION_BASE_URL`                                    | No       | `http://localhost:3000`                     | Client-facing base used to build `invitationUrl` links              |
 | `MAIL_PROVIDER`                                          | No       | `log`                                       | Mail adapter: `log` (dev/test fake) or `smtp`                       |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS`    | No       | ``/ `2525` /`` / ``                         | SMTP connection; required with `MAIL_PROVIDER=smtp`                 |

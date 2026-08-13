@@ -8,10 +8,13 @@ API tests deterministic and prevents them from opening network ports.
 The current product-facing scope contains health checks, Apple Sign-In
 authentication with refresh-token rotation, Owner/Viewer project management,
 room-scan metadata, scan asset upload/download, text notes anchored to scan
-models, project sharing through expiring invitation links, and a Viewer-facing
-Shared With Me list. The Prisma
+models, project sharing through expiring invitation links, a Viewer-facing
+Shared With Me list, and offline-first synchronization. The Prisma
 schema owns the `User`, `RefreshToken`, `Project`, `ProjectAccess`, `Scan`,
-`ScanAsset`, `Note`, and `Invitation` models.
+`ScanAsset`, `Note`, `Invitation`, and `IdempotencyRecord` models. Every
+mutable resource (`Project`, `Scan`, `Note`) carries an integer `revision` for
+optimistic concurrency, and `Note` is soft-deletable so sync can surface
+delete tombstones.
 
 ## Request flow
 
@@ -123,7 +126,10 @@ project list and detail responses carry the scans without a second round trip;
 Canonical project detail resolves the record and the caller's Owner or active
 Viewer role in one repository lookup. An Owner update performs its guarded
 write and response read in one transaction, so an overlapping deletion cannot
-turn an already-applied update into a not-found response.
+turn an already-applied update into a not-found response. The update increments
+`Project.revision` and, when an `If-Match` header is supplied, requires the
+expected revision in the write predicate, surfacing stale writes as
+`409 REVISION_CONFLICT`.
 
 Deletion marks `Project.deletedAt` and revokes active `ProjectAccess` records in
 one database transaction. A repeated deletion by the same Owner is idempotent.
@@ -157,7 +163,11 @@ submitted `name` and `description` and returns it as not created. A concurrent
 duplicate insert raises `P2002`, which the repository catches and resolves to
 the existing row instead of rethrowing. The repository also performs
 allow-listed sorting with a stable `id` tie-breaker and offset pagination. An
-Owner update runs its guarded write and response read in one transaction.
+Owner update runs its guarded write and response read in one transaction and
+increments `Scan.revision`, rejecting a stale `If-Match` revision with
+`409 REVISION_CONFLICT`. Since scan metadata edits only touch name and
+description, a completed (`UPLOADED`) model is never overwritten, and the
+revision guard blocks stale offline writes to it.
 Deleting a scan marks `Scan.deletedAt` and touches the parent project
 `updatedAt` in the same transaction; a repeated delete by the same Owner is
 idempotent. Deleting a scan cascades to its `ScanAsset` and `Note` rows because
@@ -224,15 +234,19 @@ endpoints return `NOTE_NOT_FOUND`. Only the project Owner creates, edits, moves,
 and deletes notes; an active Viewer may list and read them. Creating or moving a
 note validates that its `modelVersion` equals the parent scan's current model
 version and rejects a mismatch with `409 MODEL_VERSION_MISMATCH`, so notes
-cannot be anchored to a stale model revision.
+cannot be anchored to a stale model revision. Update and move accept an
+optional `If-Match` revision and reject a stale write with
+`409 REVISION_CONFLICT`.
 
-`PrismaNoteRepository` filters every note lookup through a non-deleted scan, so
-deleting a scan makes its notes inaccessible. Note mutations run in one
-transaction that also touches the parent scan and project `updatedAt`, keeping
-latest-activity ordering in sync with note edits. Note content is never written
-to logs; the error envelope returns only stable codes and messages. The
-repository derives the scan's real `noteCount` from note rows so scan list and
-detail reflect the note total.
+`PrismaNoteRepository` filters every note lookup through a non-deleted scan and
+a non-deleted note, so deleting a scan or note makes the note inaccessible.
+Deleting a note is a soft delete that sets `Note.deletedAt` and increments
+`revision`, keeping the row for sync tombstones while hiding it from list and
+detail. Note mutations run in one transaction that also touches the parent scan
+and project `updatedAt`, keeping latest-activity ordering in sync with note
+edits. Note content is never written to logs; the error envelope returns only
+stable codes and messages. The repository derives the scan's real `noteCount`
+from note rows so scan list and detail reflect the note total.
 
 ## Share module
 
@@ -318,6 +332,55 @@ case-insensitive name search against the parent project, sort by a to-one
 relation field with a stable project `id` tie-breaker, and paginate with an
 offset. Owners never appear in the list, and a removal attempt by the project
 Owner returns `403 NOT_SHARED_PROJECT`.
+
+## Sync module
+
+The Sync module is the read side of offline-first synchronization. It depends
+on a `SyncRepository` and derives everything from existing rows — it never
+writes to projects, scans, or notes. It exposes `GET /api/v1/sync/changes`
+(changed-resource feed) and `GET /api/v1/sync/status` (per-project sync
+summary).
+
+`PrismaSyncRepository.listChanges` fetches projects, scans, and notes visible to
+the current user (owned or active Viewer access), each ordered by
+`(updatedAt desc, id desc)`, merges them in memory, and keyset-paginates with an
+opaque cursor encoding `(updatedAt, id)`. It fetches `limit + 1` rows from each
+table so the global top-`limit` set and the "more exist" signal are always
+correct. Operation is derived per row: `DELETE` when `deletedAt` is set,
+`CREATE` when `revision` is 1, and `UPDATE` otherwise. Soft-deleted projects
+and scans surface as Owner tombstones; a revoked Viewer has no active access and
+receives nothing.
+
+`listProjectStatuses` and `findProjectStatus` aggregate each visible project's
+active scans into a `syncStatus` (precedence `CONFLICT` > `FAILED` > `SYNCING` >
+`PENDING` > `SYNCED`), scan counts by status, `lastSyncedAt` (latest synced
+`updatedAt`), and `requiredAssetsUploaded` (every active scan has its `MODEL`
+asset `UPLOADED`). Access is enforced in the repository query, so the status
+endpoint hides inaccessible projects behind `404 PROJECT_NOT_FOUND`.
+
+## Idempotency and optimistic concurrency
+
+A shared `idempotencyMiddleware` (`src/common/idempotency`) makes the five
+create endpoints (`POST /projects`, `POST /projects/:projectId/scans`,
+`POST /scans/:scanId/notes`, `POST /scans/:scanId/assets/upload-sessions`, and
+`POST /projects/:projectId/invitations`) retry-safe. It runs after
+authentication and validation, reads the `Idempotency-Key` header, hashes the
+method, path, and body with SHA-256, and reserves a row in the
+`IdempotencyRecord` table (unique per user and key). A finalized record replays
+the stored status and body for an identical retry, a different body returns
+`409 IDEMPOTENCY_KEY_MISMATCH`, and a still-processing key returns `409
+IDEMPOTENCY_KEY_IN_PROGRESS`. Records expire after `IDEMPOTENCY_KEY_TTL_SECONDS`.
+The `PrismaIdempotencyRepository` resolves a concurrent duplicate reserve
+(P2002) into the in-progress conflict that the middleware re-fetches.
+
+Optimistic concurrency uses the `revision` column on `Project`, `Scan`, and
+`Note`. Repositories increment it in the guarded `updateMany` write and include
+the expected revision in the `where` clause when an `If-Match` header is
+supplied. A zero-row update is disambiguated by re-reading: an absent row is a
+hidden 404 (delete wins) and a present row is `409 REVISION_CONFLICT`. A stale
+update therefore never overwrites newer data and never restores a deleted
+record. The `IdempotencyKeyHeaderSchema` and `IfMatchHeaderSchema` Zod schemas
+document both headers in OpenAPI.
 
 ## Mail
 
@@ -409,12 +472,14 @@ The composition root creates one Prisma Client and injects it into the database
 health/lifecycle adapter, the Apple user repository, the current-user
 repository, the project repository, the scan repository, the scan-asset
 repository, the refresh-token repository, the note repository, the share
-repository, and the shared-projects repository, plus the storage and mail
+repository, the shared-projects repository, the idempotency repository, and the
+sync repository, plus the storage and mail
 adapters. It also creates the three
 rate-limit middleware instances, the access-token and refresh-token verifiers,
 the project permission service, the project service, the scan service, the
 scan-asset service, the refresh-token service, the note service, the share
-service, and the shared-projects service once per process. Product modules never import the Prisma client
+service, the shared-projects service, the sync service, and the idempotency
+middleware once per process. Product modules never import the Prisma client
 directly. The unique provider identity constraint makes concurrent first-time
 Apple logins idempotent at the database boundary. The projects table has a
 foreign key to users with `onDelete: Restrict`; project access has unique
@@ -425,6 +490,13 @@ belong to a project with `onDelete: Cascade` and to a creator with
 `onDelete: Restrict`; their `tokenHash` is unique, their `recipientEmail` is
 indexed per project, and the access rows referencing them use
 `onDelete: SetNull` so revoking an invitation never orphans Viewer access.
+
+`Project`, `Scan`, and `Note` each store an integer `revision` (default 1) that
+the optimistic-concurrency writes increment. `Note` additionally stores a
+soft-delete `deletedAt`. The `IdempotencyRecord` table stores `(userId, key)`
+uniquely with a SHA-256 `requestHash`, a final `statusCode` and `responseBody`,
+and an `expiresAt`; its rows cascade with the owning user. Scan and note
+ordering indexes include `updatedAt` and `id` to back the sync change feed.
 
 ## Lifecycle
 

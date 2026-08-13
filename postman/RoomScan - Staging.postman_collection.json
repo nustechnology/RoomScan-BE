@@ -1529,6 +1529,217 @@
 					"response": []
 				}
 			]
+		},
+		{
+			"name": "Sync & Idempotency",
+			"item": [
+				{
+					"name": "Get Sync Changes",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"const json = pm.response.json();",
+									"pm.test(\"Changes feed returned\", function () {",
+									"  pm.response.to.have.status(200);",
+									"  pm.expect(json.changes).to.be.an('array');",
+									"});",
+									"if (json.nextCursor) {",
+									"  pm.environment.set(\"syncCursor\", json.nextCursor);",
+									"}"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/sync/changes?limit=20",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"sync",
+								"changes"
+							],
+							"query": [
+								{
+									"key": "limit",
+									"value": "20"
+								}
+							]
+						},
+						"description": "Pulls resources changed since a timestamp (`since`) or an opaque `cursor`. Each change carries `resourceType`, `resourceId`, `operation`, `revision`, `syncStatus`, `changedAt`, `deletedAt`, and a `cursor`; the response's `nextCursor` resumes the feed. Saves `nextCursor` as `syncCursor`."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Sync Changes (page 2)",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/sync/changes?cursor={{syncCursor}}&limit=20",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"sync",
+								"changes"
+							],
+							"query": [
+								{
+									"key": "cursor",
+									"value": "{{syncCursor}}"
+								},
+								{
+									"key": "limit",
+									"value": "20"
+								}
+							]
+						},
+						"description": "Resumes the changes feed from the previous page's `nextCursor`. A malformed cursor returns `400 INVALID_CURSOR`."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Sync Status",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/sync/status",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"sync",
+								"status"
+							]
+						},
+						"description": "Returns `{ \"items\": [...] }` with a per-project sync summary (`syncStatus`, `pendingCount`, `syncingCount`, `failedCount`, `conflictCount`, `lastSyncedAt`, `requiredAssetsUploaded`) for every visible project. Pass `?projectId=` for a single project."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Sync Status (single project)",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/sync/status?projectId={{projectId}}",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"sync",
+								"status"
+							],
+							"query": [
+								{
+									"key": "projectId",
+									"value": "{{projectId}}"
+								}
+							]
+						},
+						"description": "Returns the sync status for one project. A project the user cannot access is hidden behind `404 PROJECT_NOT_FOUND`."
+					},
+					"response": []
+				},
+				{
+					"name": "Create Project (idempotent)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"pm.test(\"Idempotent create returns 201 or replays\", function () {",
+									"  pm.expect(pm.response.code).to.be.oneOf([201, 200]);",
+									"});"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Idempotency-Key",
+								"value": "postman-create-project-{{$guid}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"Sync Demo Project\",\n  \"description\": \"Created with an Idempotency-Key\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/projects",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"projects"
+							]
+						},
+						"description": "Creates a project with an `Idempotency-Key` header. Retrying the same key and body returns the original result; reusing the key with a different body returns `409 IDEMPOTENCY_KEY_MISMATCH`."
+					},
+					"response": []
+				},
+				{
+					"name": "Update Project (If-Match)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"const json = pm.response.json();",
+									"if (json.revision) {",
+									"  pm.environment.set(\"projectRevision\", String(json.revision));",
+									"}"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "If-Match",
+								"value": "{{projectRevision}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"Sync Demo Project (renamed)\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/projects/{{projectId}}",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"projects",
+								"{{projectId}}"
+							]
+						},
+						"description": "Updates a project with an `If-Match` header carrying the last-read `revision`. A stale revision returns `409 REVISION_CONFLICT`; a malformed header returns `400 VALIDATION_ERROR`. Saves the new `revision` as `projectRevision`."
+					},
+					"response": []
+				}
+			]
 		}
 	],
 	"auth": {

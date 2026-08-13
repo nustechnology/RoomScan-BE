@@ -1,6 +1,9 @@
 import { Router } from 'express';
+import type { RequestHandler } from 'express';
 
 import { AppError } from '../../common/errors/app-error.js';
+import { RevisionConflictError } from '../../common/errors/revision-conflict.js';
+import { parseIfMatch } from '../../common/http/if-match.js';
 import { authenticate, getUserId } from '../../common/middleware/authenticate.js';
 import type {
   AccessTokenVerifier,
@@ -32,6 +35,7 @@ export interface NoteRouterDependencies {
   noteService: NoteService;
   accessTokenVerifier: AccessTokenVerifier;
   currentUserRepository: CurrentUserRepository;
+  idempotency: RequestHandler;
 }
 
 function mapError(error: unknown): AppError | undefined {
@@ -55,6 +59,13 @@ function mapError(error: unknown): AppError | undefined {
       message: 'Model version does not match the scan model version',
     });
   }
+  if (error instanceof RevisionConflictError) {
+    return new AppError({
+      statusCode: 409,
+      code: 'REVISION_CONFLICT',
+      message: 'The resource has changed since the client last read it',
+    });
+  }
   return undefined;
 }
 
@@ -62,6 +73,7 @@ export function createNoteRouter({
   noteService,
   accessTokenVerifier,
   currentUserRepository,
+  idempotency,
 }: NoteRouterDependencies): Router {
   const router = Router();
   const requireAuth = authenticate(accessTokenVerifier, currentUserRepository);
@@ -70,6 +82,7 @@ export function createNoteRouter({
     '/scans/:scanId/notes',
     requireAuth,
     validateRequest({ body: CreateNoteBodySchema, params: ScanIdParamSchema }),
+    idempotency,
     async (request, response, next) => {
       try {
         const userId = getUserId(request);
@@ -154,7 +167,11 @@ export function createNoteRouter({
         if (body.color !== undefined) {
           data.color = body.color;
         }
-        const result = await noteService.update(userId, params.noteId, data);
+        const expectedRevision = parseIfMatch(request.headers['if-match']);
+        const result =
+          expectedRevision === undefined
+            ? await noteService.update(userId, params.noteId, data)
+            : await noteService.update(userId, params.noteId, data, expectedRevision);
         const responseBody = NoteResponseSchema.parse(result);
 
         response.status(200).json(responseBody);
@@ -175,11 +192,16 @@ export function createNoteRouter({
           body: MoveNoteBody;
           params: NoteIdParam;
         };
-        const result = await noteService.move(userId, params.noteId, {
+        const expectedRevision = parseIfMatch(request.headers['if-match']);
+        const moveData = {
           position: body.position,
           orientation: body.orientation === undefined ? null : body.orientation,
           modelVersion: body.modelVersion,
-        });
+        };
+        const result =
+          expectedRevision === undefined
+            ? await noteService.move(userId, params.noteId, moveData)
+            : await noteService.move(userId, params.noteId, moveData, expectedRevision);
         const responseBody = NoteResponseSchema.parse(result);
 
         response.status(200).json(responseBody);

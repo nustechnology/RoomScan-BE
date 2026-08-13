@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import type { PrismaClient } from '../src/generated/prisma/client.js';
+import { RevisionConflictError } from '../src/common/errors/revision-conflict.js';
 import { PrismaProjectRepository } from '../src/infrastructure/database/prisma-project-repository.js';
 import { ProjectNotFoundError } from '../src/modules/project/project.errors.js';
 
@@ -56,6 +57,7 @@ const expectedProjectSelect = {
       },
     },
   },
+  revision: true,
   createdAt: true,
   updatedAt: true,
 };
@@ -75,6 +77,7 @@ function createRow() {
       accesses: 2,
       scans: 0,
     },
+    revision: 1,
     createdAt: NOW,
     updatedAt: NOW,
   };
@@ -327,7 +330,7 @@ describe('PrismaProjectRepository', () => {
 
     expect(project.updateMany).toHaveBeenCalledWith({
       where: { id: PROJECT_ID, ownerId: OWNER_ID, deletedAt: null },
-      data: { name: 'Updated', description: null },
+      data: { name: 'Updated', description: null, revision: { increment: 1 } },
     });
     expect(project.findFirst).toHaveBeenCalledWith({
       where: { id: PROJECT_ID, ownerId: OWNER_ID, deletedAt: null },
@@ -336,15 +339,39 @@ describe('PrismaProjectRepository', () => {
     expect(transaction).toHaveBeenCalledOnce();
   });
 
-  it('throws a hidden not-found error when an update affects no rows', async () => {
+  it('throws a hidden not-found error when an update affects no rows and the project is gone', async () => {
     const { client, project } = createClient();
     project.updateMany.mockResolvedValue({ count: 0 });
+    project.findFirst.mockResolvedValue(null);
     const repository = new PrismaProjectRepository(client);
 
     await expect(
       repository.update(PROJECT_ID, OWNER_ID, { name: 'Updated' }),
     ).rejects.toBeInstanceOf(ProjectNotFoundError);
-    expect(project.findFirst).not.toHaveBeenCalled();
+    expect(project.findFirst).toHaveBeenCalledWith({
+      where: { id: PROJECT_ID, ownerId: OWNER_ID, deletedAt: null },
+      select: { revision: true },
+    });
+  });
+
+  it('rejects a stale update when the stored revision differs from If-Match', async () => {
+    const { client, project } = createClient();
+    project.updateMany.mockResolvedValue({ count: 0 });
+    project.findFirst.mockResolvedValue(createRow());
+    const repository = new PrismaProjectRepository(client);
+
+    await expect(
+      repository.update(PROJECT_ID, OWNER_ID, { name: 'Updated' }, 2),
+    ).rejects.toBeInstanceOf(RevisionConflictError);
+    expect(project.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: PROJECT_ID,
+        ownerId: OWNER_ID,
+        deletedAt: null,
+        revision: 2,
+      },
+      data: { name: 'Updated', revision: { increment: 1 } },
+    });
   });
 
   it('throws if the project disappears after an update', async () => {
