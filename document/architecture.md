@@ -171,7 +171,7 @@ scan's model and thumbnail. It depends on a `ScanAssetRepository`, the shared
 `assetType`, creates or re-uses a single `ScanAsset` row per `(scan, assetType)`,
 and mints upload and download URLs carrying the configured TTL metadata. Model
 scan files must be between the configured `ASSET_MIN_MODEL_SIZE_BYTES` and
-`ASSET_MAX_MODEL_SIZE_BYTES` (10–100 MB); thumbnails are capped by
+`ASSET_MAX_MODEL_SIZE_BYTES` (0–200 MB); thumbnails are capped by
 `ASSET_MAX_THUMBNAIL_SIZE_BYTES`. The
 repository resolves a concurrent create for the same `(scan, assetType)` key to
 the existing row instead of surfacing the unique-constraint error, so the

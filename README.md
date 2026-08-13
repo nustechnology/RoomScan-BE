@@ -220,7 +220,7 @@ Scan assets use minted URLs: the Owner creates an upload session
 returned URL, then marks it complete
 (`POST /api/v1/upload-sessions/:uploadSessionId/complete`). Completion is
 idempotent and marks the parent scan synced. A model scan file must be between
-10 MB and 100 MB; a completed thumbnail upload persists a display URL onto the
+0 MB and 200 MB; a completed thumbnail upload persists a display URL onto the
 scan so project and scan responses show it. Owner and active Viewers can list
 metadata and request download URLs
 (`GET /api/v1/scans/:scanId/assets/:assetType/download-url`); revoked Viewers
@@ -285,8 +285,8 @@ and `x-request-id`.
 | `STORAGE_USE_SSL`                                        | No       | `false`       | Use HTTPS instead of HTTP for the MinIO endpoint                    |
 | `STORAGE_UPLOAD_URL_TTL_SECONDS`                         | No       | `900`         | Signed upload URL lifetime                                          |
 | `STORAGE_DOWNLOAD_URL_TTL_SECONDS`                       | No       | `60`          | Signed download URL lifetime                                        |
-| `ASSET_MIN_MODEL_SIZE_BYTES`                             | No       | `10000000`    | Minimum model scan-file size (10 MB)                                |
-| `ASSET_MAX_MODEL_SIZE_BYTES`                             | No       | `100000000`   | Maximum model scan-file size (100 MB)                               |
+| `ASSET_MIN_MODEL_SIZE_BYTES`                             | No       | `0`           | Minimum model scan-file size (0 MB)                                 |
+| `ASSET_MAX_MODEL_SIZE_BYTES`                             | No       | `200000000`   | Maximum model scan-file size (200 MB)                               |
 | `ASSET_MAX_THUMBNAIL_SIZE_BYTES`                         | No       | `10000000`    | Maximum thumbnail asset size                                        |
 
 The remaining PostgreSQL, MinIO and `ROOMSCAN_PORT` values in `.env.example`
