@@ -126,8 +126,8 @@ export const environmentSchema = z
     STORAGE_USE_SSL: environmentBooleanSchema,
     STORAGE_UPLOAD_URL_TTL_SECONDS: z.coerce.number().int().positive().default(900),
     STORAGE_DOWNLOAD_URL_TTL_SECONDS: z.coerce.number().int().positive().default(60),
-    ASSET_MIN_MODEL_SIZE_BYTES: z.coerce.number().int().positive().default(10_000_000),
-    ASSET_MAX_MODEL_SIZE_BYTES: z.coerce.number().int().positive().default(100_000_000),
+    ASSET_MIN_MODEL_SIZE_BYTES: z.coerce.number().int().nonnegative().default(0),
+    ASSET_MAX_MODEL_SIZE_BYTES: z.coerce.number().int().positive().default(200_000_000),
     ASSET_MAX_THUMBNAIL_SIZE_BYTES: z.coerce.number().int().positive().default(10_000_000),
     INVITATION_TTL_SECONDS: z.coerce.number().int().positive().default(604_800),
     INVITATION_BASE_URL: z

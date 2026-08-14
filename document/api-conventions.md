@@ -387,12 +387,18 @@ descriptor, returning the scan plus `uploads`:
 ```
 
 `creator` and `noteCount` are omitted above for brevity but are always present.
-The client uploads each file directly to its `uploadUrl`, then calls the
-scan-asset completion endpoint. Each `uploadUrl` is a presigned PUT URL with the
-configured upload TTL; the model scan file must be between 10 MB and 100 MB.
+The `thumbnail` and `scanFile` descriptors are independent and optional: one
+call may supply only `thumbnail`, only `scanFile`, or both, and each present
+descriptor mints its own upload session and presigned `uploadUrl`. The client
+uploads each file directly to its `uploadUrl` with a PUT, then calls the
+completion endpoint for that session
+(`POST /api/v1/upload-sessions/{uploadSessionId}/complete`); every minted
+session is completed separately. Each `uploadUrl` is a presigned PUT URL with
+the configured upload TTL; the model scan file must be between 0 MB and 200 MB.
 A `thumbnail` descriptor requires `contentType` (`image/jpeg`, `image/png`) and
-`sizeBytes`; a `scanFile` descriptor additionally requires `checksum` and
-`modelVersion`. `uploads` is omitted when neither descriptor is supplied.
+`sizeBytes` (`checksum` optional); a `scanFile` descriptor additionally requires
+`checksum` and `modelVersion`. `uploads` is omitted when neither descriptor is
+supplied.
 
 The scan list supports page-based pagination and an allow-listed sort. `page`
 defaults to 1; `limit` defaults to 20 and may not exceed 100. `sort` defaults to
@@ -412,7 +418,7 @@ Validation rules:
   `image/jpeg` or `image/png`, `sizeBytes` positive and at most the thumbnail
   maximum, `checksum` optional.
 - `scanFile` descriptor on create: optional; `contentType` must be a supported
-  model type (including `model/usdz`), `sizeBytes` between 10 MB and 100 MB,
+  model type (including `model/usdz`), `sizeBytes` positive and at most 200 MB,
   `checksum` and `modelVersion` required.
 - Create and update objects reject unknown fields; PATCH must contain at least
   one supported field; `"description": null` clears the stored description.
@@ -468,8 +474,8 @@ Create-session request:
 - `contentType`: must be in the allowed list for the asset type (models
   `model/gltf-binary`, `model/gltf+json`, `application/octet-stream`,
   `model/usd`, `model/usdz`; thumbnails `image/jpeg`, `image/png`).
-- `sizeBytes`: positive; for `MODEL` assets it must be at least the configured
-  minimum (10 MB) and at most the configured maximum (100 MB), and for
+- `sizeBytes`: positive; for `MODEL` assets it must be at most the configured
+  maximum (200 MB), and for
   `THUMBNAIL` assets at most the configured maximum (10 MB).
 - `checksum` and `modelVersion`: required for `MODEL` assets.
 - `idempotencyKey`: optional; a repeated create with an active, unexpired

@@ -114,7 +114,7 @@ function createHarness() {
     clock: () => NOW,
     uploadUrlTtlSeconds: 900,
     downloadUrlTtlSeconds: 60,
-    minModelSizeBytes: 10_000_000,
+    minModelSizeBytes: 0,
     maxModelSizeBytes: 500_000_000,
     maxThumbnailSizeBytes: 10_000_000,
   });
@@ -268,7 +268,7 @@ describe('ScanAssetService', () => {
     ).rejects.toBeInstanceOf(InvalidAssetRequestError);
   });
 
-  it('rejects an undersized model asset', async () => {
+  it('accepts a model asset at any size now that the minimum is zero', async () => {
     const { service } = createHarness();
 
     await expect(
@@ -276,8 +276,10 @@ describe('ScanAssetService', () => {
         assetType: 'MODEL',
         contentType: 'model/gltf-binary',
         sizeBytes: 1_000_000,
+        checksum: 'abc',
+        modelVersion: '1',
       }),
-    ).rejects.toBeInstanceOf(InvalidAssetRequestError);
+    ).resolves.toBeDefined();
   });
 
   it('completes a thumbnail upload and persists its display URL on the scan', async () => {

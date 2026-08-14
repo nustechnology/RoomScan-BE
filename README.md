@@ -217,16 +217,18 @@ start at `NONE` and `PENDING` respectively until the upload flow writes them.
 Create Scan can also return presigned upload URLs in the same response: optional
 `thumbnail` and `scanFile` descriptors (`contentType`, `sizeBytes`, and the
 `checksum`/`modelVersion` required for the scan file) make the API mint an
-upload session for each and return its `uploadUrl` under `uploads.thumbnail` /
-`uploads.scanFile`. The client then uploads the files directly to those URLs and
-marks each session complete.
+upload session for each present descriptor and return its `uploadUrl` under
+`uploads.thumbnail` / `uploads.scanFile`. The descriptors are independent — a
+call may include `thumbnail` only, `scanFile` only, or both. The client then
+PUTs each file directly to its own `uploadUrl` and marks each session complete
+with `POST /api/v1/upload-sessions/:uploadSessionId/complete`.
 
 Scan assets use minted URLs: the Owner creates an upload session
 (`POST /api/v1/scans/:scanId/assets/upload-sessions`), the client uploads to the
 returned URL, then marks it complete
 (`POST /api/v1/upload-sessions/:uploadSessionId/complete`). Completion is
 idempotent and marks the parent scan synced. A model scan file must be between
-10 MB and 100 MB; a completed thumbnail upload persists a display URL onto the
+0 MB and 200 MB; a completed thumbnail upload persists a display URL onto the
 scan so project and scan responses show it. Owner and active Viewers can list
 metadata and request download URLs
 (`GET /api/v1/scans/:scanId/assets/:assetType/download-url`); revoked Viewers
@@ -319,8 +321,8 @@ sharing and invitation endpoints, notes, scan assets, and upload flow.
 | `STORAGE_USE_SSL`                                        | No       | `false`                                     | Use HTTPS instead of HTTP for the MinIO endpoint                    |
 | `STORAGE_UPLOAD_URL_TTL_SECONDS`                         | No       | `900`                                       | Signed upload URL lifetime                                          |
 | `STORAGE_DOWNLOAD_URL_TTL_SECONDS`                       | No       | `60`                                        | Signed download URL lifetime                                        |
-| `ASSET_MIN_MODEL_SIZE_BYTES`                             | No       | `10000000`                                  | Minimum model scan-file size (10 MB)                                |
-| `ASSET_MAX_MODEL_SIZE_BYTES`                             | No       | `100000000`                                 | Maximum model scan-file size (100 MB)                               |
+| `ASSET_MIN_MODEL_SIZE_BYTES`                             | No       | `0`                                         | Minimum model scan-file size (0 MB)                                 |
+| `ASSET_MAX_MODEL_SIZE_BYTES`                             | No       | `200000000`                                 | Maximum model scan-file size (200 MB)                               |
 | `ASSET_MAX_THUMBNAIL_SIZE_BYTES`                         | No       | `10000000`                                  | Maximum thumbnail asset size                                        |
 | `INVITATION_TTL_SECONDS`                                 | No       | `604800`                                    | Default invitation-link lifetime (7 days)                           |
 | `INVITATION_BASE_URL`                                    | No       | `http://localhost:3000`                     | Client-facing base used to build `invitationUrl` links              |
@@ -435,4 +437,8 @@ are generated artifacts and are intentionally not committed.
   the `RATE_LIMIT_*` values and inspect structured 429 logs.
 - If port 5432 is already in use, stop the other PostgreSQL service or adjust
   the database port mapping and connection URL together.
+- If thumbnail display URLs return an S3 `AccessDenied` error, the MinIO bucket
+  is not publicly readable. Grant anonymous download access with the MinIO
+  Client (`mc anonymous set download <alias>/<bucket>`); see the
+  [development workflow](document/development.md) for the full commands.
 - If Git hooks are absent after cloning, run `yarn install` or `yarn prepare`.

@@ -48,6 +48,30 @@ Prisma commands, seeds, the API, validation, tests, coverage and builds
 natively with Yarn. If the `db` service is already healthy, leave it running
 across tasks; do not restart or recreate it as part of final verification.
 
+### Public bucket access for thumbnails
+
+Scan thumbnail display URLs are stable, unsigned object URLs, so the MinIO
+bucket (or its objects) must be publicly readable — or fronted by a CDN/reverse
+proxy — before thumbnails render in project and scan responses. Otherwise the
+browser gets an S3 `AccessDenied` error. With the MinIO Client (`mc`, the
+standalone binary from `dl.min.io`, not the Midnight Commander apt package),
+grant anonymous download access once:
+
+```bash
+mc alias set rslocal http://localhost:9000 <MINIO_ROOT_USER> <MINIO_ROOT_PASSWORD>
+mc anonymous set download rslocal/<STORAGE_BUCKET>
+mc anonymous get rslocal/<STORAGE_BUCKET>
+```
+
+`<MINIO_ROOT_USER>` and `<MINIO_ROOT_PASSWORD>` are the values from `.env`
+(see `.env.example`), the alias name is arbitrary, and `<STORAGE_BUCKET>`
+defaults to `roomscan-assets`. `anonymous set download` grants unauthenticated
+`GetObject` to everyone, which is exactly what the thumbnail display URL needs.
+Anonymous reads apply to the whole bucket, so prefer a CDN/reverse proxy in
+front of MinIO when the bucket holds non-public data, and use a stable public
+`STORAGE_ENDPOINT` (never a local tunnel host) so persisted thumbnail URLs
+remain reachable.
+
 The local seed is idempotent and refuses to run unless
 `NODE_ENV=development`. It creates (or refreshes) the fixed local Apple user,
 then seeds three demo projects owned by that user, each with room scans that
