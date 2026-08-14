@@ -15,9 +15,13 @@ import { PrismaProjectRepository } from './infrastructure/database/prisma-projec
 import { PrismaScanRepository } from './infrastructure/database/prisma-scan-repository.js';
 import { PrismaScanAssetRepository } from './infrastructure/database/prisma-scan-asset-repository.js';
 import { PrismaNoteRepository } from './infrastructure/database/prisma-note-repository.js';
+import { PrismaShareRepository } from './infrastructure/database/prisma-share-repository.js';
 import { LocalStorageAdapter } from './infrastructure/storage/local-storage-adapter.js';
 import { MinioStorageAdapter } from './infrastructure/storage/minio-storage-adapter.js';
 import type { StorageAdapter } from './infrastructure/storage/storage.types.js';
+import { LogMailer } from './infrastructure/mail/log-mailer.js';
+import { SmtpMailer, createNodemailerTransport } from './infrastructure/mail/smtp-mailer.js';
+import type { Mailer } from './infrastructure/mail/mailer.types.js';
 import { createLogger } from './infrastructure/logging/logger.js';
 import { AuthService, RefreshTokenService } from './modules/auth/auth.service.js';
 import { ProjectPermissionService } from './modules/project/project.permissions.js';
@@ -25,6 +29,7 @@ import { ProjectService } from './modules/project/project.service.js';
 import { ScanService } from './modules/scan/scan.service.js';
 import { ScanAssetService } from './modules/scan-asset/scan-asset.service.js';
 import { NoteService } from './modules/note/note.service.js';
+import { ShareService } from './modules/share/share.service.js';
 
 const config = loadConfig();
 const logger = createLogger(config);
@@ -36,6 +41,7 @@ const projectRepository = new PrismaProjectRepository(prismaClient);
 const scanRepository = new PrismaScanRepository(prismaClient);
 const scanAssetRepository = new PrismaScanAssetRepository(prismaClient);
 const noteRepository = new PrismaNoteRepository(prismaClient);
+const shareRepository = new PrismaShareRepository(prismaClient);
 function createStorageAdapter(): StorageAdapter {
   if (config.storageProvider === 'minio') {
     return new MinioStorageAdapter({
@@ -50,6 +56,22 @@ function createStorageAdapter(): StorageAdapter {
   return new LocalStorageAdapter();
 }
 const storageAdapter = createStorageAdapter();
+function createMailer(): Mailer {
+  if (config.mailProvider === 'smtp') {
+    return new SmtpMailer({
+      from: config.mailFrom,
+      transport: createNodemailerTransport({
+        host: config.smtpHost,
+        port: config.smtpPort,
+        user: config.smtpUser,
+        pass: config.smtpPass,
+        secure: config.smtpSecure,
+      }),
+    });
+  }
+  return new LogMailer(logger);
+}
+const mailer = createMailer();
 const appleIdentityVerifier = new LocalTestAppleIdentityVerifier({
   delegate: new AppleIdentityTokenVerifier(config.appleClientId),
   enabled: config.nodeEnv === 'development' && config.localTestAuthEnabled,
@@ -102,6 +124,13 @@ const noteService = new NoteService({
   repository: noteRepository,
   permissions: projectPermissions,
 });
+const shareService = new ShareService({
+  repository: shareRepository,
+  mailer,
+  logger,
+  invitationTtlSeconds: config.invitationTtlSeconds,
+  invitationBaseUrl: config.invitationBaseUrl,
+});
 const rateLimiters = createRateLimiters(config, logger);
 const app = createApp({
   config,
@@ -113,6 +142,7 @@ const app = createApp({
   scanService,
   scanAssetService,
   noteService,
+  shareService,
   accessTokenVerifier,
   currentUserRepository,
   rateLimiters,

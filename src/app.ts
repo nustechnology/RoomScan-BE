@@ -6,6 +6,7 @@ import express, { type Express } from 'express';
 import helmet from 'helmet';
 import type { Logger } from 'pino';
 import { pinoHttp } from 'pino-http';
+import type { StdSerializedResults } from 'pino-http';
 import swaggerUi from 'swagger-ui-express';
 
 import { errorHandler } from './common/middleware/error-handler.js';
@@ -29,6 +30,8 @@ import { createScanAssetRouter } from './modules/scan-asset/scan-asset.routes.js
 import type { ScanAssetService } from './modules/scan-asset/scan-asset.service.js';
 import { createNoteRouter } from './modules/note/note.routes.js';
 import type { NoteService } from './modules/note/note.service.js';
+import { createShareRouter } from './modules/share/share.routes.js';
+import type { ShareService } from './modules/share/share.service.js';
 import { createOpenApiDocument } from './openapi/document.js';
 
 export interface AppDependencies {
@@ -41,10 +44,26 @@ export interface AppDependencies {
   scanService: ScanService;
   scanAssetService: ScanAssetService;
   noteService: NoteService;
+  shareService: ShareService;
   accessTokenVerifier: AccessTokenVerifier;
   currentUserRepository: CurrentUserRepository;
   rateLimiters: RateLimiters;
   clock?: () => Date;
+}
+
+const INVITATION_TOKEN_PATTERN = /(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{43}(?![A-Za-z0-9_-])/gi;
+
+export function redactInvitationToken(value: string): string {
+  return value.replace(INVITATION_TOKEN_PATTERN, '[REDACTED]');
+}
+
+function redactTokenFields(value: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(value).map(([key, entry]) => [
+      key,
+      typeof entry === 'string' ? redactInvitationToken(entry) : entry,
+    ]),
+  );
 }
 
 export function createApp({
@@ -57,6 +76,7 @@ export function createApp({
   scanService,
   scanAssetService,
   noteService,
+  shareService,
   accessTokenVerifier,
   currentUserRepository,
   rateLimiters,
@@ -80,6 +100,16 @@ export function createApp({
 
         response.setHeader('x-request-id', requestId);
         return requestId;
+      },
+      serializers: {
+        req(request: StdSerializedResults['req']) {
+          return {
+            ...request,
+            url: redactInvitationToken(request.url ?? ''),
+            ...(request.query === undefined ? {} : { query: redactTokenFields(request.query) }),
+            ...(request.params === undefined ? {} : { params: redactTokenFields(request.params) }),
+          };
+        },
       },
     }),
   );
@@ -159,6 +189,14 @@ export function createApp({
     API_PREFIX,
     createNoteRouter({
       noteService,
+      accessTokenVerifier,
+      currentUserRepository,
+    }),
+  );
+  app.use(
+    API_PREFIX,
+    createShareRouter({
+      shareService,
       accessTokenVerifier,
       currentUserRepository,
     }),

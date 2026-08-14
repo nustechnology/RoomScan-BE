@@ -74,10 +74,10 @@ remain reachable.
 
 The local seed is idempotent and refuses to run unless
 `NODE_ENV=development`. It creates (or refreshes) the fixed local Apple user,
-then seeds a demo project owned by that user with a set of room scans that
-exercise a range of asset and sync states, plus text notes anchored to those
-scans, so the list and detail screens can be tried without manual setup. With
-the shortcut enabled, use:
+then seeds three demo projects owned by that user, each with room scans that
+exercise a range of asset and sync states, plus text notes anchored to the
+primary project's scans, so the list, pagination, sort, and detail screens can
+be tried without manual setup. With the shortcut enabled, use:
 
 ```json
 {
@@ -97,6 +97,16 @@ The default development rate limits use the in-process MemoryStore and require
 no additional service. `TRUST_PROXY` remains empty for direct local and Compose
 connections. Set it only when requests arrive exclusively through a known
 reverse-proxy topology.
+
+The `postman/` directory holds the operator-facing API test collection
+(`RoomScan - Staging.postman_collection.json`) and its environments
+(`RoomScan - Staging.postman_environment.json` for the deployed API and
+`RoomScan - Local.postman_environment.json` for the locally seeded API). Keep
+them in sync with the public HTTP surface: whenever a public route, request
+field, or response shape changes, add or update the matching request in the
+collection on the same branch. The collection description documents setup, the
+sequential upload flow, and the invitation sharing flow (including the `409`
+states and token rotation).
 
 ## Before handoff
 
@@ -162,7 +172,20 @@ constraint, a unique `idempotencyKey`, and an index on `(scanId, status)`. The
 `scans` foreign key (`ON DELETE CASCADE`), a `users` creator foreign key
 (`ON DELETE RESTRICT`), a `position`/`orientation` JSONB pair, a
 `modelVersion` column, and indexes on `(scanId, updatedAt, id)` and
-`createdById`.
+`createdById`. The `add_invitations` migration creates the `InvitationStatus`
+enum and the `invitations` table (unique `tokenHash`, `status`, `expiresAt`,
+`sentAt`, `revokedAt`, project and creator foreign keys), and extends
+`project_accesses` with `invitationId`, `acceptedAt`, and `declinedAt` columns.
+The `declinedAt` column was temporary and is removed by the subsequent
+migration. The `add_invitation_recipient_and_lifecycle` migration extends
+`InvitationStatus` with `ACCEPTED` and `DECLINED`, adds `recipientEmail`,
+`acceptedAt`, `declinedAt`, and `acceptedByUserId` to `invitations`, indexes
+`(projectId, recipientEmail)`, adds a partial unique index on
+`(projectId, recipientEmail)` for `PENDING` rows so at most one pending link
+exists per recipient, and drops the now-unused `declinedAt` column from
+`project_accesses`. Final decline lifecycle data is stored on the invitation
+row (`status` and `declinedAt`); declined invitations never create project
+access rows.
 Tests use Prisma delegate doubles; native migration and endpoint verification
 use the PostgreSQL `db` container.
 
@@ -184,6 +207,13 @@ multiple API replicas requires a shared store such as Redis.
 
 Presigned object-store URLs use the pinned `minio` client. Adapter unit tests
 inject a fake client, so the quality gate never contacts a MinIO server.
+
+Transactional invitation email uses the pinned `nodemailer` client through the
+`SmtpMailer` adapter, which accepts an injected transporter so the quality gate
+never contacts an SMTP server. Development and test default to
+`MAIL_PROVIDER=log`, which writes messages to the application log instead of
+delivering them; `log` is rejected in staging and production, so those
+environments must set `MAIL_PROVIDER=smtp`.
 
 Update this document in the same branch whenever development commands, required
 tool versions, environment setup, tests, coverage, hooks, CI, Docker, Prisma

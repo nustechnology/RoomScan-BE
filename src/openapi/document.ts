@@ -7,6 +7,7 @@ import { projectOpenApiRegistry } from '../modules/project/project.openapi.js';
 import { scanOpenApiRegistry } from '../modules/scan/scan.openapi.js';
 import { scanAssetOpenApiRegistry } from '../modules/scan-asset/scan-asset.openapi.js';
 import { noteOpenApiRegistry } from '../modules/note/note.openapi.js';
+import { shareOpenApiRegistry } from '../modules/share/share.openapi.js';
 
 export function createOpenApiDocument(): ReturnType<OpenApiGeneratorV31['generateDocument']> {
   const generator = new OpenApiGeneratorV31([
@@ -16,6 +17,7 @@ export function createOpenApiDocument(): ReturnType<OpenApiGeneratorV31['generat
     ...scanOpenApiRegistry.definitions,
     ...scanAssetOpenApiRegistry.definitions,
     ...noteOpenApiRegistry.definitions,
+    ...shareOpenApiRegistry.definitions,
   ]);
 
   return generator.generateDocument({
@@ -55,6 +57,10 @@ export function createOpenApiDocument(): ReturnType<OpenApiGeneratorV31['generat
       {
         name: 'Notes',
         description: 'Text notes anchored to 3D positions inside scan models',
+      },
+      {
+        name: 'Shares',
+        description: 'Project sharing through expiring invitation links and Viewer access',
       },
     ],
   });

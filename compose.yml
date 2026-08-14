@@ -77,6 +77,18 @@ services:
       ASSET_MIN_MODEL_SIZE_BYTES: ${ASSET_MIN_MODEL_SIZE_BYTES:-0}
       ASSET_MAX_MODEL_SIZE_BYTES: ${ASSET_MAX_MODEL_SIZE_BYTES:-200000000}
       ASSET_MAX_THUMBNAIL_SIZE_BYTES: ${ASSET_MAX_THUMBNAIL_SIZE_BYTES:-10000000}
+      INVITATION_TTL_SECONDS: ${INVITATION_TTL_SECONDS:-604800}
+      INVITATION_BASE_URL: ${INVITATION_BASE_URL:-http://localhost:3000}
+      # The production-style API requires SMTP credentials from .env: it runs
+      # NODE_ENV=production, where MAIL_PROVIDER=log is rejected, so it defaults
+      # to smtp and SMTP_HOST/SMTP_USER/SMTP_PASS are required (like MinIO).
+      MAIL_PROVIDER: ${MAIL_PROVIDER:-smtp}
+      SMTP_HOST: ${SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT:-2525}
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASS: ${SMTP_PASS}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      MAIL_FROM: ${MAIL_FROM:-RoomScan App <notifications@roomscan.app>}
     ports:
       - '${ROOMSCAN_PORT:-3000}:3000'
     depends_on:
