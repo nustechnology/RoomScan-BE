@@ -17,6 +17,7 @@ import type { ScanService } from '../src/modules/scan/scan.service.js';
 import type { ScanAssetService } from '../src/modules/scan-asset/scan-asset.service.js';
 import type { NoteService } from '../src/modules/note/note.service.js';
 import type { ShareService } from '../src/modules/share/share.service.js';
+import type { SharedProjectsService } from '../src/modules/shared-projects/shared-projects.service.js';
 
 const baseConfig: AppConfig = {
   nodeEnv: 'test',
@@ -129,6 +130,11 @@ function createTestApp(overrides: Partial<AppConfig> = {}, stores: RateLimitStor
     listShares: vi.fn(),
     revokeViewer: vi.fn(),
   } as unknown as ShareService;
+  const sharedProjectsService = {
+    list: vi.fn(),
+    detail: vi.fn(),
+    remove: vi.fn(),
+  } as unknown as SharedProjectsService;
   const rateLimiters = createRateLimiters(config, logger, stores);
   const app = createApp({
     config,
@@ -144,6 +150,7 @@ function createTestApp(overrides: Partial<AppConfig> = {}, stores: RateLimitStor
     scanAssetService,
     noteService,
     shareService,
+    sharedProjectsService,
     accessTokenVerifier,
     currentUserRepository,
     rateLimiters,

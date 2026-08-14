@@ -31,6 +31,7 @@ import type { ScanService } from '../src/modules/scan/scan.service.js';
 import type { ScanAssetService } from '../src/modules/scan-asset/scan-asset.service.js';
 import type { NoteService } from '../src/modules/note/note.service.js';
 import type { ShareService } from '../src/modules/share/share.service.js';
+import type { SharedProjectsService } from '../src/modules/shared-projects/shared-projects.service.js';
 
 const config: AppConfig = {
   nodeEnv: 'test',
@@ -141,6 +142,11 @@ describe('RoomScan HTTP application', () => {
     listShares: vi.fn(),
     revokeViewer: vi.fn(),
   } as unknown as ShareService;
+  const sharedProjectsService = {
+    list: vi.fn(),
+    detail: vi.fn(),
+    remove: vi.fn(),
+  } as unknown as SharedProjectsService;
 
   const app = createApp({
     config,
@@ -153,6 +159,7 @@ describe('RoomScan HTTP application', () => {
     scanAssetService,
     noteService,
     shareService,
+    sharedProjectsService,
     accessTokenVerifier,
     currentUserRepository,
     rateLimiters,
@@ -202,6 +209,7 @@ describe('RoomScan HTTP application', () => {
       scanAssetService,
       noteService,
       shareService,
+      sharedProjectsService,
       accessTokenVerifier,
       currentUserRepository,
       rateLimiters,
@@ -481,6 +489,7 @@ describe('RoomScan HTTP application', () => {
       scanAssetService,
       noteService,
       shareService,
+      sharedProjectsService,
       accessTokenVerifier,
       currentUserRepository,
       rateLimiters,

@@ -1433,6 +1433,102 @@
 					"response": []
 				}
 			]
+		},
+		{
+			"name": "Shared With Me",
+			"item": [
+				{
+					"name": "List Shared Projects",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"const json = pm.response.json();",
+									"pm.test(\"Shared projects listed\", function () {",
+									"  pm.response.to.have.status(200);",
+									"  pm.expect(json.items).to.be.an('array');",
+									"});",
+									"const items = json.items || [];",
+									"const active = items.find((i) => i.status === \"ACTIVE\");",
+									"const target = active || items[0];",
+									"if (target && target.id) {",
+									"  pm.environment.set(\"sharedProjectId\", target.id);",
+									"}"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/shared-projects?page=1&limit=5&sort=updatedAt:desc",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"shared-projects"
+							],
+							"query": [
+								{
+									"key": "page",
+									"value": "1"
+								},
+								{
+									"key": "limit",
+									"value": "5"
+								},
+								{
+									"key": "sort",
+									"value": "updatedAt:desc"
+								}
+							]
+						},
+						"description": "Lists projects shared with the current user. Optional query params: `search` (case-insensitive name search), `page`, `limit` (max 100), `sort` (updatedAt:desc|asc, createdAt:desc|asc, name:asc|desc). Each item carries `status` (ACTIVE/REVOKED/PROJECT_DELETED/TEMPORARILY_UNAVAILABLE) and read-only `permissions`. Saves the first item's id as `sharedProjectId` for the detail and remove requests."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Shared Project Detail",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/shared-projects/{{sharedProjectId}}",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"shared-projects",
+								"{{sharedProjectId}}"
+							]
+						},
+						"description": "Returns a shared project read-only as an active Viewer. Only `ACTIVE` projects open (`200`); revoked, deleted, or never-shared projects are hidden behind `404 PROJECT_NOT_FOUND`."
+					},
+					"response": []
+				},
+				{
+					"name": "Remove from Shared With Me",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/shared-projects/{{sharedProjectId}}",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"shared-projects",
+								"{{sharedProjectId}}"
+							]
+						},
+						"description": "Removes a project from the current user's Shared With Me list (Viewer only; `200`). Revokes only the current user's own access; the project, the Owner, and other Viewers are unaffected. `403 NOT_SHARED_PROJECT` for the Owner; `409 NOT_IN_SHARED_WITH_ME` when the project is not in the list."
+					},
+					"response": []
+				}
+			]
 		}
 	],
 	"auth": {
@@ -1492,6 +1588,10 @@
 		},
 		{
 			"key": "viewerUserId",
+			"value": ""
+		},
+		{
+			"key": "sharedProjectId",
 			"value": ""
 		},
 		{

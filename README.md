@@ -126,6 +126,9 @@ the local PostgreSQL and MinIO data volumes.
 | `DELETE` | `/api/v1/invitations/:invitationId`                    | Revoke a pending invitation (Owner only)                   |
 | `GET`    | `/api/v1/projects/:projectId/shares`                   | List pending invitations and accepted Viewers (Owner only) |
 | `DELETE` | `/api/v1/projects/:projectId/shares/:userId`           | Revoke Viewer access (Owner only)                          |
+| `GET`    | `/api/v1/shared-projects`                              | List projects shared with the current user                 |
+| `GET`    | `/api/v1/shared-projects/:projectId`                   | Get a shared project read-only                             |
+| `DELETE` | `/api/v1/shared-projects/:projectId`                   | Remove a project from the user's Shared With Me list       |
 | `GET`    | `/api-doc`                                             | Interactive Swagger UI                                     |
 | `GET`    | `/api-doc.json`                                        | Generated OpenAPI 3.1 document                             |
 
@@ -166,7 +169,12 @@ For local `yarn dev`, set `NODE_ENV=development` and
 Apple verification for `local-test@roomscan.dev` and returns normally signed
 RoomScan tokens. The seed also creates three demo projects owned by that local
 user with room scans spanning several asset and sync states and text notes
-anchored to those scans, ready to list, paginate, sort, and inspect. The flag is
+anchored to those scans, ready to list, paginate, sort, and inspect, plus four
+shared demo projects that the local user accepted (or was granted)
+as a Viewer — "Garden House" (`ACTIVE`), "Maple Cottage" (`REVOKED`), "Willow
+Townhouse" (`PROJECT_DELETED`), and "Cedar Bungalow"
+(`TEMPORARILY_UNAVAILABLE`) — so the Shared With Me list exercises every
+status and the owner/share-viewer flows can both be tried. The flag is
 rejected in test, staging, and production; the production-style Compose API
 therefore cannot expose this shortcut.
 
@@ -269,6 +277,16 @@ revoke a Viewer's access (`DELETE /api/v1/projects/:projectId/shares/:userId`).
 Revoked Viewers lose project, scan, note, and asset-download access immediately.
 Share management is Owner-only (`403 NOT_OWNER` for others).
 
+`GET /api/v1/shared-projects` lists every project the current user accepted an
+invitation for, each with a computed `status` (`ACTIVE`, `REVOKED`,
+`PROJECT_DELETED`, or `TEMPORARILY_UNAVAILABLE`) and read-only permissions.
+Owned projects never appear. `GET /api/v1/shared-projects/:projectId` opens an
+active shared project read-only (revoked/deleted/never-shared projects are
+hidden behind `404`), and
+`DELETE /api/v1/shared-projects/:projectId` removes the project from the user's
+own list without affecting the Owner, the project, or other Viewers. The list
+supports the same `search`/`page`/`limit`/`sort` pagination as owned projects.
+
 For nonce-bound sign-in, the client generates a raw nonce, sends its lowercase
 hexadecimal SHA-256 digest to Apple, and sends the raw nonce in the request
 above. If the identity token contains a `nonce` claim, the raw request nonce is
@@ -291,7 +309,8 @@ environment signs in through the seeded test user
 (`LOCAL_TEST_AUTH_ENABLED=true` with the `roomscan-local-test-user` identity
 token) at `http://localhost:3000`; the staging environment targets the deployed
 API. Follow the setup notes in the collection description; it includes the
-sharing and invitation endpoints, notes, scan assets, and upload flow.
+sharing and invitation endpoints, the Shared With Me endpoints, notes, scan
+assets, and the upload flow.
 
 ## Environment variables
 

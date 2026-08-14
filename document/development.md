@@ -77,7 +77,12 @@ The local seed is idempotent and refuses to run unless
 then seeds three demo projects owned by that user, each with room scans that
 exercise a range of asset and sync states, plus text notes anchored to the
 primary project's scans, so the list, pagination, sort, and detail screens can
-be tried without manual setup. With the shortcut enabled, use:
+be tried without manual setup. It also seeds four shared projects
+the local user accepted (or was granted) as a Viewer — "Garden House"
+(`ACTIVE`), "Maple Cottage" (`REVOKED`), "Willow Townhouse"
+(`PROJECT_DELETED`), and "Cedar Bungalow" (`TEMPORARILY_UNAVAILABLE`) — so the
+Shared With Me list exercises every status and the viewer-removal flow is
+demoable locally. With the shortcut enabled, use:
 
 ```json
 {
@@ -105,8 +110,8 @@ The `postman/` directory holds the operator-facing API test collection
 them in sync with the public HTTP surface: whenever a public route, request
 field, or response shape changes, add or update the matching request in the
 collection on the same branch. The collection description documents setup, the
-sequential upload flow, and the invitation sharing flow (including the `409`
-states and token rotation).
+sequential upload flow, the invitation sharing flow (including the `409`
+states and token rotation), and the Shared With Me endpoints.
 
 ## Before handoff
 
