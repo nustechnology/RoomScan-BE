@@ -170,7 +170,7 @@ Apple verification for `local-test@roomscan.dev` and returns normally signed
 RoomScan tokens. The seed also creates three demo projects owned by that local
 user with room scans spanning several asset and sync states and text notes
 anchored to those scans, ready to list, paginate, sort, and inspect, plus four
-viewer-owned shared demo projects that the local user accepted (or was granted)
+shared demo projects that the local user accepted (or was granted)
 as a Viewer — "Garden House" (`ACTIVE`), "Maple Cottage" (`REVOKED`), "Willow
 Townhouse" (`PROJECT_DELETED`), and "Cedar Bungalow"
 (`TEMPORARILY_UNAVAILABLE`) — so the Shared With Me list exercises every

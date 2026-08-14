@@ -53,7 +53,7 @@ The local seed is idempotent and refuses to run unless
 then seeds three demo projects owned by that user, each with room scans that
 exercise a range of asset and sync states, plus text notes anchored to the
 primary project's scans, so the list, pagination, sort, and detail screens can
-be tried without manual setup. It also seeds four viewer-owned shared projects
+be tried without manual setup. It also seeds four shared projects
 the local user accepted (or was granted) as a Viewer — "Garden House"
 (`ACTIVE`), "Maple Cottage" (`REVOKED`), "Willow Townhouse"
 (`PROJECT_DELETED`), and "Cedar Bungalow" (`TEMPORARILY_UNAVAILABLE`) — so the

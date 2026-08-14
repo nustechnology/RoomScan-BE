@@ -307,14 +307,17 @@ true only for `ACTIVE`. Detail only returns a project while it is `ACTIVE`;
 revoked, deleted, and never-shared projects are hidden behind the standard
 `404 PROJECT_NOT_FOUND`.
 
-`PrismaSharedProjectsRepository` queries `project_accesses` by `userId` (with
-the `VIEWER` role filter), applies case-insensitive name search against the
-parent project, sorts by a to-one relation field with a stable project `id`
-tie-breaker, and paginates with an offset. Removal runs a guarded
-`updateMany` on the access row (`revokedAt: null`), so a concurrent removal or
-Owner revocation resolves to `409 NOT_IN_SHARED_WITH_ME` instead of succeeding.
-Owners never appear in the list, and a removal attempt by the project Owner
-returns `403 NOT_SHARED_PROJECT`.
+`PrismaSharedProjectsRepository` restricts every `project_accesses` lookup to
+`VIEWER` rows: list filters by `userId` and the `VIEWER` role, detail and
+access-status checks match on `(projectId, userId)` with the same role filter,
+and removal runs a guarded `updateMany` on the access row
+(`role: VIEWER`, `revokedAt: null`), so owner records are never returned or
+revoked and a concurrent removal or Owner revocation resolves to
+`409 NOT_IN_SHARED_WITH_ME` instead of succeeding. Lookups apply
+case-insensitive name search against the parent project, sort by a to-one
+relation field with a stable project `id` tie-breaker, and paginate with an
+offset. Owners never appear in the list, and a removal attempt by the project
+Owner returns `403 NOT_SHARED_PROJECT`.
 
 ## Mail
 

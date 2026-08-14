@@ -121,7 +121,7 @@ export class PrismaSharedProjectsRepository implements SharedProjectsRepository 
 
   async findSharedForUser(projectId: string, userId: string): Promise<SharedProjectRecord | null> {
     const row = await this.#client.projectAccess.findFirst({
-      where: { projectId, userId },
+      where: { projectId, userId, role: PrismaProjectRole.VIEWER },
       select: sharedProjectSelect,
     });
 
@@ -132,8 +132,8 @@ export class PrismaSharedProjectsRepository implements SharedProjectsRepository 
     projectId: string,
     userId: string,
   ): Promise<{ revokedAt: Date | null } | null> {
-    const access = await this.#client.projectAccess.findUnique({
-      where: { projectId_userId: { projectId, userId } },
+    const access = await this.#client.projectAccess.findFirst({
+      where: { projectId, userId, role: PrismaProjectRole.VIEWER },
       select: { revokedAt: true },
     });
 
@@ -151,7 +151,7 @@ export class PrismaSharedProjectsRepository implements SharedProjectsRepository 
 
   async removeFromShared(projectId: string, userId: string, removedAt: Date): Promise<boolean> {
     const updated = await this.#client.projectAccess.updateMany({
-      where: { projectId, userId, revokedAt: null },
+      where: { projectId, userId, role: PrismaProjectRole.VIEWER, revokedAt: null },
       data: { revokedAt: removedAt },
     });
 

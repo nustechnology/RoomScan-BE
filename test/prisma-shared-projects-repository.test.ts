@@ -127,7 +127,7 @@ describe('PrismaSharedProjectsRepository', () => {
 
     expect(projectAccess.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { projectId: PROJECT_ID, userId: USER_ID },
+        where: { projectId: PROJECT_ID, userId: USER_ID, role: 'VIEWER' },
       }),
     );
     expect(result?.accessRevokedAt).toEqual(NOW);
@@ -141,19 +141,24 @@ describe('PrismaSharedProjectsRepository', () => {
     await expect(
       new PrismaSharedProjectsRepository(client).findSharedForUser(PROJECT_ID, USER_ID),
     ).resolves.toBeNull();
+    expect(projectAccess.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { projectId: PROJECT_ID, userId: USER_ID, role: 'VIEWER' },
+      }),
+    );
   });
 
   it('findAccessStatus reads the revocation state of the access row', async () => {
     const { client, projectAccess } = createClient();
-    projectAccess.findUnique.mockResolvedValue({ revokedAt: NOW });
+    projectAccess.findFirst.mockResolvedValue({ revokedAt: NOW });
 
     const result = await new PrismaSharedProjectsRepository(client).findAccessStatus(
       PROJECT_ID,
       USER_ID,
     );
 
-    expect(projectAccess.findUnique).toHaveBeenCalledWith({
-      where: { projectId_userId: { projectId: PROJECT_ID, userId: USER_ID } },
+    expect(projectAccess.findFirst).toHaveBeenCalledWith({
+      where: { projectId: PROJECT_ID, userId: USER_ID, role: 'VIEWER' },
       select: { revokedAt: true },
     });
     expect(result).toEqual({ revokedAt: NOW });
@@ -161,11 +166,16 @@ describe('PrismaSharedProjectsRepository', () => {
 
   it('findAccessStatus returns null when the access row is missing', async () => {
     const { client, projectAccess } = createClient();
-    projectAccess.findUnique.mockResolvedValue(null);
+    projectAccess.findFirst.mockResolvedValue(null);
 
     await expect(
       new PrismaSharedProjectsRepository(client).findAccessStatus(PROJECT_ID, USER_ID),
     ).resolves.toBeNull();
+    expect(projectAccess.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { projectId: PROJECT_ID, userId: USER_ID, role: 'VIEWER' },
+      }),
+    );
   });
 
   it('findProjectOwner returns the project owner', async () => {
@@ -199,10 +209,27 @@ describe('PrismaSharedProjectsRepository', () => {
     );
 
     expect(projectAccess.updateMany).toHaveBeenCalledWith({
-      where: { projectId: PROJECT_ID, userId: USER_ID, revokedAt: null },
+      where: { projectId: PROJECT_ID, userId: USER_ID, role: 'VIEWER', revokedAt: null },
       data: { revokedAt: NOW },
     });
     expect(result).toBe(true);
+  });
+
+  it('removeFromShared never revokes an OWNER access row', async () => {
+    const { client, projectAccess } = createClient();
+    projectAccess.updateMany.mockResolvedValue({ count: 0 });
+
+    const result = await new PrismaSharedProjectsRepository(client).removeFromShared(
+      PROJECT_ID,
+      USER_ID,
+      NOW,
+    );
+
+    expect(projectAccess.updateMany).toHaveBeenCalledWith({
+      where: { projectId: PROJECT_ID, userId: USER_ID, role: 'VIEWER', revokedAt: null },
+      data: { revokedAt: NOW },
+    });
+    expect(result).toBe(false);
   });
 
   it('removeFromShared returns false when nothing active was revoked', async () => {
