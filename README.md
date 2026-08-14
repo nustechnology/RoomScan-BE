@@ -385,4 +385,8 @@ are generated artifacts and are intentionally not committed.
   the `RATE_LIMIT_*` values and inspect structured 429 logs.
 - If port 5432 is already in use, stop the other PostgreSQL service or adjust
   the database port mapping and connection URL together.
+- If thumbnail display URLs return an S3 `AccessDenied` error, the MinIO bucket
+  is not publicly readable. Grant anonymous download access with the MinIO
+  Client (`mc anonymous set download <alias>/<bucket>`); see the
+  [development workflow](document/development.md) for the full commands.
 - If Git hooks are absent after cloning, run `yarn install` or `yarn prepare`.
