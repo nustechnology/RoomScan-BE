@@ -3,7 +3,7 @@ import request from 'supertest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
-import { createApp } from '../src/app.js';
+import { createApp, redactInvitationToken } from '../src/app.js';
 import type {
   AccessTokenVerifier,
   CurrentUserRepository,
@@ -30,6 +30,7 @@ import type { ProjectService } from '../src/modules/project/project.service.js';
 import type { ScanService } from '../src/modules/scan/scan.service.js';
 import type { ScanAssetService } from '../src/modules/scan-asset/scan-asset.service.js';
 import type { NoteService } from '../src/modules/note/note.service.js';
+import type { ShareService } from '../src/modules/share/share.service.js';
 
 const config: AppConfig = {
   nodeEnv: 'test',
@@ -62,6 +63,15 @@ const config: AppConfig = {
   assetMinModelSizeBytes: 10_000_000,
   assetMaxModelSizeBytes: 500_000_000,
   assetMaxThumbnailSizeBytes: 10_000_000,
+  invitationTtlSeconds: 604_800,
+  invitationBaseUrl: 'http://localhost:3000',
+  mailProvider: 'log',
+  smtpHost: '',
+  smtpPort: 2525,
+  smtpUser: '',
+  smtpPass: '',
+  smtpSecure: false,
+  mailFrom: 'RoomScan App <notifications@roomscan.app>',
 };
 
 const clock = () => new Date('2026-07-23T07:00:00.000Z');
@@ -121,6 +131,16 @@ describe('RoomScan HTTP application', () => {
     move: vi.fn(),
     delete: vi.fn(),
   } as unknown as NoteService;
+  const previewInvitation = vi.fn<ShareService['previewInvitation']>();
+  const shareService = {
+    createInvitation: vi.fn(),
+    previewInvitation,
+    acceptInvitation: vi.fn(),
+    declineInvitation: vi.fn(),
+    revokeInvitation: vi.fn(),
+    listShares: vi.fn(),
+    revokeViewer: vi.fn(),
+  } as unknown as ShareService;
 
   const app = createApp({
     config,
@@ -132,6 +152,7 @@ describe('RoomScan HTTP application', () => {
     scanService,
     scanAssetService,
     noteService,
+    shareService,
     accessTokenVerifier,
     currentUserRepository,
     rateLimiters,
@@ -180,6 +201,7 @@ describe('RoomScan HTTP application', () => {
       scanService,
       scanAssetService,
       noteService,
+      shareService,
       accessTokenVerifier,
       currentUserRepository,
       rateLimiters,
@@ -428,6 +450,102 @@ describe('RoomScan HTTP application', () => {
       code: 'APPLE_IDENTITY_PROVIDER_UNAVAILABLE',
       message: 'Apple identity provider is unavailable',
     });
+  });
+
+  it('redacts the invitation token from request access logs', async () => {
+    interface RequestLogRecord {
+      req?: {
+        url?: string;
+        query?: Record<string, unknown>;
+        remoteAddress?: string;
+        remotePort?: number;
+      };
+    }
+    const records: RequestLogRecord[] = [];
+    const collectingLogger = pino(
+      { level: 'info' },
+      {
+        write(chunk: string) {
+          records.push(JSON.parse(chunk) as RequestLogRecord);
+        },
+      },
+    );
+    const loggingApp = createApp({
+      config,
+      database,
+      logger: collectingLogger,
+      authService,
+      refreshTokenService,
+      projectService,
+      scanService,
+      scanAssetService,
+      noteService,
+      shareService,
+      accessTokenVerifier,
+      currentUserRepository,
+      rateLimiters,
+      clock,
+    });
+    const token = 'A'.repeat(43);
+    previewInvitation.mockResolvedValue({
+      project: {
+        id: 'a1b2c3d4-e5f6-4890-abcd-ef1234567890',
+        name: 'District 2 Apartment',
+        description: null,
+        thumbnail: null,
+      },
+      status: 'PENDING',
+      recipientEmail: 'recipient@example.com',
+      sentAt: '2026-07-29T10:00:00.000Z',
+      expiresAt: '2026-08-05T10:00:00.000Z',
+    });
+
+    await request(loggingApp).get(`/api/v1/invitations/${token}`).expect(200);
+    await request(loggingApp).get(`/api/v1/invitations?token=${token}`).expect(404);
+
+    const pathLog = records.find((record) => record.req?.url?.startsWith('/api/v1/invitations/'));
+    expect(pathLog?.req?.url).toBe('/api/v1/invitations/[REDACTED]');
+    expect(pathLog?.req?.remoteAddress).toEqual(expect.any(String));
+    expect(pathLog?.req?.remotePort).toEqual(expect.any(Number));
+
+    const queryLog = records.find((record) => record.req?.url?.includes('?token='));
+    expect(queryLog?.req?.url).toBe('/api/v1/invitations?token=[REDACTED]');
+    expect(queryLog?.req?.query).toEqual({ token: '[REDACTED]' });
+
+    expect(JSON.stringify(records.map((record) => record.req))).not.toContain(token);
+  });
+
+  it('redacts only bounded 43-character base64url tokens', () => {
+    const token = 'AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-abXYZ';
+
+    expect(redactInvitationToken(`/api/v1/invitations/${token}`)).toBe(
+      '/api/v1/invitations/[REDACTED]',
+    );
+    expect(redactInvitationToken(`/API/V1/INVITATIONS/${token}`)).toBe(
+      '/API/V1/INVITATIONS/[REDACTED]',
+    );
+    expect(redactInvitationToken(`/api/v1/invitations/${token}/accept`)).toBe(
+      '/api/v1/invitations/[REDACTED]/accept',
+    );
+    expect(redactInvitationToken(`/api/v1/invitations/${token}/decline`)).toBe(
+      '/api/v1/invitations/[REDACTED]/decline',
+    );
+    expect(redactInvitationToken(`/api/v1/invitations/${token}?from=email`)).toBe(
+      '/api/v1/invitations/[REDACTED]?from=email',
+    );
+    expect(redactInvitationToken(`/api/v1/invitations?token=${token}`)).toBe(
+      '/api/v1/invitations?token=[REDACTED]',
+    );
+  });
+
+  it('does not partially redact an overlong token segment', () => {
+    const token = 'AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-abXYZ';
+    const overlong = `${token}x`;
+
+    expect(redactInvitationToken(`/api/v1/invitations/${overlong}`)).toBe(
+      `/api/v1/invitations/${overlong}`,
+    );
+    expect(redactInvitationToken(`/api/v1/invitations/${overlong}`)).not.toContain('[REDACTED]');
   });
 
   it('returns a safe internal error when authentication fails unexpectedly', async () => {

@@ -92,3 +92,36 @@ export function getUserId(request: Request): string {
 
   return locals.currentUser.id;
 }
+
+export function optionalAuthenticate(
+  verifier: AccessTokenVerifier,
+  currentUserRepository: CurrentUserRepository,
+): RequestHandler {
+  return async (request, _response, next) => {
+    const authorization = request.headers.authorization;
+
+    if (typeof authorization !== 'string' || authorization.length === 0) {
+      next();
+      return;
+    }
+
+    try {
+      const token = extractBearerToken(authorization);
+      const { userId } = await verifier.verify(token);
+      const currentUser = await currentUserRepository.findById(userId);
+
+      if (currentUser !== null) {
+        request.locals = { currentUser };
+      }
+
+      next();
+    } catch (error) {
+      if (error instanceof InvalidAccessTokenError) {
+        next();
+        return;
+      }
+
+      next(error);
+    }
+  };
+}

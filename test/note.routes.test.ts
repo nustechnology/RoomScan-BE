@@ -17,6 +17,7 @@ import type { DatabaseHealth } from '../src/infrastructure/database/database.js'
 import { ModelVersionMismatchError, NoteNotFoundError } from '../src/modules/note/note.errors.js';
 import { NoteListResponseSchema, NoteResponseSchema } from '../src/modules/note/note.schemas.js';
 import type { NoteService } from '../src/modules/note/note.service.js';
+import type { ShareService } from '../src/modules/share/share.service.js';
 import type { NoteResult } from '../src/modules/note/note.types.js';
 import type { ProjectService } from '../src/modules/project/project.service.js';
 import type { ScanService } from '../src/modules/scan/scan.service.js';
@@ -61,6 +62,15 @@ const config: AppConfig = {
   assetMinModelSizeBytes: 10_000_000,
   assetMaxModelSizeBytes: 500_000_000,
   assetMaxThumbnailSizeBytes: 10_000_000,
+  invitationTtlSeconds: 604_800,
+  invitationBaseUrl: 'http://localhost:3000',
+  mailProvider: 'log',
+  smtpHost: '',
+  smtpPort: 2525,
+  smtpUser: '',
+  smtpPass: '',
+  smtpSecure: false,
+  mailFrom: 'RoomScan App <notifications@roomscan.app>',
 };
 
 function noteResult(overrides: Partial<NoteResult> = {}): NoteResult {
@@ -162,6 +172,15 @@ describe('Note HTTP endpoints', () => {
     move,
     delete: remove,
   } as unknown as NoteService;
+  const shareService = {
+    createInvitation: vi.fn(),
+    previewInvitation: vi.fn(),
+    acceptInvitation: vi.fn(),
+    declineInvitation: vi.fn(),
+    revokeInvitation: vi.fn(),
+    listShares: vi.fn(),
+    revokeViewer: vi.fn(),
+  } as unknown as ShareService;
   const app = createApp({
     config,
     database,
@@ -172,6 +191,7 @@ describe('Note HTTP endpoints', () => {
     scanService,
     scanAssetService,
     noteService,
+    shareService,
     accessTokenVerifier,
     currentUserRepository,
     rateLimiters,

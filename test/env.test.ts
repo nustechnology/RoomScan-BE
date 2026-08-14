@@ -49,6 +49,15 @@ describe('loadConfig', () => {
       assetMinModelSizeBytes: 0,
       assetMaxModelSizeBytes: 200_000_000,
       assetMaxThumbnailSizeBytes: 10_000_000,
+      invitationTtlSeconds: 604_800,
+      invitationBaseUrl: 'http://localhost:3000',
+      mailProvider: 'log',
+      smtpHost: '',
+      smtpPort: 2525,
+      smtpUser: '',
+      smtpPass: '',
+      smtpSecure: false,
+      mailFrom: 'RoomScan App <notifications@roomscan.app>',
     });
   });
 
@@ -159,6 +168,10 @@ describe('loadConfig', () => {
     const config = loadConfig({
       ...validEnvironment,
       NODE_ENV: 'staging',
+      MAIL_PROVIDER: 'smtp',
+      SMTP_HOST: 'sandbox.smtp.mailtrap.io',
+      SMTP_USER: 'mailtrap-user',
+      SMTP_PASS: 'mailtrap-pass',
     });
 
     expect(config.nodeEnv).toBe('staging');
@@ -323,5 +336,85 @@ describe('loadConfig', () => {
         ASSET_MAX_MODEL_SIZE_BYTES: '50000000',
       }),
     ).toThrow(/greater than ASSET_MIN_MODEL_SIZE_BYTES/);
+  });
+
+  it('parses the configured invitation settings', () => {
+    const config = loadConfig({
+      ...validEnvironment,
+      INVITATION_TTL_SECONDS: '1209600',
+      INVITATION_BASE_URL: 'https://invite.roomscan.dev/',
+    });
+
+    expect(config.invitationTtlSeconds).toBe(1_209_600);
+    expect(config.invitationBaseUrl).toBe('https://invite.roomscan.dev');
+  });
+
+  it.each(['', 'not-a-url', '0', '-1', '1.5'])(
+    'rejects an invalid invitation TTL or base URL value: %s',
+    (value) => {
+      expect(() =>
+        loadConfig({
+          ...validEnvironment,
+          INVITATION_TTL_SECONDS: value,
+          INVITATION_BASE_URL: value,
+        }),
+      ).toThrow(ZodError);
+    },
+  );
+
+  it('parses a fully configured smtp mail provider', () => {
+    const config = loadConfig({
+      ...validEnvironment,
+      MAIL_PROVIDER: 'smtp',
+      SMTP_HOST: 'sandbox.smtp.mailtrap.io',
+      SMTP_PORT: '2525',
+      SMTP_USER: 'mailtrap-user',
+      SMTP_PASS: 'mailtrap-pass',
+      SMTP_SECURE: 'false',
+      MAIL_FROM: 'RoomScan App <notifications@roomscan.app>',
+    });
+
+    expect(config).toMatchObject({
+      mailProvider: 'smtp',
+      smtpHost: 'sandbox.smtp.mailtrap.io',
+      smtpPort: 2525,
+      smtpUser: 'mailtrap-user',
+      smtpPass: 'mailtrap-pass',
+      smtpSecure: false,
+      mailFrom: 'RoomScan App <notifications@roomscan.app>',
+    });
+  });
+
+  it.each(['SMTP_HOST', 'SMTP_USER', 'SMTP_PASS'])('rejects a smtp provider missing %s', (name) => {
+    expect(() =>
+      loadConfig({
+        ...validEnvironment,
+        MAIL_PROVIDER: 'smtp',
+        SMTP_HOST: 'sandbox.smtp.mailtrap.io',
+        SMTP_USER: 'mailtrap-user',
+        SMTP_PASS: 'mailtrap-pass',
+        [name]: '',
+      }),
+    ).toThrow(RegExp(`${name} is required when MAIL_PROVIDER=smtp`));
+  });
+
+  it.each(['staging', 'production'])('rejects the log mail provider in NODE_ENV=%s', (nodeEnv) => {
+    expect(() =>
+      loadConfig({
+        ...validEnvironment,
+        NODE_ENV: nodeEnv,
+        MAIL_PROVIDER: 'log',
+      }),
+    ).toThrow(/MAIL_PROVIDER=log is only allowed when NODE_ENV is development or test/);
+  });
+
+  it.each(['development', 'test'])('allows the log mail provider in NODE_ENV=%s', (nodeEnv) => {
+    const config = loadConfig({
+      ...validEnvironment,
+      NODE_ENV: nodeEnv,
+      MAIL_PROVIDER: 'log',
+    });
+
+    expect(config.mailProvider).toBe('log');
   });
 });
