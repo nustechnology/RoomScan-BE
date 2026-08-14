@@ -16,6 +16,7 @@ import { PrismaScanRepository } from './infrastructure/database/prisma-scan-repo
 import { PrismaScanAssetRepository } from './infrastructure/database/prisma-scan-asset-repository.js';
 import { PrismaNoteRepository } from './infrastructure/database/prisma-note-repository.js';
 import { PrismaShareRepository } from './infrastructure/database/prisma-share-repository.js';
+import { PrismaSharedProjectsRepository } from './infrastructure/database/prisma-shared-projects-repository.js';
 import { LocalStorageAdapter } from './infrastructure/storage/local-storage-adapter.js';
 import { MinioStorageAdapter } from './infrastructure/storage/minio-storage-adapter.js';
 import type { StorageAdapter } from './infrastructure/storage/storage.types.js';
@@ -30,6 +31,7 @@ import { ScanService } from './modules/scan/scan.service.js';
 import { ScanAssetService } from './modules/scan-asset/scan-asset.service.js';
 import { NoteService } from './modules/note/note.service.js';
 import { ShareService } from './modules/share/share.service.js';
+import { SharedProjectsService } from './modules/shared-projects/shared-projects.service.js';
 
 const config = loadConfig();
 const logger = createLogger(config);
@@ -42,6 +44,7 @@ const scanRepository = new PrismaScanRepository(prismaClient);
 const scanAssetRepository = new PrismaScanAssetRepository(prismaClient);
 const noteRepository = new PrismaNoteRepository(prismaClient);
 const shareRepository = new PrismaShareRepository(prismaClient);
+const sharedProjectsRepository = new PrismaSharedProjectsRepository(prismaClient);
 function createStorageAdapter(): StorageAdapter {
   if (config.storageProvider === 'minio') {
     return new MinioStorageAdapter({
@@ -131,6 +134,9 @@ const shareService = new ShareService({
   invitationTtlSeconds: config.invitationTtlSeconds,
   invitationBaseUrl: config.invitationBaseUrl,
 });
+const sharedProjectsService = new SharedProjectsService({
+  repository: sharedProjectsRepository,
+});
 const rateLimiters = createRateLimiters(config, logger);
 const app = createApp({
   config,
@@ -143,6 +149,7 @@ const app = createApp({
   scanAssetService,
   noteService,
   shareService,
+  sharedProjectsService,
   accessTokenVerifier,
   currentUserRepository,
   rateLimiters,

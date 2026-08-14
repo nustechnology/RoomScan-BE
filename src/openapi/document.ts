@@ -8,6 +8,7 @@ import { scanOpenApiRegistry } from '../modules/scan/scan.openapi.js';
 import { scanAssetOpenApiRegistry } from '../modules/scan-asset/scan-asset.openapi.js';
 import { noteOpenApiRegistry } from '../modules/note/note.openapi.js';
 import { shareOpenApiRegistry } from '../modules/share/share.openapi.js';
+import { sharedProjectsOpenApiRegistry } from '../modules/shared-projects/shared-projects.openapi.js';
 
 export function createOpenApiDocument(): ReturnType<OpenApiGeneratorV31['generateDocument']> {
   const generator = new OpenApiGeneratorV31([
@@ -18,6 +19,7 @@ export function createOpenApiDocument(): ReturnType<OpenApiGeneratorV31['generat
     ...scanAssetOpenApiRegistry.definitions,
     ...noteOpenApiRegistry.definitions,
     ...shareOpenApiRegistry.definitions,
+    ...sharedProjectsOpenApiRegistry.definitions,
   ]);
 
   return generator.generateDocument({
@@ -61,6 +63,10 @@ export function createOpenApiDocument(): ReturnType<OpenApiGeneratorV31['generat
       {
         name: 'Shares',
         description: 'Project sharing through expiring invitation links and Viewer access',
+      },
+      {
+        name: 'Shared With Me',
+        description: 'Projects accepted by the current user as a Viewer',
       },
     ],
   });

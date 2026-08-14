@@ -18,6 +18,7 @@ import type { ProjectService } from '../src/modules/project/project.service.js';
 import type { ScanService } from '../src/modules/scan/scan.service.js';
 import type { NoteService } from '../src/modules/note/note.service.js';
 import type { ShareService } from '../src/modules/share/share.service.js';
+import type { SharedProjectsService } from '../src/modules/shared-projects/shared-projects.service.js';
 import {
   AssetMetadataResponseSchema,
   CreateUploadSessionResponseSchema,
@@ -199,6 +200,11 @@ describe('Scan asset HTTP endpoints', () => {
     listShares: vi.fn(),
     revokeViewer: vi.fn(),
   } as unknown as ShareService;
+  const sharedProjectsService = {
+    list: vi.fn(),
+    detail: vi.fn(),
+    remove: vi.fn(),
+  } as unknown as SharedProjectsService;
   const app = createApp({
     config,
     database,
@@ -210,6 +216,7 @@ describe('Scan asset HTTP endpoints', () => {
     scanAssetService,
     noteService,
     shareService,
+    sharedProjectsService,
     accessTokenVerifier,
     currentUserRepository,
     rateLimiters,
