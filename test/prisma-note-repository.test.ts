@@ -245,21 +245,35 @@ describe('PrismaNoteRepository', () => {
         id: NOTE_ID,
         scan: {
           deletedAt: null,
-          project: {
-            deletedAt: null,
-            OR: [
-              { ownerId: OWNER_ID },
-              {
-                accesses: {
-                  some: {
-                    userId: OWNER_ID,
-                    role: 'VIEWER',
-                    revokedAt: null,
+          OR: [
+            {
+              project: {
+                deletedAt: null,
+                OR: [
+                  { ownerId: OWNER_ID },
+                  {
+                    accesses: {
+                      some: {
+                        userId: OWNER_ID,
+                        role: 'VIEWER',
+                        revokedAt: null,
+                      },
+                    },
                   },
+                ],
+              },
+            },
+            {
+              project: { deletedAt: null },
+              accesses: {
+                some: {
+                  userId: OWNER_ID,
+                  role: 'VIEWER',
+                  revokedAt: null,
                 },
               },
-            ],
-          },
+            },
+          ],
         },
       },
       select: {

@@ -5,9 +5,11 @@ import { PrismaShareRepository } from '../src/infrastructure/database/prisma-sha
 import { InvitationAlreadySentError } from '../src/modules/share/share.errors.js';
 
 const PROJECT_ID = 'a1b2c3d4-e5f6-4890-abcd-ef1234567890';
+const SCAN_ID = 'f1e2d3c4-a5b6-7890-abcd-ef1234567890';
 const OWNER_ID = 'eb5d278f-c857-45c7-887d-7be65288cb75';
 const VIEWER_ID = '8c53d31d-2788-48de-82a0-c4f219ca3701';
 const INVITATION_ID = 'b1a2c3d4-e5f6-4890-abcd-ef1234567890';
+const SHARE_LINK_ID = 'c0ffee00-0000-4000-8000-0000000000aa';
 const TOKEN_HASH = 'a'.repeat(64);
 const RECIPIENT_EMAIL = 'recipient@example.com';
 const NOW = new Date('2026-07-29T10:00:00.000Z');
@@ -43,7 +45,7 @@ function createClient() {
   const projectAccess = {
     findFirst: vi.fn().mockResolvedValue({ id: 'access-id' }),
     findUnique: vi.fn().mockResolvedValue({ id: 'access-id', revokedAt: null }),
-    upsert: vi.fn().mockResolvedValue({}),
+    upsert: vi.fn().mockResolvedValue({ id: 'access-id' }),
     update: vi.fn().mockResolvedValue({ revokedAt: NOW }),
     findMany: vi.fn().mockResolvedValue([
       {
@@ -53,6 +55,47 @@ function createClient() {
         user: { id: VIEWER_ID, email: RECIPIENT_EMAIL },
       },
     ]),
+  };
+  const scanAccess = {
+    findFirst: vi.fn().mockResolvedValue({ id: 'scan-access-id' }),
+    findUnique: vi.fn().mockResolvedValue({ id: 'scan-access-id', revokedAt: null }),
+    upsert: vi.fn().mockResolvedValue({ id: 'scan-access-id' }),
+    update: vi.fn().mockResolvedValue({ revokedAt: NOW }),
+    findMany: vi.fn().mockResolvedValue([
+      {
+        userId: VIEWER_ID,
+        acceptedAt: NOW,
+        createdAt: NOW,
+        user: { id: VIEWER_ID, email: RECIPIENT_EMAIL },
+      },
+    ]),
+  };
+  const shareLink = {
+    create: vi.fn().mockResolvedValue({
+      id: 'c0ffee00-0000-4000-8000-0000000000aa',
+      projectId: PROJECT_ID,
+      scanId: null,
+      createdById: OWNER_ID,
+      tokenHash: TOKEN_HASH,
+      expiresAt: NOW,
+      revokedAt: null,
+      createdAt: NOW,
+      updatedAt: NOW,
+    }),
+    findFirst: vi.fn().mockResolvedValue(null),
+    findUnique: vi.fn().mockResolvedValue({
+      id: 'c0ffee00-0000-4000-8000-0000000000aa',
+      projectId: PROJECT_ID,
+      scanId: null,
+      createdById: OWNER_ID,
+      tokenHash: TOKEN_HASH,
+      expiresAt: NOW,
+      revokedAt: null,
+      createdAt: NOW,
+      updatedAt: NOW,
+    }),
+    findMany: vi.fn().mockResolvedValue([]),
+    updateMany: vi.fn().mockResolvedValue({ count: 1 }),
   };
   const project = {
     findFirst: vi.fn().mockResolvedValue({ ownerId: OWNER_ID }),
@@ -69,6 +112,7 @@ function createClient() {
           findUnique: typeof invitation.findUnique;
         };
         projectAccess: { upsert: typeof projectAccess.upsert };
+        scanAccess: { upsert: typeof scanAccess.upsert };
       }) => Promise<unknown>
     )({
       invitation: {
@@ -77,20 +121,29 @@ function createClient() {
         findUnique: invitation.findUnique,
       },
       projectAccess: { upsert: projectAccess.upsert },
+      scanAccess: { upsert: scanAccess.upsert },
     });
   });
   const client = {
     invitation,
     projectAccess,
+    scanAccess,
+    shareLink,
     project,
     scan,
     $transaction: transaction,
   } as unknown as Pick<
     PrismaClient,
-    'invitation' | 'projectAccess' | 'project' | 'scan' | '$transaction'
+    | 'invitation'
+    | 'projectAccess'
+    | 'scanAccess'
+    | 'shareLink'
+    | 'project'
+    | 'scan'
+    | '$transaction'
   >;
 
-  return { client, invitation, projectAccess, project, scan, transaction };
+  return { client, invitation, projectAccess, scanAccess, shareLink, project, scan, transaction };
 }
 
 describe('PrismaShareRepository', () => {
@@ -175,6 +228,7 @@ describe('PrismaShareRepository', () => {
     expect(invitation.updateMany).toHaveBeenCalledWith({
       where: {
         projectId: PROJECT_ID,
+        scanId: null,
         recipientEmail: RECIPIENT_EMAIL,
         status: 'PENDING',
         expiresAt: { lte: NOW },
@@ -185,6 +239,7 @@ describe('PrismaShareRepository', () => {
       expect.objectContaining({
         data: {
           projectId: PROJECT_ID,
+          scanId: null,
           createdById: OWNER_ID,
           recipientEmail: RECIPIENT_EMAIL,
           tokenHash: TOKEN_HASH,
@@ -243,6 +298,7 @@ describe('PrismaShareRepository', () => {
         description: null,
         owner: { id: OWNER_ID, email: 'owner@example.com' },
       },
+      scan: null,
     });
 
     const result = await new PrismaShareRepository(client).findByTokenHash(TOKEN_HASH);
@@ -256,9 +312,16 @@ describe('PrismaShareRepository', () => {
       thumbnail: null,
       owner: { id: OWNER_ID, email: 'owner@example.com' },
     });
+    expect(result?.scan).toBeNull();
     expect(invitation.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { tokenHash: TOKEN_HASH, project: { deletedAt: null } },
+        where: {
+          tokenHash: TOKEN_HASH,
+          OR: [
+            { projectId: { not: null }, project: { deletedAt: null } },
+            { scanId: { not: null }, scan: { deletedAt: null, project: { deletedAt: null } } },
+          ],
+        },
       }),
     );
   });
@@ -524,6 +587,410 @@ describe('PrismaShareRepository', () => {
       where: { id: 'access-id' },
       data: { revokedAt: NOW },
       select: { revokedAt: true },
+    });
+  });
+
+  it('findScanInfo returns the scan name and project owner', async () => {
+    const { client, scan } = createClient();
+    scan.findFirst.mockResolvedValue({
+      name: 'Living Room',
+      projectId: PROJECT_ID,
+      project: { ownerId: OWNER_ID, owner: { email: 'owner@example.com' } },
+    });
+
+    const result = await new PrismaShareRepository(client).findScanInfo(SCAN_ID);
+
+    expect(result).toEqual({
+      name: 'Living Room',
+      projectId: PROJECT_ID,
+      ownerId: OWNER_ID,
+      ownerEmail: 'owner@example.com',
+    });
+    expect(scan.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: SCAN_ID, deletedAt: null, project: { deletedAt: null } },
+      }),
+    );
+  });
+
+  it('findScanInfo returns null when the scan or project is deleted', async () => {
+    const { client, scan } = createClient();
+    scan.findFirst.mockResolvedValue(null);
+
+    await expect(new PrismaShareRepository(client).findScanInfo(SCAN_ID)).resolves.toBeNull();
+  });
+
+  it('hasUploadedScanModel is true when the scan has an uploaded model', async () => {
+    const { client, scan } = createClient();
+
+    await expect(new PrismaShareRepository(client).hasUploadedScanModel(SCAN_ID)).resolves.toBe(
+      true,
+    );
+    expect(scan.findFirst).toHaveBeenCalledWith({
+      where: { id: SCAN_ID, deletedAt: null, assetStatus: 'UPLOADED' },
+      select: { id: true },
+    });
+  });
+
+  it('createInvitation stores a scan-scope invitation', async () => {
+    const { client, invitation } = createClient();
+
+    await new PrismaShareRepository(client).createInvitation({
+      scanId: SCAN_ID,
+      createdById: OWNER_ID,
+      recipientEmail: RECIPIENT_EMAIL,
+      tokenHash: TOKEN_HASH,
+      expiresAt: NOW,
+      sentAt: NOW,
+    });
+
+    expect(invitation.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          scanId: SCAN_ID,
+          projectId: null,
+          recipientEmail: RECIPIENT_EMAIL,
+          status: 'PENDING',
+          expiresAt: { lte: NOW },
+        },
+      }),
+    );
+    expect(invitation.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: {
+          scanId: SCAN_ID,
+          projectId: null,
+          createdById: OWNER_ID,
+          recipientEmail: RECIPIENT_EMAIL,
+          tokenHash: TOKEN_HASH,
+          status: 'PENDING',
+          expiresAt: NOW,
+          sentAt: NOW,
+        },
+      }),
+    );
+  });
+
+  it('acceptScanInvitation grants ScanAccess in one transaction', async () => {
+    const { client, invitation, scanAccess, transaction } = createClient();
+    invitation.findUnique.mockResolvedValue(
+      createInvitationRow({ status: 'ACCEPTED', acceptedAt: NOW, acceptedByUserId: VIEWER_ID }),
+    );
+
+    const result = await new PrismaShareRepository(client).acceptScanInvitation(
+      INVITATION_ID,
+      SCAN_ID,
+      VIEWER_ID,
+      NOW,
+    );
+
+    expect(result?.status).toBe('ACCEPTED');
+    expect(transaction).toHaveBeenCalledOnce();
+    expect(invitation.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: INVITATION_ID,
+        scanId: SCAN_ID,
+        status: 'PENDING',
+        expiresAt: { gt: NOW },
+      },
+      data: { status: 'ACCEPTED', acceptedAt: NOW, acceptedByUserId: VIEWER_ID },
+    });
+    expect(scanAccess.upsert).toHaveBeenCalledWith({
+      where: { scanId_userId: { scanId: SCAN_ID, userId: VIEWER_ID } },
+      create: {
+        scanId: SCAN_ID,
+        userId: VIEWER_ID,
+        role: 'VIEWER',
+        invitationId: INVITATION_ID,
+        acceptedAt: NOW,
+        revokedAt: null,
+      },
+      update: {
+        role: 'VIEWER',
+        invitationId: INVITATION_ID,
+        acceptedAt: NOW,
+        revokedAt: null,
+      },
+    });
+  });
+
+  it('acceptScanInvitation returns null when the invitation is no longer pending', async () => {
+    const { client, invitation, scanAccess } = createClient();
+    invitation.updateMany.mockResolvedValue({ count: 0 });
+
+    await expect(
+      new PrismaShareRepository(client).acceptScanInvitation(
+        INVITATION_ID,
+        SCAN_ID,
+        VIEWER_ID,
+        NOW,
+      ),
+    ).resolves.toBeNull();
+    expect(scanAccess.upsert).not.toHaveBeenCalled();
+  });
+
+  it('listPendingByScan returns only PENDING scan invitations', async () => {
+    const { client, invitation } = createClient();
+
+    const result = await new PrismaShareRepository(client).listPendingByScan(SCAN_ID);
+
+    expect(result).toHaveLength(1);
+    expect(invitation.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { scanId: SCAN_ID, status: 'PENDING' },
+        orderBy: [{ sentAt: 'desc' }, { id: 'desc' }],
+      }),
+    );
+  });
+
+  it('findActiveScanAccess returns the active access id', async () => {
+    const { client, scanAccess } = createClient();
+
+    await expect(
+      new PrismaShareRepository(client).findActiveScanAccess(SCAN_ID, VIEWER_ID),
+    ).resolves.toEqual({ id: 'scan-access-id' });
+    expect(scanAccess.findFirst).toHaveBeenCalledWith({
+      where: { scanId: SCAN_ID, userId: VIEWER_ID, revokedAt: null },
+      select: { id: true },
+    });
+  });
+
+  it('listActiveScanViewers maps acceptedAt as grantedAt', async () => {
+    const { client, scanAccess } = createClient();
+
+    const result = await new PrismaShareRepository(client).listActiveScanViewers(SCAN_ID);
+
+    expect(result).toEqual([
+      {
+        userId: VIEWER_ID,
+        user: { id: VIEWER_ID, email: RECIPIENT_EMAIL },
+        grantedAt: NOW,
+      },
+    ]);
+    expect(scanAccess.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { scanId: SCAN_ID, role: 'VIEWER', revokedAt: null },
+      }),
+    );
+  });
+
+  it('revokeScanViewerAccess revokes an active scan access', async () => {
+    const { client, scanAccess } = createClient();
+    scanAccess.findUnique.mockResolvedValue({ id: 'scan-access-id', revokedAt: null });
+
+    await expect(
+      new PrismaShareRepository(client).revokeScanViewerAccess(SCAN_ID, VIEWER_ID, NOW),
+    ).resolves.toEqual({ revokedAt: NOW });
+    expect(scanAccess.update).toHaveBeenCalledWith({
+      where: { id: 'scan-access-id' },
+      data: { revokedAt: NOW },
+      select: { revokedAt: true },
+    });
+  });
+
+  it('revokeScanViewerAccess returns null when no access record exists', async () => {
+    const { client, scanAccess } = createClient();
+    scanAccess.findUnique.mockResolvedValue(null);
+
+    await expect(
+      new PrismaShareRepository(client).revokeScanViewerAccess(SCAN_ID, VIEWER_ID, NOW),
+    ).resolves.toBeNull();
+  });
+
+  it('createShareLink stores a reusable link without a recipient', async () => {
+    const { client, shareLink } = createClient();
+
+    const result = await new PrismaShareRepository(client).createShareLink({
+      projectId: PROJECT_ID,
+      createdById: OWNER_ID,
+      tokenHash: TOKEN_HASH,
+      expiresAt: NOW,
+    });
+
+    expect(result.tokenHash).toBe(TOKEN_HASH);
+    expect(shareLink.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: {
+          projectId: PROJECT_ID,
+          createdById: OWNER_ID,
+          tokenHash: TOKEN_HASH,
+          expiresAt: NOW,
+        },
+      }),
+    );
+  });
+
+  it('findShareLinkByTokenHash returns the share link with its project summary', async () => {
+    const { client, shareLink } = createClient();
+    shareLink.findFirst.mockResolvedValue({
+      id: SHARE_LINK_ID,
+      projectId: PROJECT_ID,
+      scanId: null,
+      createdById: OWNER_ID,
+      tokenHash: TOKEN_HASH,
+      expiresAt: NOW,
+      revokedAt: null,
+      createdAt: NOW,
+      updatedAt: NOW,
+      project: {
+        id: PROJECT_ID,
+        name: 'District 2 Apartment',
+        description: null,
+        owner: { id: OWNER_ID, email: 'owner@example.com' },
+      },
+      scan: null,
+    });
+
+    const result = await new PrismaShareRepository(client).findShareLinkByTokenHash(TOKEN_HASH);
+
+    expect(result?.shareLink.tokenHash).toBe(TOKEN_HASH);
+    expect(result?.project).toEqual(
+      expect.objectContaining({ id: PROJECT_ID, name: 'District 2 Apartment' }),
+    );
+    expect(result?.scan).toBeNull();
+    expect(shareLink.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          tokenHash: TOKEN_HASH,
+          OR: [
+            { projectId: { not: null }, project: { deletedAt: null } },
+            { scanId: { not: null }, scan: { deletedAt: null, project: { deletedAt: null } } },
+          ],
+        },
+      }),
+    );
+  });
+
+  it('findShareLinkById returns the stored share link', async () => {
+    const { client, shareLink } = createClient();
+
+    const result = await new PrismaShareRepository(client).findShareLinkById(SHARE_LINK_ID);
+
+    expect(result).toEqual(expect.objectContaining({ id: SHARE_LINK_ID, tokenHash: TOKEN_HASH }));
+    expect(shareLink.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: SHARE_LINK_ID } }),
+    );
+  });
+
+  it('listShareLinksByResource returns only active links for the resource', async () => {
+    const { client, shareLink } = createClient();
+    shareLink.findMany.mockResolvedValue([
+      {
+        id: SHARE_LINK_ID,
+        projectId: PROJECT_ID,
+        scanId: null,
+        createdById: OWNER_ID,
+        tokenHash: TOKEN_HASH,
+        expiresAt: NOW,
+        revokedAt: null,
+        createdAt: NOW,
+        updatedAt: NOW,
+      },
+    ]);
+
+    const result = await new PrismaShareRepository(client).listShareLinksByResource({
+      projectId: PROJECT_ID,
+    });
+
+    expect(result).toHaveLength(1);
+    expect(shareLink.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { projectId: PROJECT_ID, scanId: null, revokedAt: null },
+      }),
+    );
+  });
+
+  it('revokeShareLink marks an active link revoked', async () => {
+    const { client, shareLink } = createClient();
+    shareLink.findUnique.mockResolvedValue({
+      id: SHARE_LINK_ID,
+      projectId: PROJECT_ID,
+      scanId: null,
+      createdById: OWNER_ID,
+      tokenHash: TOKEN_HASH,
+      expiresAt: NOW,
+      revokedAt: NOW,
+      createdAt: NOW,
+      updatedAt: NOW,
+    });
+
+    const result = await new PrismaShareRepository(client).revokeShareLink(SHARE_LINK_ID, NOW);
+
+    expect(result?.revokedAt).toEqual(NOW);
+    expect(shareLink.updateMany).toHaveBeenCalledWith({
+      where: { id: SHARE_LINK_ID, revokedAt: null },
+      data: { revokedAt: NOW },
+    });
+  });
+
+  it('revokeShareLink returns null for an already revoked link', async () => {
+    const { client, shareLink } = createClient();
+    shareLink.updateMany.mockResolvedValue({ count: 0 });
+
+    await expect(
+      new PrismaShareRepository(client).revokeShareLink(SHARE_LINK_ID, NOW),
+    ).resolves.toBeNull();
+  });
+
+  it('grantProjectAccess upserts a share-link-granted ProjectAccess', async () => {
+    const { client, projectAccess } = createClient();
+
+    const result = await new PrismaShareRepository(client).grantProjectAccess(
+      PROJECT_ID,
+      VIEWER_ID,
+      SHARE_LINK_ID,
+      NOW,
+    );
+
+    expect(result).toEqual({ id: 'access-id' });
+    expect(projectAccess.upsert).toHaveBeenCalledWith({
+      where: { projectId_userId: { projectId: PROJECT_ID, userId: VIEWER_ID } },
+      create: {
+        projectId: PROJECT_ID,
+        userId: VIEWER_ID,
+        role: 'VIEWER',
+        shareLinkId: SHARE_LINK_ID,
+        acceptedAt: NOW,
+        revokedAt: null,
+      },
+      update: {
+        role: 'VIEWER',
+        shareLinkId: SHARE_LINK_ID,
+        acceptedAt: NOW,
+        revokedAt: null,
+      },
+      select: { id: true },
+    });
+  });
+
+  it('grantScanAccess upserts a share-link-granted ScanAccess', async () => {
+    const { client, scanAccess } = createClient();
+
+    const result = await new PrismaShareRepository(client).grantScanAccess(
+      SCAN_ID,
+      VIEWER_ID,
+      SHARE_LINK_ID,
+      NOW,
+    );
+
+    expect(result).toEqual({ id: 'scan-access-id' });
+    expect(scanAccess.upsert).toHaveBeenCalledWith({
+      where: { scanId_userId: { scanId: SCAN_ID, userId: VIEWER_ID } },
+      create: {
+        scanId: SCAN_ID,
+        userId: VIEWER_ID,
+        role: 'VIEWER',
+        shareLinkId: SHARE_LINK_ID,
+        acceptedAt: NOW,
+        revokedAt: null,
+      },
+      update: {
+        role: 'VIEWER',
+        shareLinkId: SHARE_LINK_ID,
+        acceptedAt: NOW,
+        revokedAt: null,
+      },
+      select: { id: true },
     });
   });
 });

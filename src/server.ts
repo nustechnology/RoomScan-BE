@@ -28,9 +28,11 @@ import { AuthService, RefreshTokenService } from './modules/auth/auth.service.js
 import { ProjectPermissionService } from './modules/project/project.permissions.js';
 import { ProjectService } from './modules/project/project.service.js';
 import { ScanService } from './modules/scan/scan.service.js';
+import { ScanPermissionService } from './modules/scan/scan.permissions.js';
 import { ScanAssetService } from './modules/scan-asset/scan-asset.service.js';
 import { NoteService } from './modules/note/note.service.js';
 import { ShareService } from './modules/share/share.service.js';
+import { ShareLinkService } from './modules/share/share-link.service.js';
 import { SharedProjectsService } from './modules/shared-projects/shared-projects.service.js';
 
 const config = loadConfig();
@@ -104,6 +106,7 @@ const refreshTokenService = new RefreshTokenService({
   tokenIssuer,
 });
 const projectPermissions = new ProjectPermissionService(projectRepository);
+const scanPermissions = new ScanPermissionService(scanRepository);
 const projectService = new ProjectService({
   repository: projectRepository,
   permissions: projectPermissions,
@@ -116,6 +119,7 @@ const scanAssetService = new ScanAssetService({
   repository: scanAssetRepository,
   scanRepository,
   permissions: projectPermissions,
+  scanPermissions,
   storage: storageAdapter,
   uploadUrlTtlSeconds: config.storageUploadUrlTtlSeconds,
   downloadUrlTtlSeconds: config.storageDownloadUrlTtlSeconds,
@@ -126,11 +130,17 @@ const scanAssetService = new ScanAssetService({
 const noteService = new NoteService({
   repository: noteRepository,
   permissions: projectPermissions,
+  scanPermissions,
 });
 const shareService = new ShareService({
   repository: shareRepository,
   mailer,
   logger,
+  invitationTtlSeconds: config.invitationTtlSeconds,
+  invitationBaseUrl: config.invitationBaseUrl,
+});
+const shareLinkService = new ShareLinkService({
+  repository: shareRepository,
   invitationTtlSeconds: config.invitationTtlSeconds,
   invitationBaseUrl: config.invitationBaseUrl,
 });
@@ -149,6 +159,7 @@ const app = createApp({
   scanAssetService,
   noteService,
   shareService,
+  shareLinkService,
   sharedProjectsService,
   accessTokenVerifier,
   currentUserRepository,

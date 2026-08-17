@@ -31,6 +31,7 @@ import type { ScanAssetService } from './modules/scan-asset/scan-asset.service.j
 import { createNoteRouter } from './modules/note/note.routes.js';
 import type { NoteService } from './modules/note/note.service.js';
 import { createShareRouter } from './modules/share/share.routes.js';
+import type { ShareLinkService } from './modules/share/share-link.service.js';
 import type { ShareService } from './modules/share/share.service.js';
 import { createSharedProjectsRouter } from './modules/shared-projects/shared-projects.routes.js';
 import type { SharedProjectsService } from './modules/shared-projects/shared-projects.service.js';
@@ -47,6 +48,7 @@ export interface AppDependencies {
   scanAssetService: ScanAssetService;
   noteService: NoteService;
   shareService: ShareService;
+  shareLinkService: ShareLinkService;
   sharedProjectsService: SharedProjectsService;
   accessTokenVerifier: AccessTokenVerifier;
   currentUserRepository: CurrentUserRepository;
@@ -80,6 +82,7 @@ export function createApp({
   scanAssetService,
   noteService,
   shareService,
+  shareLinkService,
   sharedProjectsService,
   accessTokenVerifier,
   currentUserRepository,
@@ -201,6 +204,7 @@ export function createApp({
     API_PREFIX,
     createShareRouter({
       shareService,
+      shareLinkService,
       accessTokenVerifier,
       currentUserRepository,
     }),

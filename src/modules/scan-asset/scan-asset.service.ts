@@ -1,6 +1,7 @@
 import { ProjectNotFoundError } from '../project/project.errors.js';
 import type { ProjectPermissionService } from '../project/project.permissions.js';
 import { ScanNotFoundError } from '../scan/scan.errors.js';
+import type { ScanPermissionService } from '../scan/scan.permissions.js';
 import type { ScanRepository } from '../scan/scan.types.js';
 import {
   AssetNotReadyError,
@@ -33,6 +34,7 @@ export interface ScanAssetServiceDependencies {
   repository: ScanAssetRepository;
   scanRepository: ScanRepository;
   permissions: ProjectPermissionService;
+  scanPermissions: ScanPermissionService;
   storage: StorageAdapter;
   clock?: () => Date;
   uploadUrlTtlSeconds: number;
@@ -64,6 +66,7 @@ export class ScanAssetService {
   readonly #repository: ScanAssetRepository;
   readonly #scanRepository: ScanRepository;
   readonly #permissions: ProjectPermissionService;
+  readonly #scanPermissions: ScanPermissionService;
   readonly #storage: StorageAdapter;
   readonly #clock: () => Date;
   readonly #uploadUrlTtlSeconds: number;
@@ -76,6 +79,7 @@ export class ScanAssetService {
     repository,
     scanRepository,
     permissions,
+    scanPermissions,
     storage,
     clock,
     uploadUrlTtlSeconds,
@@ -87,6 +91,7 @@ export class ScanAssetService {
     this.#repository = repository;
     this.#scanRepository = scanRepository;
     this.#permissions = permissions;
+    this.#scanPermissions = scanPermissions;
     this.#storage = storage;
     this.#clock = clock ?? (() => new Date());
     this.#uploadUrlTtlSeconds = uploadUrlTtlSeconds;
@@ -97,18 +102,7 @@ export class ScanAssetService {
   }
 
   async #requireView(scanId: string, userId: string): Promise<void> {
-    const projectId = await this.#scanRepository.findProjectId(scanId);
-    if (projectId === null) {
-      throw new ScanNotFoundError();
-    }
-    try {
-      await this.#permissions.requireView(projectId, userId);
-    } catch (error) {
-      if (error instanceof ProjectNotFoundError) {
-        throw new ScanNotFoundError();
-      }
-      throw error;
-    }
+    await this.#scanPermissions.requireView(scanId, userId);
   }
 
   async #requireOwner(scanId: string, userId: string): Promise<void> {

@@ -17,12 +17,20 @@
   `PATCH /api/v1/notes/:noteId/position`.
 - Sharing creates, resends, and revokes invitation links at
   `POST /api/v1/projects/:projectId/invitations`,
+  `POST /api/v1/scans/:scanId/invitations`,
   `POST /api/v1/invitations/:invitationId/resend`, and
   `DELETE /api/v1/invitations/:invitationId`; recipients preview, accept, and
   decline at `GET`, `POST`, and `POST` under `/api/v1/invitations/:token`; and
   share management lists and revokes Viewer access at
-  `GET /api/v1/projects/:projectId/shares` and
-  `DELETE /api/v1/projects/:projectId/shares/:userId`.
+  `GET /api/v1/projects/:projectId/shares`,
+  `DELETE /api/v1/projects/:projectId/shares/:userId`,
+  `GET /api/v1/scans/:scanId/shares`, and
+  `DELETE /api/v1/scans/:scanId/shares/:userId`.
+- Generic share links (reusable, no recipient email) are created, listed, and
+  revoked at `POST`, `GET`, and `DELETE` under
+  `/api/v1/projects/:projectId/share-links` and `/api/v1/scans/:scanId/share-links`;
+  their tokens resolve through the same `/api/v1/invitations/:token` preview and
+  accept endpoints as invitations.
 - Shared With Me lists, opens, and self-removes accepted projects for the
   current Viewer at `GET /api/v1/shared-projects`,
   `GET /api/v1/shared-projects/:projectId`, and
@@ -627,28 +635,50 @@ Error behavior:
 
 ## Sharing and invitations
 
-Projects are shared through expiring invitation links addressed to a specific
-recipient email. The Owner creates an invitation for a recipient, and the API
-sends an invitation email whose CTA opens the link; the recipient (or any
-signed-in user who possesses the link) accepts it and receives Viewer access.
-Each invitation is per-recipient: creating a second invitation for the same
-email while the first is still pending returns `409 INVITATION_ALREADY_SENT`.
+Projects and scans are shared through expiring, token-based links. There are two
+kinds of shareable links:
+
+- **Per-recipient invitations** addressed to a specific recipient email. The
+  Owner creates an invitation, and the API sends an invitation email whose CTA
+  opens the link; the recipient (or any signed-in user who possesses the link)
+  accepts it and receives Viewer access. Each invitation is per-recipient:
+  creating a second invitation for the same email and scope while the first is
+  still pending returns `409 INVITATION_ALREADY_SENT`.
+- **Generic share links** with no recipient. Copying the link does not send an
+  email; any signed-in user with the link can accept it and receive Viewer
+  access. A share link is reusable and stays valid until it expires or the Owner
+  revokes it, so multiple users can accept the same link.
+
 The raw token is an opaque, random base64url string of 32 bytes; only its
 SHA-256 hash is stored, so a leaked database never exposes a usable link. The
 token is also redacted from request access logs so it is never emitted to log
 shippers. A project is shareable only when it has at least one non-deleted scan
-with an uploaded model (`assetStatus = UPLOADED`).
+with an uploaded model (`assetStatus = UPLOADED`); a scan is shareable only when
+that specific scan has an uploaded model. Every invitation and share link has
+exactly one scope: a project (`projectId`) or a scan (`scanId`). Acceptance
+creates a `ProjectAccess` row for project scope or a `ScanAccess` row for scan
+scope, and `ScanAccess` records grant read access to that scan, its notes, and
+its assets without granting project-level access.
 
-| Method   | Endpoint                                     | Result                                                      |
-| -------- | -------------------------------------------- | ----------------------------------------------------------- |
-| `POST`   | `/api/v1/projects/:projectId/invitations`    | Create an invitation for an email; Owner only; return `201` |
-| `POST`   | `/api/v1/invitations/:invitationId/resend`   | Resend a pending invitation; Owner only; return `200`       |
-| `GET`    | `/api/v1/invitations/:token`                 | Preview an invitation; anonymous or optional Bearer         |
-| `POST`   | `/api/v1/invitations/:token/accept`          | Accept and gain Viewer access; return `200`                 |
-| `POST`   | `/api/v1/invitations/:token/decline`         | Decline for the current user; return `200`                  |
-| `DELETE` | `/api/v1/invitations/:invitationId`          | Revoke a pending invitation; Owner only; return `200`       |
-| `GET`    | `/api/v1/projects/:projectId/shares`         | List pending invitations and accepted Viewers; Owner only   |
-| `DELETE` | `/api/v1/projects/:projectId/shares/:userId` | Revoke Viewer access; Owner only; return `200`              |
+| Method   | Endpoint                                               | Result                                                            |
+| -------- | ------------------------------------------------------ | ----------------------------------------------------------------- |
+| `POST`   | `/api/v1/projects/:projectId/invitations`              | Create a project invitation for an email; Owner only; `201`       |
+| `POST`   | `/api/v1/scans/:scanId/invitations`                    | Create a scan invitation for an email; Owner only; `201`          |
+| `POST`   | `/api/v1/invitations/:invitationId/resend`             | Resend a pending invitation; Owner only; `200`                    |
+| `GET`    | `/api/v1/invitations/:token`                           | Preview an invitation or share link; anonymous or optional Bearer |
+| `POST`   | `/api/v1/invitations/:token/accept`                    | Accept and gain Viewer access; `200`                              |
+| `POST`   | `/api/v1/invitations/:token/decline`                   | Decline an invitation for the current user; `200`                 |
+| `DELETE` | `/api/v1/invitations/:invitationId`                    | Revoke a pending invitation; Owner only; `200`                    |
+| `GET`    | `/api/v1/projects/:projectId/shares`                   | List project pending invitations and accepted Viewers; Owner only |
+| `DELETE` | `/api/v1/projects/:projectId/shares/:userId`           | Revoke project Viewer access; Owner only; `200`                   |
+| `GET`    | `/api/v1/scans/:scanId/shares`                         | List scan pending invitations and accepted Viewers; Owner only    |
+| `DELETE` | `/api/v1/scans/:scanId/shares/:userId`                 | Revoke scan Viewer access; Owner only; `200`                      |
+| `POST`   | `/api/v1/projects/:projectId/share-links`              | Create a reusable project share link; Owner only; `201`           |
+| `GET`    | `/api/v1/projects/:projectId/share-links`              | List active project share links; Owner only; `200`                |
+| `DELETE` | `/api/v1/projects/:projectId/share-links/:shareLinkId` | Revoke a project share link; Owner only; `200`                    |
+| `POST`   | `/api/v1/scans/:scanId/share-links`                    | Create a reusable scan share link; Owner only; `201`              |
+| `GET`    | `/api/v1/scans/:scanId/share-links`                    | List active scan share links; Owner only; `200`                   |
+| `DELETE` | `/api/v1/scans/:scanId/share-links/:shareLinkId`       | Revoke a scan share link; Owner only; `200`                       |
 
 Create invitation body:
 
@@ -680,17 +710,25 @@ invitation rotates the token (the previous link stops working), extends
 `expiresAt` to `now + INVITATION_TTL_SECONDS`, updates `sentAt`, and re-sends
 the email.
 
-Preview `200` (anonymous; `hasAccess` is present only when a valid Bearer token
-is supplied and reports whether that user already has active access):
+Preview `200` resolves either an invitation or a generic share link and returns
+a `type` (`invitation` or `share-link`) and `scope` (`project` or `scan`) plus
+the matching entity (`project` or `scan`); the other entity is `null`. An
+invitation adds `recipientEmail`, `sentAt`, and its lifecycle `status`; a share
+link has no recipient and reports `ACTIVE`, `EXPIRED`, or `REVOKED`.
+`hasAccess` is present only when a valid Bearer token is supplied and reports
+whether that user already has active access. A project-scope invitation preview:
 
 ```json
 {
+  "type": "invitation",
+  "scope": "project",
   "project": {
     "id": "a1b2c3d4-e5f6-4890-abcd-ef1234567890",
     "name": "District 2 Apartment",
     "description": null,
     "thumbnail": null
   },
+  "scan": null,
   "status": "PENDING",
   "recipientEmail": "recipient@example.com",
   "sentAt": "2026-07-29T10:00:00.000Z",
@@ -699,13 +737,17 @@ is supplied and reports whether that user already has active access):
 }
 ```
 
-`status` is `PENDING`, `EXPIRED`, `ACCEPTED`, `DECLINED`, or `REVOKED`.
+`status` is `PENDING`, `EXPIRED`, `ACCEPTED`, `DECLINED`, or `REVOKED` for
+invitations and `ACTIVE`, `EXPIRED`, or `REVOKED` for share links.
 
-Accept `200`:
+Accept `200` also discriminates on `type` and `scope` and returns the matching
+entity. A project-scope invitation accept:
 
 ```json
 {
+  "type": "invitation",
   "invitationId": "b1a2c3d4-e5f6-4890-abcd-ef1234567890",
+  "scope": "project",
   "project": {
     "id": "a1b2c3d4-e5f6-4890-abcd-ef1234567890",
     "name": "District 2 Apartment",
@@ -716,6 +758,7 @@ Accept `200`:
       "email": "owner@example.com"
     }
   },
+  "scan": null,
   "access": {
     "role": "VIEWER",
     "status": "ACTIVE",
@@ -723,6 +766,10 @@ Accept `200`:
   }
 }
 ```
+
+A scan-scope accept returns the scan entity (`id`, `projectId`, `name`,
+`description`, `thumbnail`, `creator`, `ownerId`) with `project` set to `null`,
+and a share-link accept reports `shareLinkId` instead of `invitationId`.
 
 Decline `200`:
 
@@ -797,14 +844,17 @@ Validation rules:
 Business rules:
 
 - Only the project Owner creates invitations and manages shares; a non-owner
-  receives `403 NOT_OWNER`. Viewers cannot share a project again.
-- Invitation links grant Viewer role only.
-- A project is shareable only after it has at least one uploaded scan model.
-- One pending invitation per `(project, recipientEmail)`: creating a duplicate
-  returns `409 INVITATION_ALREADY_SENT`. Re-inviting an email whose earlier
-  invitation is revoked, declined, accepted, or expired creates a fresh
-  invitation. A partial unique index on `(projectId, recipientEmail)` for
-  `PENDING` rows makes creation atomic, so concurrent duplicates resolve to
+  receives `403 NOT_OWNER`. Viewers cannot share a project or scan again. The
+  Owner of a scan is the owner of its parent project.
+- Invitation and share-link acceptance grant Viewer role only.
+- A project is shareable only after it has at least one uploaded scan model; a
+  scan is shareable only after that scan has an uploaded model.
+- One pending invitation per `(project, recipientEmail)` and per
+  `(scan, recipientEmail)`: creating a duplicate returns `409
+INVITATION_ALREADY_SENT`. Re-inviting an email whose earlier invitation is
+  revoked, declined, accepted, or expired creates a fresh invitation. Partial
+  unique indexes on `(projectId, recipientEmail)` and `(scanId, recipientEmail)`
+  for `PENDING` rows make creation atomic, so concurrent duplicates resolve to
   `409` instead of creating a second pending link.
 - Invitations are per-recipient: the first acceptance marks the invitation
   `ACCEPTED`; an already accepted or declined invitation cannot be accepted
@@ -814,15 +864,51 @@ Business rules:
 - An invitation can be revoked while pending; revocation is idempotent. Expired,
   accepted, and declined invitations cannot be revoked.
 - Resend requires a pending, unexpired invitation; it rotates the token and
-  re-sends the email.
+  re-sends the email. Resend works for both project and scan invitations and
+  uses the matching email template.
 - Expired and revoked invitations cannot be accepted or declined.
+- A generic share link has no recipient and no `ACCEPTED`/`DECLINED` lifecycle;
+  acceptance creates access without changing the link, so it remains usable by
+  other users until it expires or the Owner revokes it. Revoking a link stops
+  further acceptances but does not revoke access already granted through it.
 - Accepting must not create duplicate Viewer access: at most one access record
-  exists per `(project, user)`.
-- The project Owner cannot accept or decline their own invitation.
-- A user who already has active access cannot accept or decline again.
-- Revoking a Viewer removes project, scan, note, and asset download access
-  immediately because every module's permission lookup ignores
-  `revokedAt`-non-null access.
+  exists per `(project, user)` and per `(scan, user)`.
+- The project Owner cannot accept or decline their own invitation, nor accept
+  their own share link.
+- A user who already has active access to the entity cannot accept or decline
+  again.
+- Revoking a project Viewer removes project, scan, note, and asset download
+  access immediately; revoking a scan Viewer removes access to that scan, its
+  notes, and its assets, because every module's permission lookup ignores
+  `revokedAt`-non-null access. Scan-level access lets a Viewer read only that
+  scan (plus its notes and assets); it never grants project, other-scan, or
+  write access.
+
+Share-link create `201`:
+
+```json
+{
+  "shareLinkId": "c0ffee00-0000-4000-8000-0000000000aa",
+  "shareLinkUrl": "https://invite.roomscan.dev/invitations/AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-ab",
+  "scope": "project",
+  "expiresAt": "2026-08-05T10:00:00.000Z"
+}
+```
+
+The share link list returns `{ "items": [{ "shareLinkId", "status": "ACTIVE",
+"expiresAt", "createdAt" }] }`; revoked and expired links are omitted. Revoking
+a share link returns `{ "shareLinkId", "status": "REVOKED", "revokedAt" }` and
+is idempotent. `shareLinkUrl` is `{INVITATION_BASE_URL}/invitations/{rawToken}`,
+the same token namespace as invitations.
+
+Validation rules:
+
+- `projectId`, `scanId`, `userId`, `invitationId`, `shareLinkId`: UUID.
+- `recipientEmail`: a valid email address.
+- `token`: exactly 43 characters from the base64url alphabet; anything else is
+  malformed.
+- `expiresInSeconds`: optional integer, 60 to 2,592,000; unknown fields are
+  rejected.
 
 Error behavior:
 
@@ -831,8 +917,11 @@ Error behavior:
   required (accept, decline, and all Owner-only endpoints).
 - `403 NOT_OWNER`: a non-owner attempts share management.
 - `404 PROJECT_NOT_FOUND`: project missing, deleted, or inaccessible.
+- `404 SCAN_NOT_FOUND`: scan missing, deleted, or inaccessible.
 - `404 INVITATION_NOT_FOUND`: unknown token or invitation, or the invitation's
-  project was deleted.
+  project or scan was deleted.
+- `404 SHARE_LINK_NOT_FOUND`: unknown share-link token or id, or its resource
+  was deleted.
 - `404 ACCESS_NOT_FOUND`: no access record exists for the user being unshared.
 - `409 INVITATION_ALREADY_SENT`: a pending invitation already targets this email.
 - `409 INVITATION_ALREADY_ACCEPTED`: the invitation was already accepted.
@@ -840,8 +929,11 @@ Error behavior:
 - `409 INVITATION_REVOKED`: the link was revoked.
 - `409 INVITATION_DECLINED`: the user already declined this link.
 - `409 ACCESS_ALREADY_EXISTS`: the user already has active access.
-- `409 CANNOT_ACCEPT_OWN_INVITATION`: the project Owner acts on their own link.
+- `409 CANNOT_ACCEPT_OWN_INVITATION`: the resource Owner acts on their own link.
 - `409 PROJECT_NOT_SHAREABLE`: the project has no uploaded scan model yet.
+- `409 SCAN_NOT_SHAREABLE`: the scan has no uploaded model yet.
+- `409 SHARE_LINK_REVOKED`: the share link was revoked.
+- `409 SHARE_LINK_EXPIRED`: the share link is past its expiry.
 - `429 RATE_LIMIT_EXCEEDED`: API quota exceeded.
 - `500 INTERNAL_SERVER_ERROR`: unexpected failure without Prisma, SQL, token, or
   secret leakage.

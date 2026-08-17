@@ -190,7 +190,16 @@ migration. The `add_invitation_recipient_and_lifecycle` migration extends
 exists per recipient, and drops the now-unused `declinedAt` column from
 `project_accesses`. Final decline lifecycle data is stored on the invitation
 row (`status` and `declinedAt`); declined invitations never create project
-access rows.
+access rows. The `add_scan_sharing_and_share_links` migration makes `projectId`
+on `invitations` nullable and adds a `scanId` so a single invitation row models
+either a project or a scan scope, adds partial unique indexes guarding one
+`PENDING` invitation per `(scan, recipientEmail)`, adds a scope CHECK constraint
+to `invitations`, and creates the `share_links` table (generic reusable links
+with exactly one of `projectId`/`scanId`) and the `scan_accesses` table
+(scan-level Viewer access). It also adds `shareLinkId` to `project_accesses` so
+link-granted project access is traceable. The raw partial unique index and CHECK
+constraints are expressed in the migration SQL, matching how the earlier
+`(projectId, recipientEmail)` `PENDING` partial index is handled.
 Tests use Prisma delegate doubles; native migration and endpoint verification
 use the PostgreSQL `db` container.
 

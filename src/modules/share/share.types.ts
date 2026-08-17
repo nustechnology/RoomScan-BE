@@ -1,5 +1,7 @@
 export type InvitationStatus = 'PENDING' | 'ACCEPTED' | 'DECLINED' | 'REVOKED';
 export type InvitationViewStatus = 'PENDING' | 'EXPIRED' | 'ACCEPTED' | 'DECLINED' | 'REVOKED';
+export type ShareScope = 'project' | 'scan';
+export type ShareLinkViewStatus = 'ACTIVE' | 'EXPIRED' | 'REVOKED';
 
 export interface ShareProjectSummary {
   id: string;
@@ -12,9 +14,23 @@ export interface ShareProjectSummary {
   };
 }
 
-export interface InvitationRecord {
+export interface ShareScanSummary {
   id: string;
   projectId: string;
+  name: string;
+  description: string | null;
+  thumbnail: string | null;
+  creator: {
+    id: string;
+    email: string | null;
+  };
+  ownerId: string;
+}
+
+export interface InvitationRecord {
+  id: string;
+  projectId: string | null;
+  scanId: string | null;
   createdById: string;
   recipientEmail: string;
   tokenHash: string;
@@ -29,9 +45,10 @@ export interface InvitationRecord {
   updatedAt: Date;
 }
 
-export interface InvitationWithProject {
+export interface InvitationWithEntity {
   invitation: InvitationRecord;
-  project: ShareProjectSummary;
+  project: ShareProjectSummary | null;
+  scan: ShareScanSummary | null;
 }
 
 export interface InvitationCreateInput {
@@ -51,13 +68,13 @@ export interface InvitationSendResult {
 export type InvitationCreateResult = InvitationSendResult;
 export type InvitationResendResult = InvitationSendResult;
 
+export type ShareEntityPreview = Omit<ShareProjectSummary, 'owner'> | ShareScanSummary | null;
+
 export interface InvitationPreviewResult {
-  project: {
-    id: string;
-    name: string;
-    description: string | null;
-    thumbnail: string | null;
-  };
+  type: 'invitation';
+  scope: ShareScope;
+  project: Omit<ShareProjectSummary, 'owner'> | null;
+  scan: ShareScanSummary | null;
   status: InvitationViewStatus;
   recipientEmail: string;
   sentAt: string;
@@ -65,15 +82,45 @@ export interface InvitationPreviewResult {
   hasAccess?: boolean;
 }
 
+export interface ShareLinkPreviewResult {
+  type: 'share-link';
+  scope: ShareScope;
+  project: Omit<ShareProjectSummary, 'owner'> | null;
+  scan: ShareScanSummary | null;
+  status: ShareLinkViewStatus;
+  expiresAt: string;
+  hasAccess?: boolean;
+}
+
+export type TokenPreviewResult = InvitationPreviewResult | ShareLinkPreviewResult;
+
 export interface InvitationAcceptResult {
+  type: 'invitation';
   invitationId: string;
-  project: ShareProjectSummary;
+  scope: ShareScope;
+  project: ShareProjectSummary | null;
+  scan: ShareScanSummary | null;
   access: {
     role: 'VIEWER';
     status: 'ACTIVE';
     grantedAt: string;
   };
 }
+
+export interface ShareLinkAcceptResult {
+  type: 'share-link';
+  shareLinkId: string;
+  scope: ShareScope;
+  project: ShareProjectSummary | null;
+  scan: ShareScanSummary | null;
+  access: {
+    role: 'VIEWER';
+    status: 'ACTIVE';
+    grantedAt: string;
+  };
+}
+
+export type TokenAcceptResult = InvitationAcceptResult | ShareLinkAcceptResult;
 
 export interface InvitationDeclineResult {
   invitationId: string;
@@ -115,29 +162,104 @@ export interface ViewerRevokeResult {
   revokedAt: string;
 }
 
+export interface ScanViewerRevokeResult {
+  scanId: string;
+  userId: string;
+  revokedAt: string;
+}
+
+export interface ShareLinkRecord {
+  id: string;
+  projectId: string | null;
+  scanId: string | null;
+  createdById: string;
+  tokenHash: string;
+  expiresAt: Date;
+  revokedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface ShareLinkWithEntity {
+  shareLink: ShareLinkRecord;
+  project: ShareProjectSummary | null;
+  scan: ShareScanSummary | null;
+}
+
+export interface ShareLinkCreateResult {
+  shareLinkId: string;
+  shareLinkUrl: string;
+  scope: ShareScope;
+  expiresAt: string;
+}
+
+export interface ShareLinkListResult {
+  shareLinkId: string;
+  status: 'ACTIVE';
+  expiresAt: string;
+  createdAt: string;
+}
+
+export interface ShareLinkRevokeResult {
+  shareLinkId: string;
+  status: 'REVOKED';
+  revokedAt: string;
+}
+
+export interface ScanSharesListResult {
+  pendingInvitations: PendingInvitationResult[];
+  viewers: ViewerResult[];
+  shareLinks: ShareLinkListResult[];
+}
+
 export interface ShareProjectInfo {
   name: string;
   ownerId: string;
   ownerEmail: string | null;
 }
 
+export interface ShareScanInfo {
+  name: string;
+  projectId: string;
+  ownerId: string;
+  ownerEmail: string | null;
+}
+
+export type ShareLinkCreateData = {
+  createdById: string;
+  tokenHash: string;
+  expiresAt: Date;
+} & ({ projectId: string; scanId?: never } | { scanId: string; projectId?: never });
+
+export type InvitationCreateData = {
+  createdById: string;
+  recipientEmail: string;
+  tokenHash: string;
+  expiresAt: Date;
+  sentAt: Date;
+} & ({ projectId: string; scanId?: never } | { scanId: string; projectId?: never });
+
+export type ShareLinkResourceData =
+  { projectId: string; scanId?: never } | { scanId: string; projectId?: never };
+
 export interface ShareRepository {
   findProjectOwner(projectId: string): Promise<string | null>;
   findProjectInfo(projectId: string): Promise<ShareProjectInfo | null>;
   hasUploadedModel(projectId: string): Promise<boolean>;
-  createInvitation(data: {
-    projectId: string;
-    createdById: string;
-    recipientEmail: string;
-    tokenHash: string;
-    expiresAt: Date;
-    sentAt: Date;
-  }): Promise<InvitationRecord>;
-  findByTokenHash(tokenHash: string): Promise<InvitationWithProject | null>;
+  findScanInfo(scanId: string): Promise<ShareScanInfo | null>;
+  hasUploadedScanModel(scanId: string): Promise<boolean>;
+  createInvitation(data: InvitationCreateData): Promise<InvitationRecord>;
+  findByTokenHash(tokenHash: string): Promise<InvitationWithEntity | null>;
   findInvitationById(id: string): Promise<InvitationRecord | null>;
   acceptInvitation(
     invitationId: string,
     projectId: string,
+    userId: string,
+    acceptedAt: Date,
+  ): Promise<InvitationRecord | null>;
+  acceptScanInvitation(
+    invitationId: string,
+    scanId: string,
     userId: string,
     acceptedAt: Date,
   ): Promise<InvitationRecord | null>;
@@ -148,9 +270,16 @@ export interface ShareRepository {
     data: { tokenHash: string; sentAt: Date; expiresAt: Date },
   ): Promise<InvitationRecord | null>;
   listPendingByProject(projectId: string): Promise<InvitationRecord[]>;
+  listPendingByScan(scanId: string): Promise<InvitationRecord[]>;
   findActiveViewerAccess(projectId: string, userId: string): Promise<{ id: string } | null>;
+  findActiveScanAccess(scanId: string, userId: string): Promise<{ id: string } | null>;
   listActiveViewers(
     projectId: string,
+  ): Promise<
+    Array<{ userId: string; user: { id: string; email: string | null }; grantedAt: Date }>
+  >;
+  listActiveScanViewers(
+    scanId: string,
   ): Promise<
     Array<{ userId: string; user: { id: string; email: string | null }; grantedAt: Date }>
   >;
@@ -159,4 +288,26 @@ export interface ShareRepository {
     userId: string,
     revokedAt: Date,
   ): Promise<{ revokedAt: Date } | null>;
+  revokeScanViewerAccess(
+    scanId: string,
+    userId: string,
+    revokedAt: Date,
+  ): Promise<{ revokedAt: Date } | null>;
+  createShareLink(data: ShareLinkCreateData): Promise<ShareLinkRecord>;
+  findShareLinkByTokenHash(tokenHash: string): Promise<ShareLinkWithEntity | null>;
+  findShareLinkById(id: string): Promise<ShareLinkRecord | null>;
+  listShareLinksByResource(data: ShareLinkResourceData): Promise<ShareLinkRecord[]>;
+  revokeShareLink(id: string, revokedAt: Date): Promise<ShareLinkRecord | null>;
+  grantProjectAccess(
+    projectId: string,
+    userId: string,
+    shareLinkId: string,
+    acceptedAt: Date,
+  ): Promise<{ id: string }>;
+  grantScanAccess(
+    scanId: string,
+    userId: string,
+    shareLinkId: string,
+    acceptedAt: Date,
+  ): Promise<{ id: string }>;
 }

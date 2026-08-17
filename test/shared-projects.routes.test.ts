@@ -29,6 +29,7 @@ import type { ProjectService } from '../src/modules/project/project.service.js';
 import type { ScanService } from '../src/modules/scan/scan.service.js';
 import type { ScanAssetService } from '../src/modules/scan-asset/scan-asset.service.js';
 import type { ShareService } from '../src/modules/share/share.service.js';
+import type { ShareLinkService } from '../src/modules/share/share-link.service.js';
 
 const ACCESS_SECRET = 'access-secret-that-is-at-least-32-characters';
 const USER_VIEWER = 'f1a2b3c4-d5e6-7890-abcd-ef1234567890';
@@ -156,6 +157,11 @@ describe('Shared With Me HTTP endpoints', () => {
     listShares: vi.fn(),
     revokeViewer: vi.fn(),
   } as unknown as ShareService;
+  const shareLinkService = {
+    createShareLink: vi.fn(),
+    listShareLinks: vi.fn(),
+    revokeShareLink: vi.fn(),
+  } as unknown as ShareLinkService;
   const list = vi.fn<SharedProjectsService['list']>();
   const detail = vi.fn<SharedProjectsService['detail']>();
   const remove = vi.fn<SharedProjectsService['remove']>();
@@ -175,6 +181,7 @@ describe('Shared With Me HTTP endpoints', () => {
     scanAssetService,
     noteService,
     shareService,
+    shareLinkService,
     sharedProjectsService,
     accessTokenVerifier,
     currentUserRepository,

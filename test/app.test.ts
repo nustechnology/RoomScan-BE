@@ -31,6 +31,7 @@ import type { ScanService } from '../src/modules/scan/scan.service.js';
 import type { ScanAssetService } from '../src/modules/scan-asset/scan-asset.service.js';
 import type { NoteService } from '../src/modules/note/note.service.js';
 import type { ShareService } from '../src/modules/share/share.service.js';
+import type { ShareLinkService } from '../src/modules/share/share-link.service.js';
 import type { SharedProjectsService } from '../src/modules/shared-projects/shared-projects.service.js';
 
 const config: AppConfig = {
@@ -142,6 +143,11 @@ describe('RoomScan HTTP application', () => {
     listShares: vi.fn(),
     revokeViewer: vi.fn(),
   } as unknown as ShareService;
+  const shareLinkService = {
+    createShareLink: vi.fn(),
+    listShareLinks: vi.fn(),
+    revokeShareLink: vi.fn(),
+  } as unknown as ShareLinkService;
   const sharedProjectsService = {
     list: vi.fn(),
     detail: vi.fn(),
@@ -159,6 +165,7 @@ describe('RoomScan HTTP application', () => {
     scanAssetService,
     noteService,
     shareService,
+    shareLinkService,
     sharedProjectsService,
     accessTokenVerifier,
     currentUserRepository,
@@ -209,6 +216,7 @@ describe('RoomScan HTTP application', () => {
       scanAssetService,
       noteService,
       shareService,
+      shareLinkService,
       sharedProjectsService,
       accessTokenVerifier,
       currentUserRepository,
@@ -489,6 +497,7 @@ describe('RoomScan HTTP application', () => {
       scanAssetService,
       noteService,
       shareService,
+      shareLinkService,
       sharedProjectsService,
       accessTokenVerifier,
       currentUserRepository,
@@ -497,12 +506,15 @@ describe('RoomScan HTTP application', () => {
     });
     const token = 'A'.repeat(43);
     previewInvitation.mockResolvedValue({
+      type: 'invitation',
+      scope: 'project',
       project: {
         id: 'a1b2c3d4-e5f6-4890-abcd-ef1234567890',
         name: 'District 2 Apartment',
         description: null,
         thumbnail: null,
       },
+      scan: null,
       status: 'PENDING',
       recipientEmail: 'recipient@example.com',
       sentAt: '2026-07-29T10:00:00.000Z',

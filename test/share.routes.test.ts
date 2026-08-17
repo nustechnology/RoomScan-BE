@@ -14,6 +14,7 @@ import { TOKEN_ISSUER, TOKEN_AUDIENCE } from '../src/config/constants.js';
 import type { AppConfig } from '../src/config/env.js';
 import type { DatabaseHealth } from '../src/infrastructure/database/database.js';
 import { ProjectNotFoundError } from '../src/modules/project/project.errors.js';
+import { ScanNotFoundError } from '../src/modules/scan/scan.errors.js';
 import {
   AccessAlreadyExistsError,
   CannotAcceptOwnInvitationError,
@@ -25,6 +26,10 @@ import {
   InvitationRevokedError,
   NotOwnerError,
   ProjectNotShareableError,
+  ScanNotShareableError,
+  ShareLinkExpiredError,
+  ShareLinkNotFoundError,
+  ShareLinkRevokedError,
   ViewerAccessNotFoundError,
 } from '../src/modules/share/share.errors.js';
 import {
@@ -34,10 +39,16 @@ import {
   InvitationPreviewResponseSchema,
   InvitationResendResponseSchema,
   InvitationRevokeResponseSchema,
+  ScanSharesListResponseSchema,
+  ScanViewerRevokeResponseSchema,
+  ShareLinkCreateResponseSchema,
+  ShareLinkListResponseSchema,
+  ShareLinkRevokeResponseSchema,
   SharesListResponseSchema,
   ViewerRevokeResponseSchema,
 } from '../src/modules/share/share.schemas.js';
 import type { ShareService } from '../src/modules/share/share.service.js';
+import type { ShareLinkService } from '../src/modules/share/share-link.service.js';
 import type { SharedProjectsService } from '../src/modules/shared-projects/shared-projects.service.js';
 import type { NoteService } from '../src/modules/note/note.service.js';
 import type { ProjectService } from '../src/modules/project/project.service.js';
@@ -48,7 +59,9 @@ const ACCESS_SECRET = 'access-secret-that-is-at-least-32-characters';
 const USER_OWNER = 'eb5d278f-c857-45c7-887d-7be65288cb75';
 const USER_RECIPIENT = 'f1a2b3c4-d5e6-7890-abcd-ef1234567890';
 const PROJECT_ID = 'a1b2c3d4-e5f6-4890-abcd-ef1234567890';
+const SCAN_ID = 'f1e2d3c4-a5b6-7890-abcd-ef1234567890';
 const INVITATION_ID = 'b1a2c3d4-e5f6-4890-abcd-ef1234567890';
+const SHARE_LINK_ID = 'c0ffee00-0000-4000-8000-0000000000aa';
 const TOKEN = 'A'.repeat(43);
 const RECIPIENT_EMAIL = 'recipient@example.com';
 const NOW = new Date('2026-07-29T10:00:00.000Z');
@@ -167,23 +180,37 @@ describe('Share HTTP endpoints', () => {
     delete: vi.fn(),
   } as unknown as NoteService;
   const createInvitation = vi.fn<ShareService['createInvitation']>();
+  const createScanInvitation = vi.fn<ShareService['createScanInvitation']>();
   const previewInvitation = vi.fn<ShareService['previewInvitation']>();
   const acceptInvitation = vi.fn<ShareService['acceptInvitation']>();
   const declineInvitation = vi.fn<ShareService['declineInvitation']>();
   const revokeInvitation = vi.fn<ShareService['revokeInvitation']>();
   const resendInvitation = vi.fn<ShareService['resendInvitation']>();
   const listShares = vi.fn<ShareService['listShares']>();
+  const listScanShares = vi.fn<ShareService['listScanShares']>();
   const revokeViewer = vi.fn<ShareService['revokeViewer']>();
+  const revokeScanViewer = vi.fn<ShareService['revokeScanViewer']>();
   const shareService = {
     createInvitation,
+    createScanInvitation,
     previewInvitation,
     acceptInvitation,
     declineInvitation,
     revokeInvitation,
     resendInvitation,
     listShares,
+    listScanShares,
     revokeViewer,
+    revokeScanViewer,
   } as unknown as ShareService;
+  const createShareLink = vi.fn<ShareLinkService['createShareLink']>();
+  const listShareLinks = vi.fn<ShareLinkService['listShareLinks']>();
+  const revokeShareLink = vi.fn<ShareLinkService['revokeShareLink']>();
+  const shareLinkService = {
+    createShareLink,
+    listShareLinks,
+    revokeShareLink,
+  } as unknown as ShareLinkService;
   const sharedProjectsService = {
     list: vi.fn(),
     detail: vi.fn(),
@@ -200,6 +227,7 @@ describe('Share HTTP endpoints', () => {
     scanAssetService,
     noteService,
     shareService,
+    shareLinkService,
     sharedProjectsService,
     accessTokenVerifier,
     currentUserRepository,
@@ -223,19 +251,24 @@ describe('Share HTTP endpoints', () => {
       sentAt: NOW.toISOString(),
     });
     previewInvitation.mockResolvedValue({
+      type: 'invitation',
+      scope: 'project',
       project: {
         id: PROJECT_ID,
         name: 'District 2 Apartment',
         description: null,
         thumbnail: null,
       },
+      scan: null,
       status: 'PENDING',
       recipientEmail: RECIPIENT_EMAIL,
       sentAt: NOW.toISOString(),
       expiresAt,
     });
     acceptInvitation.mockResolvedValue({
+      type: 'invitation',
       invitationId: INVITATION_ID,
+      scope: 'project',
       project: {
         id: PROJECT_ID,
         name: 'District 2 Apartment',
@@ -243,6 +276,7 @@ describe('Share HTTP endpoints', () => {
         thumbnail: null,
         owner: { id: USER_OWNER, email: 'owner@example.com' },
       },
+      scan: null,
       access: { role: 'VIEWER', status: 'ACTIVE', grantedAt: NOW.toISOString() },
     });
     declineInvitation.mockResolvedValue({
@@ -284,6 +318,56 @@ describe('Share HTTP endpoints', () => {
     revokeViewer.mockResolvedValue({
       projectId: PROJECT_ID,
       userId: USER_RECIPIENT,
+      revokedAt: NOW.toISOString(),
+    });
+    createScanInvitation.mockResolvedValue({
+      invitationId: INVITATION_ID,
+      invitationUrl,
+      recipientEmail: RECIPIENT_EMAIL,
+      expiresAt,
+      status: 'PENDING',
+      sentAt: NOW.toISOString(),
+    });
+    listScanShares.mockResolvedValue({
+      pendingInvitations: [
+        {
+          invitationId: INVITATION_ID,
+          recipientEmail: RECIPIENT_EMAIL,
+          status: 'PENDING',
+          sentAt: NOW.toISOString(),
+          expiresAt,
+        },
+      ],
+      viewers: [
+        {
+          userId: USER_RECIPIENT,
+          recipientUser: { id: USER_RECIPIENT, email: 'recipient@example.com' },
+          grantedAt: NOW.toISOString(),
+        },
+      ],
+    });
+    revokeScanViewer.mockResolvedValue({
+      scanId: SCAN_ID,
+      userId: USER_RECIPIENT,
+      revokedAt: NOW.toISOString(),
+    });
+    createShareLink.mockResolvedValue({
+      shareLinkId: SHARE_LINK_ID,
+      shareLinkUrl: `https://invite.roomscan.dev/invitations/${TOKEN}`,
+      scope: 'project',
+      expiresAt,
+    });
+    listShareLinks.mockResolvedValue([
+      {
+        shareLinkId: SHARE_LINK_ID,
+        status: 'ACTIVE',
+        expiresAt,
+        createdAt: NOW.toISOString(),
+      },
+    ]);
+    revokeShareLink.mockResolvedValue({
+      shareLinkId: SHARE_LINK_ID,
+      status: 'REVOKED',
       revokedAt: NOW.toISOString(),
     });
   });
@@ -466,12 +550,15 @@ describe('Share HTTP endpoints', () => {
 
       const body = InvitationPreviewResponseSchema.parse(response.body as unknown);
       expect(body).toEqual({
+        type: 'invitation',
+        scope: 'project',
         project: {
           id: PROJECT_ID,
           name: 'District 2 Apartment',
           description: null,
           thumbnail: null,
         },
+        scan: null,
         status: 'PENDING',
         recipientEmail: RECIPIENT_EMAIL,
         sentAt: NOW.toISOString(),
@@ -482,12 +569,15 @@ describe('Share HTTP endpoints', () => {
 
     it('reports hasAccess when a valid token is supplied', async () => {
       previewInvitation.mockResolvedValue({
+        type: 'invitation',
+        scope: 'project',
         project: {
           id: PROJECT_ID,
           name: 'District 2 Apartment',
           description: null,
           thumbnail: null,
         },
+        scan: null,
         status: 'PENDING',
         recipientEmail: RECIPIENT_EMAIL,
         sentAt: NOW.toISOString(),
@@ -533,7 +623,9 @@ describe('Share HTTP endpoints', () => {
 
       const body = InvitationAcceptResponseSchema.parse(response.body as unknown);
       expect(body).toEqual({
+        type: 'invitation',
         invitationId: INVITATION_ID,
+        scope: 'project',
         project: {
           id: PROJECT_ID,
           name: 'District 2 Apartment',
@@ -541,6 +633,7 @@ describe('Share HTTP endpoints', () => {
           thumbnail: null,
           owner: { id: USER_OWNER, email: 'owner@example.com' },
         },
+        scan: null,
         access: { role: 'VIEWER', status: 'ACTIVE', grantedAt: NOW.toISOString() },
       });
       expect(acceptInvitation).toHaveBeenCalledWith(USER_RECIPIENT, TOKEN);
@@ -571,6 +664,8 @@ describe('Share HTTP endpoints', () => {
         409,
         'CANNOT_ACCEPT_OWN_INVITATION',
       ],
+      ['revoked share link', new ShareLinkRevokedError(), 409, 'SHARE_LINK_REVOKED'],
+      ['expired share link', new ShareLinkExpiredError(), 409, 'SHARE_LINK_EXPIRED'],
     ])('rejects an %s with %i %s', async (_label, error, status, code) => {
       acceptInvitation.mockRejectedValue(error);
 
@@ -614,6 +709,19 @@ describe('Share HTTP endpoints', () => {
       const response = await request(app).post(`/api/v1/invitations/${TOKEN}/decline`).expect(401);
 
       expect(ErrorResponseSchema.parse(response.body as unknown).error.code).toBe('UNAUTHORIZED');
+    });
+
+    it('rejects an expired invitation with 409', async () => {
+      declineInvitation.mockRejectedValue(new InvitationExpiredError());
+
+      const response = await request(app)
+        .post(`/api/v1/invitations/${TOKEN}/decline`)
+        .set('Authorization', `Bearer ${recipientToken}`)
+        .expect(409);
+
+      expect(ErrorResponseSchema.parse(response.body as unknown).error.code).toBe(
+        'INVITATION_EXPIRED',
+      );
     });
   });
 
@@ -739,6 +847,398 @@ describe('Share HTTP endpoints', () => {
       const body = ErrorResponseSchema.parse(response.body as unknown);
       expect(response.headers['x-request-id']).toEqual(expect.any(String));
       expect(body.requestId).toBe(response.headers['x-request-id']);
+    });
+  });
+
+  describe('POST /api/v1/scans/:scanId/invitations', () => {
+    it('creates a scan-scope invitation for the owner', async () => {
+      const response = await request(app)
+        .post(`/api/v1/scans/${SCAN_ID}/invitations`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ recipientEmail: RECIPIENT_EMAIL })
+        .expect(201);
+
+      const body = InvitationCreateResponseSchema.parse(response.body as unknown);
+      expect(body.status).toBe('PENDING');
+      expect(createScanInvitation).toHaveBeenCalledWith(USER_OWNER, SCAN_ID, {
+        recipientEmail: RECIPIENT_EMAIL,
+      });
+    });
+
+    it('rejects an unauthenticated request', async () => {
+      const response = await request(app)
+        .post(`/api/v1/scans/${SCAN_ID}/invitations`)
+        .send({ recipientEmail: RECIPIENT_EMAIL })
+        .expect(401);
+
+      expect(ErrorResponseSchema.parse(response.body as unknown).error.code).toBe('UNAUTHORIZED');
+      expect(createScanInvitation).not.toHaveBeenCalled();
+    });
+
+    it('rejects a scan that is not shareable with 409', async () => {
+      createScanInvitation.mockRejectedValue(new ScanNotShareableError());
+
+      const response = await request(app)
+        .post(`/api/v1/scans/${SCAN_ID}/invitations`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ recipientEmail: RECIPIENT_EMAIL })
+        .expect(409);
+
+      expect(ErrorResponseSchema.parse(response.body as unknown).error.code).toBe(
+        'SCAN_NOT_SHAREABLE',
+      );
+    });
+
+    it('rejects a missing scan with 404', async () => {
+      createScanInvitation.mockRejectedValue(new ScanNotFoundError());
+
+      const response = await request(app)
+        .post(`/api/v1/scans/${SCAN_ID}/invitations`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ recipientEmail: RECIPIENT_EMAIL })
+        .expect(404);
+
+      expect(ErrorResponseSchema.parse(response.body as unknown).error.code).toBe('SCAN_NOT_FOUND');
+    });
+
+    it('rejects an invalid body with 400', async () => {
+      const response = await request(app)
+        .post(`/api/v1/scans/${SCAN_ID}/invitations`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ recipientEmail: 'not-an-email' })
+        .expect(400);
+
+      expect(ErrorResponseSchema.parse(response.body as unknown).error.code).toBe(
+        'VALIDATION_ERROR',
+      );
+    });
+
+    it('rejects a non-owner with 403', async () => {
+      createScanInvitation.mockRejectedValue(new NotOwnerError());
+
+      const response = await request(app)
+        .post(`/api/v1/scans/${SCAN_ID}/invitations`)
+        .set('Authorization', `Bearer ${recipientToken}`)
+        .send({ recipientEmail: RECIPIENT_EMAIL })
+        .expect(403);
+
+      expect(ErrorResponseSchema.parse(response.body as unknown).error.code).toBe('NOT_OWNER');
+    });
+
+    it('rejects a duplicate pending scan invitation with 409', async () => {
+      createScanInvitation.mockRejectedValue(new InvitationAlreadySentError());
+
+      const response = await request(app)
+        .post(`/api/v1/scans/${SCAN_ID}/invitations`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ recipientEmail: RECIPIENT_EMAIL })
+        .expect(409);
+
+      expect(ErrorResponseSchema.parse(response.body as unknown).error.code).toBe(
+        'INVITATION_ALREADY_SENT',
+      );
+    });
+  });
+
+  describe('GET /api/v1/scans/:scanId/shares', () => {
+    it('lists scan pending invitations and scan viewers for the owner', async () => {
+      const response = await request(app)
+        .get(`/api/v1/scans/${SCAN_ID}/shares`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .expect(200);
+
+      const body = ScanSharesListResponseSchema.parse(response.body as unknown);
+      expect(body.pendingInvitations).toHaveLength(1);
+      expect(body.viewers).toHaveLength(1);
+      expect(listScanShares).toHaveBeenCalledWith(USER_OWNER, SCAN_ID);
+    });
+
+    it('rejects a non-owner with 403', async () => {
+      listScanShares.mockRejectedValue(new NotOwnerError());
+
+      const response = await request(app)
+        .get(`/api/v1/scans/${SCAN_ID}/shares`)
+        .set('Authorization', `Bearer ${recipientToken}`)
+        .expect(403);
+
+      expect(ErrorResponseSchema.parse(response.body as unknown).error.code).toBe('NOT_OWNER');
+    });
+
+    it('rejects a missing scan with 404', async () => {
+      listScanShares.mockRejectedValue(new ScanNotFoundError());
+
+      const response = await request(app)
+        .get(`/api/v1/scans/${SCAN_ID}/shares`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .expect(404);
+
+      expect(ErrorResponseSchema.parse(response.body as unknown).error.code).toBe('SCAN_NOT_FOUND');
+    });
+  });
+
+  describe('DELETE /api/v1/scans/:scanId/shares/:userId', () => {
+    it('revokes scan Viewer access as the owner', async () => {
+      const response = await request(app)
+        .delete(`/api/v1/scans/${SCAN_ID}/shares/${USER_RECIPIENT}`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .expect(200);
+
+      const body = ScanViewerRevokeResponseSchema.parse(response.body as unknown);
+      expect(body).toEqual({
+        scanId: SCAN_ID,
+        userId: USER_RECIPIENT,
+        revokedAt: NOW.toISOString(),
+      });
+      expect(revokeScanViewer).toHaveBeenCalledWith(USER_OWNER, SCAN_ID, USER_RECIPIENT);
+    });
+
+    it('rejects a non-owner with 403', async () => {
+      revokeScanViewer.mockRejectedValue(new NotOwnerError());
+
+      const response = await request(app)
+        .delete(`/api/v1/scans/${SCAN_ID}/shares/${USER_RECIPIENT}`)
+        .set('Authorization', `Bearer ${recipientToken}`)
+        .expect(403);
+
+      expect(ErrorResponseSchema.parse(response.body as unknown).error.code).toBe('NOT_OWNER');
+    });
+
+    it('rejects when no scan access record exists with 404', async () => {
+      revokeScanViewer.mockRejectedValue(new ViewerAccessNotFoundError());
+
+      const response = await request(app)
+        .delete(`/api/v1/scans/${SCAN_ID}/shares/${USER_RECIPIENT}`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .expect(404);
+
+      expect(ErrorResponseSchema.parse(response.body as unknown).error.code).toBe(
+        'ACCESS_NOT_FOUND',
+      );
+    });
+  });
+
+  describe('POST /api/v1/projects/:projectId/share-links', () => {
+    it('creates a generic project share link for the owner', async () => {
+      const response = await request(app)
+        .post(`/api/v1/projects/${PROJECT_ID}/share-links`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .expect(201);
+
+      const body = ShareLinkCreateResponseSchema.parse(response.body as unknown);
+      expect(body).toEqual({
+        shareLinkId: SHARE_LINK_ID,
+        shareLinkUrl: `https://invite.roomscan.dev/invitations/${TOKEN}`,
+        scope: 'project',
+        expiresAt,
+      });
+      expect(createShareLink).toHaveBeenCalledWith(USER_OWNER, { projectId: PROJECT_ID });
+    });
+
+    it('rejects an unauthenticated request', async () => {
+      const response = await request(app)
+        .post(`/api/v1/projects/${PROJECT_ID}/share-links`)
+        .expect(401);
+
+      expect(ErrorResponseSchema.parse(response.body as unknown).error.code).toBe('UNAUTHORIZED');
+      expect(createShareLink).not.toHaveBeenCalled();
+    });
+
+    it('rejects a non-owner with 403', async () => {
+      createShareLink.mockRejectedValue(new NotOwnerError());
+
+      const response = await request(app)
+        .post(`/api/v1/projects/${PROJECT_ID}/share-links`)
+        .set('Authorization', `Bearer ${recipientToken}`)
+        .expect(403);
+
+      expect(ErrorResponseSchema.parse(response.body as unknown).error.code).toBe('NOT_OWNER');
+    });
+
+    it('rejects a project that is not shareable with 409', async () => {
+      createShareLink.mockRejectedValue(new ProjectNotShareableError());
+
+      const response = await request(app)
+        .post(`/api/v1/projects/${PROJECT_ID}/share-links`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .expect(409);
+
+      expect(ErrorResponseSchema.parse(response.body as unknown).error.code).toBe(
+        'PROJECT_NOT_SHAREABLE',
+      );
+    });
+
+    it('rejects a missing project with 404', async () => {
+      createShareLink.mockRejectedValue(new ProjectNotFoundError());
+
+      const response = await request(app)
+        .post(`/api/v1/projects/${PROJECT_ID}/share-links`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .expect(404);
+
+      expect(ErrorResponseSchema.parse(response.body as unknown).error.code).toBe(
+        'PROJECT_NOT_FOUND',
+      );
+    });
+  });
+
+  describe('POST /api/v1/scans/:scanId/share-links', () => {
+    it('creates a generic scan share link for the owner', async () => {
+      const response = await request(app)
+        .post(`/api/v1/scans/${SCAN_ID}/share-links`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .expect(201);
+
+      const body = ShareLinkCreateResponseSchema.parse(response.body as unknown);
+      expect(body.scope).toBe('project');
+      expect(createShareLink).toHaveBeenCalledWith(USER_OWNER, { scanId: SCAN_ID });
+    });
+
+    it('rejects a scan that is not shareable with 409', async () => {
+      createShareLink.mockRejectedValue(new ScanNotShareableError());
+
+      const response = await request(app)
+        .post(`/api/v1/scans/${SCAN_ID}/share-links`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .expect(409);
+
+      expect(ErrorResponseSchema.parse(response.body as unknown).error.code).toBe(
+        'SCAN_NOT_SHAREABLE',
+      );
+    });
+
+    it('rejects a missing scan with 404', async () => {
+      createShareLink.mockRejectedValue(new ScanNotFoundError());
+
+      const response = await request(app)
+        .post(`/api/v1/scans/${SCAN_ID}/share-links`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .expect(404);
+
+      expect(ErrorResponseSchema.parse(response.body as unknown).error.code).toBe('SCAN_NOT_FOUND');
+    });
+  });
+
+  describe('GET /api/v1/projects/:projectId/share-links', () => {
+    it('lists active project share links for the owner', async () => {
+      const response = await request(app)
+        .get(`/api/v1/projects/${PROJECT_ID}/share-links`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .expect(200);
+
+      const body = ShareLinkListResponseSchema.parse(response.body as unknown);
+      expect(body.items).toHaveLength(1);
+      expect(listShareLinks).toHaveBeenCalledWith(USER_OWNER, { projectId: PROJECT_ID });
+    });
+
+    it('rejects a non-owner with 403', async () => {
+      listShareLinks.mockRejectedValue(new NotOwnerError());
+
+      const response = await request(app)
+        .get(`/api/v1/projects/${PROJECT_ID}/share-links`)
+        .set('Authorization', `Bearer ${recipientToken}`)
+        .expect(403);
+
+      expect(ErrorResponseSchema.parse(response.body as unknown).error.code).toBe('NOT_OWNER');
+    });
+  });
+
+  describe('GET /api/v1/scans/:scanId/share-links', () => {
+    it('lists active scan share links for the owner', async () => {
+      const response = await request(app)
+        .get(`/api/v1/scans/${SCAN_ID}/share-links`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .expect(200);
+
+      const body = ShareLinkListResponseSchema.parse(response.body as unknown);
+      expect(body.items).toHaveLength(1);
+      expect(listShareLinks).toHaveBeenCalledWith(USER_OWNER, { scanId: SCAN_ID });
+    });
+
+    it('rejects a missing scan with 404', async () => {
+      listShareLinks.mockRejectedValue(new ScanNotFoundError());
+
+      const response = await request(app)
+        .get(`/api/v1/scans/${SCAN_ID}/share-links`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .expect(404);
+
+      expect(ErrorResponseSchema.parse(response.body as unknown).error.code).toBe('SCAN_NOT_FOUND');
+    });
+  });
+
+  describe('DELETE /api/v1/projects/:projectId/share-links/:shareLinkId', () => {
+    it('revokes a project share link as the owner', async () => {
+      const response = await request(app)
+        .delete(`/api/v1/projects/${PROJECT_ID}/share-links/${SHARE_LINK_ID}`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .expect(200);
+
+      const body = ShareLinkRevokeResponseSchema.parse(response.body as unknown);
+      expect(body).toEqual({
+        shareLinkId: SHARE_LINK_ID,
+        status: 'REVOKED',
+        revokedAt: NOW.toISOString(),
+      });
+      expect(revokeShareLink).toHaveBeenCalledWith(USER_OWNER, SHARE_LINK_ID);
+    });
+
+    it('rejects an unknown share link with 404', async () => {
+      revokeShareLink.mockRejectedValue(new ShareLinkNotFoundError());
+
+      const response = await request(app)
+        .delete(`/api/v1/projects/${PROJECT_ID}/share-links/${SHARE_LINK_ID}`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .expect(404);
+
+      expect(ErrorResponseSchema.parse(response.body as unknown).error.code).toBe(
+        'SHARE_LINK_NOT_FOUND',
+      );
+    });
+
+    it('rejects a non-owner with 403', async () => {
+      revokeShareLink.mockRejectedValue(new NotOwnerError());
+
+      const response = await request(app)
+        .delete(`/api/v1/projects/${PROJECT_ID}/share-links/${SHARE_LINK_ID}`)
+        .set('Authorization', `Bearer ${recipientToken}`)
+        .expect(403);
+
+      expect(ErrorResponseSchema.parse(response.body as unknown).error.code).toBe('NOT_OWNER');
+    });
+
+    it('rejects a share link whose owning project is deleted with 404', async () => {
+      revokeShareLink.mockRejectedValue(new ProjectNotFoundError());
+
+      const response = await request(app)
+        .delete(`/api/v1/projects/${PROJECT_ID}/share-links/${SHARE_LINK_ID}`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .expect(404);
+
+      expect(ErrorResponseSchema.parse(response.body as unknown).error.code).toBe(
+        'PROJECT_NOT_FOUND',
+      );
+    });
+  });
+
+  describe('DELETE /api/v1/scans/:scanId/share-links/:shareLinkId', () => {
+    it('revokes a scan share link as the owner', async () => {
+      await request(app)
+        .delete(`/api/v1/scans/${SCAN_ID}/share-links/${SHARE_LINK_ID}`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .expect(200);
+
+      expect(revokeShareLink).toHaveBeenCalledWith(USER_OWNER, SHARE_LINK_ID);
+    });
+
+    it('rejects a share link whose owning scan is deleted with 404', async () => {
+      revokeShareLink.mockRejectedValue(new ScanNotFoundError());
+
+      const response = await request(app)
+        .delete(`/api/v1/scans/${SCAN_ID}/share-links/${SHARE_LINK_ID}`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .expect(404);
+
+      expect(ErrorResponseSchema.parse(response.body as unknown).error.code).toBe('SCAN_NOT_FOUND');
     });
   });
 });
