@@ -3,7 +3,11 @@ import { Prisma } from '../../generated/prisma/client.js';
 import type { PrismaClient } from '../../generated/prisma/client.js';
 import { LOCAL_TEST_USER_ID, LOCAL_TEST_VIEWER_ID } from '../../config/constants.js';
 import { generateInvitationToken, hashInvitationToken } from '../../modules/share/share.service.js';
-import { writeAccessUpsert, writeProjectBootstrap } from './prisma-sync-writer.js';
+import {
+  resetProjectSyncState,
+  writeAccessUpsert,
+  writeProjectBootstrap,
+} from './prisma-sync-writer.js';
 
 export const LOCAL_TEST_PROJECT_ID = '00000000-0000-4000-8000-000000000101';
 export const LOCAL_TEST_PROJECT_NAME = 'District 2 Apartment';
@@ -416,6 +420,7 @@ export async function seedLocalTestProject(client: SeedClient): Promise<{ invita
         },
       });
       if (shared.projectDeletedAt === null && shared.accessRevokedAt === null) {
+        await resetProjectSyncState(transaction, [shared.id]);
         await writeAccessUpsert(transaction, access.id);
         await writeAccessUpsert(transaction, access.id, { targetUserId: LOCAL_TEST_USER_ID });
         await writeProjectBootstrap(transaction, shared.id, LOCAL_TEST_USER_ID, new Date());
@@ -443,6 +448,10 @@ export async function seedLocalTestProject(client: SeedClient): Promise<{ invita
         revokedAt: null,
       },
     });
+    await resetProjectSyncState(
+      transaction,
+      LOCAL_TEST_PROJECTS.map((project) => project.id),
+    );
     await writeAccessUpsert(transaction, ownerProjectViewerAccess.id);
     await writeAccessUpsert(transaction, ownerProjectViewerAccess.id, {
       targetUserId: LOCAL_TEST_VIEWER_ID,

@@ -449,6 +449,19 @@ export async function refreshScanRollup(
   return scan.projectId;
 }
 
+export async function resetProjectSyncState(
+  transaction: PrismaTransactionClient,
+  projectIds: string[],
+): Promise<void> {
+  if (!supportsSync(transaction) || projectIds.length === 0) return;
+  await transaction.syncConflict.deleteMany({
+    where: { projectId: { in: projectIds } },
+  });
+  await transaction.syncChange.deleteMany({
+    where: { projectId: { in: projectIds } },
+  });
+}
+
 export async function writeProjectBootstrap(
   transaction: PrismaTransactionClient,
   projectId: string,
