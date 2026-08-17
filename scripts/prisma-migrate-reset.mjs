@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const nodeEnv = process.env.NODE_ENV ?? 'development';
+const nodeEnv = process.env.NODE_ENV;
 
 if (nodeEnv !== 'development') {
   console.error(
