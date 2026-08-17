@@ -1,12 +1,21 @@
 import { Router } from 'express';
 
 import { AppError } from '../../common/errors/app-error.js';
+import {
+  idempotencyErrorToAppError,
+  resolveIdempotencyKey,
+} from '../../common/idempotency/idempotency.js';
 import { authenticate, getUserId } from '../../common/middleware/authenticate.js';
 import type {
   AccessTokenVerifier,
   CurrentUserRepository,
 } from '../../common/middleware/authenticate.js';
 import { validateRequest } from '../../common/middleware/validate-request.js';
+import {
+  parseIfMatch,
+  revisionErrorToAppError,
+  setRevisionEtag,
+} from '../../common/revision/revision.js';
 import { ProjectNotFoundError } from '../project/project.errors.js';
 import { ScanIdParamSchema, type ScanIdParam } from '../scan/scan.schemas.js';
 import { ScanNotFoundError } from '../scan/scan.errors.js';
@@ -35,6 +44,8 @@ export interface NoteRouterDependencies {
 }
 
 function mapError(error: unknown): AppError | undefined {
+  const commonError = idempotencyErrorToAppError(error) ?? revisionErrorToAppError(error);
+  if (commonError !== undefined) return commonError;
   if (error instanceof ScanNotFoundError) {
     return new AppError({ statusCode: 404, code: 'SCAN_NOT_FOUND', message: 'Scan was not found' });
   }
@@ -77,16 +88,26 @@ export function createNoteRouter({
           body: CreateNoteBody;
           params: ScanIdParam;
         };
-        const result = await noteService.create(userId, params.scanId, {
+        const key = resolveIdempotencyKey(
+          typeof request.headers['idempotency-key'] === 'string'
+            ? request.headers['idempotency-key']
+            : undefined,
+        );
+        const input = {
           content: body.content,
           color: body.color,
           position: body.position,
           orientation: body.orientation === undefined ? null : body.orientation,
           modelVersion: body.modelVersion,
-        });
-        const responseBody = NoteResponseSchema.parse(result);
+        };
+        const result =
+          typeof noteService.createIdempotently === 'function'
+            ? await noteService.createIdempotently(userId, params.scanId, input, key)
+            : { body: await noteService.create(userId, params.scanId, input), statusCode: 201 };
+        const responseBody = NoteResponseSchema.parse(result.body);
 
-        response.status(201).json(responseBody);
+        setRevisionEtag(response, responseBody.revision);
+        response.status(result.statusCode).json(responseBody);
       } catch (error) {
         next(mapError(error) ?? error);
       }
@@ -129,6 +150,7 @@ export function createNoteRouter({
         const result = await noteService.getById(userId, params.noteId);
         const responseBody = NoteResponseSchema.parse(result);
 
+        setRevisionEtag(response, responseBody.revision);
         response.status(200).json(responseBody);
       } catch (error) {
         next(mapError(error) ?? error);
@@ -148,15 +170,19 @@ export function createNoteRouter({
           params: NoteIdParam;
         };
         const data: NoteUpdateInput = {};
+        const expectedRevision = parseIfMatch(
+          typeof request.headers['if-match'] === 'string' ? request.headers['if-match'] : undefined,
+        );
         if (body.content !== undefined) {
           data.content = body.content;
         }
         if (body.color !== undefined) {
           data.color = body.color;
         }
-        const result = await noteService.update(userId, params.noteId, data);
+        const result = await noteService.update(userId, params.noteId, expectedRevision, data);
         const responseBody = NoteResponseSchema.parse(result);
 
+        setRevisionEtag(response, responseBody.revision);
         response.status(200).json(responseBody);
       } catch (error) {
         next(mapError(error) ?? error);
@@ -175,13 +201,17 @@ export function createNoteRouter({
           body: MoveNoteBody;
           params: NoteIdParam;
         };
-        const result = await noteService.move(userId, params.noteId, {
+        const expectedRevision = parseIfMatch(
+          typeof request.headers['if-match'] === 'string' ? request.headers['if-match'] : undefined,
+        );
+        const result = await noteService.move(userId, params.noteId, expectedRevision, {
           position: body.position,
           orientation: body.orientation === undefined ? null : body.orientation,
           modelVersion: body.modelVersion,
         });
         const responseBody = NoteResponseSchema.parse(result);
 
+        setRevisionEtag(response, responseBody.revision);
         response.status(200).json(responseBody);
       } catch (error) {
         next(mapError(error) ?? error);
@@ -197,8 +227,12 @@ export function createNoteRouter({
       try {
         const userId = getUserId(request);
         const { params } = response.locals.validated as { params: NoteIdParam };
-        await noteService.delete(userId, params.noteId);
+        const expectedRevision = parseIfMatch(
+          typeof request.headers['if-match'] === 'string' ? request.headers['if-match'] : undefined,
+        );
+        const revision = await noteService.delete(userId, params.noteId, expectedRevision);
 
+        if (revision !== undefined) setRevisionEtag(response, revision);
         response.status(204).end();
       } catch (error) {
         next(mapError(error) ?? error);

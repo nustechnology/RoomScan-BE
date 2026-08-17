@@ -189,7 +189,6 @@ describe('ProjectService', () => {
       description: null,
     });
 
-    expect(mocks.findAccessRole).toHaveBeenCalledWith(PROJECT_ID, OWNER_ID);
     expect(mocks.update).toHaveBeenCalledWith(PROJECT_ID, OWNER_ID, {
       name: 'Updated name',
       description: null,
@@ -199,11 +198,14 @@ describe('ProjectService', () => {
 
   it('hides update from a Viewer', async () => {
     const { mocks, service } = createRepository();
+    mocks.update.mockRejectedValueOnce(new ProjectNotFoundError());
 
     await expect(
       service.update(VIEWER_ID, PROJECT_ID, { name: 'Forbidden change' }),
     ).rejects.toBeInstanceOf(ProjectNotFoundError);
-    expect(mocks.update).not.toHaveBeenCalled();
+    expect(mocks.update).toHaveBeenCalledWith(PROJECT_ID, VIEWER_ID, {
+      name: 'Forbidden change',
+    });
   });
 
   it('soft-deletes a project and preserves repository idempotency', async () => {

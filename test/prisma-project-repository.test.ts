@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import type { PrismaClient } from '../src/generated/prisma/client.js';
+import { RevisionConflictError } from '../src/common/revision/revision.errors.js';
 import { PrismaProjectRepository } from '../src/infrastructure/database/prisma-project-repository.js';
 import { ProjectNotFoundError } from '../src/modules/project/project.errors.js';
 
@@ -13,6 +14,9 @@ const expectedProjectSelect = {
   name: true,
   description: true,
   ownerId: true,
+  revision: true,
+  syncStatus: true,
+  lastSyncedAt: true,
   owner: {
     select: {
       id: true,
@@ -36,7 +40,7 @@ const expectedProjectSelect = {
       createdAt: true,
       _count: {
         select: {
-          notes: true,
+          notes: { where: { deletedAt: null } },
         },
       },
     },
@@ -66,6 +70,9 @@ function createRow() {
     name: 'Apartment scan',
     description: 'First floor',
     ownerId: OWNER_ID,
+    revision: 1,
+    syncStatus: 'SYNCED',
+    lastSyncedAt: NOW,
     owner: {
       id: OWNER_ID,
       email: 'owner@example.com',
@@ -122,14 +129,19 @@ describe('PrismaProjectRepository', () => {
       description: 'First floor',
     });
 
-    expect(project.create).toHaveBeenCalledWith({
-      data: {
-        ownerId: OWNER_ID,
-        name: 'Apartment scan',
-        description: 'First floor',
-      },
-      select: expectedProjectSelect,
+    const [createArguments] = project.create.mock.calls[0] as unknown as [
+      { data: Record<string, unknown>; select: unknown },
+    ];
+    expect(createArguments.data).toMatchObject({
+      ownerId: OWNER_ID,
+      name: 'Apartment scan',
+      description: 'First floor',
+      syncStatus: 'SYNCED',
     });
+    expect(createArguments.data.lastSyncedAt).toBeInstanceOf(Date);
+    expect(createArguments.data.createdAt).toBeInstanceOf(Date);
+    expect(createArguments.data.updatedAt).toBeInstanceOf(Date);
+    expect(createArguments.select).toEqual(expectedProjectSelect);
     expect(result).toMatchObject({
       owner: {
         id: OWNER_ID,
@@ -139,7 +151,9 @@ describe('PrismaProjectRepository', () => {
       scans: [],
       sharedCount: 2,
       thumbnail: null,
-      syncStatus: null,
+      syncStatus: 'SYNCED',
+      revision: 1,
+      lastSyncedAt: NOW,
     });
   });
 
@@ -364,10 +378,11 @@ describe('PrismaProjectRepository', () => {
 
     await repository.softDelete(PROJECT_ID, OWNER_ID);
 
-    expect(project.findFirst).toHaveBeenCalledWith({
-      where: { id: PROJECT_ID, ownerId: OWNER_ID },
-      select: { deletedAt: true },
-    });
+    const [findArguments] = project.findFirst.mock.calls.at(-1) as unknown as [
+      { where: unknown; select: Record<string, unknown> },
+    ];
+    expect(findArguments.where).toEqual({ id: PROJECT_ID, ownerId: OWNER_ID });
+    expect(findArguments.select).toMatchObject({ deletedAt: true, revision: true });
     expect(project.update).toHaveBeenCalledOnce();
     const projectUpdate = project.update.mock.calls[0]?.[0] as
       | {
@@ -390,6 +405,52 @@ describe('PrismaProjectRepository', () => {
       revokedAt: null,
     });
     expect(accessUpdate?.data.revokedAt).toBe(projectUpdate?.data.deletedAt);
+  });
+
+  it('claims an Owner delete with an atomic revision predicate', async () => {
+    const { client, project } = createClient();
+    project.findFirst.mockResolvedValueOnce({
+      ownerId: OWNER_ID,
+      revision: 3,
+      deletedAt: null,
+      scans: [],
+      accesses: [],
+    });
+    const repository = new PrismaProjectRepository(client);
+
+    await expect(repository.softDelete(PROJECT_ID, OWNER_ID, 3)).resolves.toBe(4);
+
+    expect(project.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: PROJECT_ID,
+          ownerId: OWNER_ID,
+          deletedAt: null,
+          revision: 3,
+        },
+      }),
+    );
+  });
+
+  it('returns a revision conflict when another Owner write wins the delete claim', async () => {
+    const { client, project } = createClient();
+    project.findFirst
+      .mockResolvedValueOnce({
+        ownerId: OWNER_ID,
+        revision: 3,
+        deletedAt: null,
+        scans: [],
+        accesses: [],
+      })
+      .mockResolvedValueOnce({ revision: 4, deletedAt: null });
+    project.updateMany.mockResolvedValueOnce({ count: 0 });
+    const repository = new PrismaProjectRepository(client);
+
+    await expect(repository.softDelete(PROJECT_ID, OWNER_ID, 3)).rejects.toMatchObject({
+      name: RevisionConflictError.name,
+      currentRevision: 4,
+      deleted: false,
+    });
   });
 
   it('keeps repeated deletion idempotent for the same Owner', async () => {

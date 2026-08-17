@@ -4,13 +4,25 @@ import {
   InvitationStatus,
   ProjectRole as PrismaProjectRole,
 } from '../../generated/prisma/enums.js';
+import type {
+  IdempotencyContext,
+  IdempotencyResult,
+} from '../../common/idempotency/idempotency.types.js';
 import { InvitationAlreadySentError } from '../../modules/share/share.errors.js';
 import type {
   InvitationRecord,
+  InvitationCreateResult,
   InvitationWithProject,
   ShareProjectInfo,
   ShareRepository,
 } from '../../modules/share/share.types.js';
+import type { PrismaIdempotencyExecutor } from './prisma-idempotency.js';
+import {
+  refreshProjectRollup,
+  writeAccessUpsert,
+  writeDeleteChange,
+  writeProjectBootstrap,
+} from './prisma-sync-writer.js';
 
 const invitationSelect = {
   id: true,
@@ -72,9 +84,11 @@ type ShareClient = Pick<
 
 export class PrismaShareRepository implements ShareRepository {
   readonly #client: ShareClient;
+  readonly #idempotency: PrismaIdempotencyExecutor | undefined;
 
-  constructor(client: ShareClient) {
+  constructor(client: ShareClient, idempotency?: PrismaIdempotencyExecutor) {
     this.#client = client;
+    this.#idempotency = idempotency;
   }
 
   async findProjectOwner(projectId: string): Promise<string | null> {
@@ -167,6 +181,55 @@ export class PrismaShareRepository implements ShareRepository {
     });
   }
 
+  async createInvitationIdempotently(
+    data: {
+      id: string;
+      projectId: string;
+      createdById: string;
+      recipientEmail: string;
+      tokenHash: string;
+      expiresAt: Date;
+      sentAt: Date;
+    },
+    context: IdempotencyContext,
+    result: InvitationCreateResult,
+  ): Promise<IdempotencyResult<InvitationCreateResult>> {
+    if (this.#idempotency === undefined)
+      throw new Error('Invitation idempotency is not configured');
+    return await this.#idempotency.execute(context, 201, async (transaction) => {
+      await transaction.invitation.updateMany({
+        where: {
+          projectId: data.projectId,
+          recipientEmail: data.recipientEmail,
+          status: InvitationStatus.PENDING,
+          expiresAt: { lte: data.sentAt },
+        },
+        data: { status: InvitationStatus.REVOKED, revokedAt: data.sentAt },
+      });
+      try {
+        await transaction.invitation.create({
+          data: {
+            id: data.id,
+            projectId: data.projectId,
+            createdById: data.createdById,
+            recipientEmail: data.recipientEmail,
+            tokenHash: data.tokenHash,
+            status: InvitationStatus.PENDING,
+            expiresAt: data.expiresAt,
+            sentAt: data.sentAt,
+          },
+        });
+      } catch (error) {
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+          throw new InvitationAlreadySentError();
+        }
+        throw error;
+      }
+      await refreshProjectRollup(transaction, data.projectId, data.sentAt);
+      return result;
+    });
+  }
+
   async findByTokenHash(tokenHash: string): Promise<InvitationWithProject | null> {
     const row = await this.#client.invitation.findFirst({
       where: {
@@ -240,7 +303,7 @@ export class PrismaShareRepository implements ShareRepository {
         return null;
       }
 
-      await transaction.projectAccess.upsert({
+      const access = await transaction.projectAccess.upsert({
         where: { projectId_userId: { projectId, userId } },
         create: {
           projectId,
@@ -255,8 +318,27 @@ export class PrismaShareRepository implements ShareRepository {
           invitationId,
           acceptedAt,
           revokedAt: null,
+          revision: { increment: 1 },
+          updatedAt: acceptedAt,
         },
+        select: { id: true },
       });
+
+      if (this.#idempotency === undefined) {
+        const row = await transaction.invitation.findUnique({
+          where: { id: invitationId },
+          select: invitationSelect,
+        });
+        return row === null ? null : toInvitationRecord(row);
+      }
+
+      await refreshProjectRollup(transaction, projectId, acceptedAt);
+      await writeAccessUpsert(transaction, access.id, { changedAt: acceptedAt });
+      await writeAccessUpsert(transaction, access.id, {
+        targetUserId: userId,
+        changedAt: acceptedAt,
+      });
+      await writeProjectBootstrap(transaction, projectId, userId, acceptedAt);
 
       const row = await transaction.invitation.findUnique({
         where: { id: invitationId },
@@ -349,16 +431,20 @@ export class PrismaShareRepository implements ShareRepository {
     });
   }
 
-  async listActiveViewers(
-    projectId: string,
-  ): Promise<
-    Array<{ userId: string; user: { id: string; email: string | null }; grantedAt: Date }>
+  async listActiveViewers(projectId: string): Promise<
+    Array<{
+      userId: string;
+      revision: number;
+      user: { id: string; email: string | null };
+      grantedAt: Date;
+    }>
   > {
     const rows = await this.#client.projectAccess.findMany({
       where: { projectId, role: PrismaProjectRole.VIEWER, revokedAt: null },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       select: {
         userId: true,
+        revision: true,
         acceptedAt: true,
         createdAt: true,
         user: {
@@ -372,6 +458,7 @@ export class PrismaShareRepository implements ShareRepository {
 
     return rows.map((row) => ({
       userId: row.userId,
+      revision: row.revision,
       user: row.user,
       grantedAt: row.acceptedAt ?? row.createdAt,
     }));
@@ -381,24 +468,54 @@ export class PrismaShareRepository implements ShareRepository {
     projectId: string,
     userId: string,
     revokedAt: Date,
-  ): Promise<{ revokedAt: Date } | null> {
-    const access = await this.#client.projectAccess.findUnique({
-      where: { projectId_userId: { projectId, userId } },
-      select: { id: true, revokedAt: true },
-    });
-
-    if (access === null) {
-      return null;
+  ): Promise<{ revokedAt: Date; revision: number } | null> {
+    if (this.#idempotency === undefined) {
+      const access = await this.#client.projectAccess.findUnique({
+        where: { projectId_userId: { projectId, userId } },
+        select: { id: true, revision: true, revokedAt: true },
+      });
+      if (access === null) return null;
+      if (access.revokedAt !== null) {
+        return { revokedAt: access.revokedAt, revision: access.revision };
+      }
+      const updated = await this.#client.projectAccess.update({
+        where: { id: access.id },
+        data: { revokedAt, revision: { increment: 1 }, updatedAt: revokedAt },
+        select: { revokedAt: true, revision: true },
+      });
+      return { revokedAt: updated.revokedAt as Date, revision: updated.revision };
     }
-    if (access.revokedAt !== null) {
-      return { revokedAt: access.revokedAt };
-    }
+    return await this.#client.$transaction(async (transaction) => {
+      const access = await transaction.projectAccess.findUnique({
+        where: { projectId_userId: { projectId, userId } },
+        select: {
+          id: true,
+          revision: true,
+          revokedAt: true,
+          project: { select: { ownerId: true } },
+        },
+      });
+      if (access === null) return null;
+      if (access.revokedAt !== null) {
+        return { revokedAt: access.revokedAt, revision: access.revision };
+      }
 
-    const updated = await this.#client.projectAccess.update({
-      where: { id: access.id },
-      data: { revokedAt },
-      select: { revokedAt: true },
+      await transaction.projectAccess.update({
+        where: { id: access.id },
+        data: { revokedAt, revision: { increment: 1 }, updatedAt: revokedAt },
+      });
+      const change = {
+        projectId,
+        ownerId: access.project.ownerId,
+        resourceType: 'PROJECT_ACCESS' as const,
+        resourceId: access.id,
+        revision: access.revision + 1,
+        deletedAt: revokedAt,
+      };
+      await writeDeleteChange(transaction, change);
+      await writeDeleteChange(transaction, { ...change, targetUserId: userId });
+      await refreshProjectRollup(transaction, projectId, revokedAt);
+      return { revokedAt, revision: access.revision + 1 };
     });
-    return { revokedAt: updated.revokedAt as Date };
   }
 }

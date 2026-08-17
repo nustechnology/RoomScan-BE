@@ -14,22 +14,26 @@ import {
 describe('seedLocalTestProject', () => {
   it('idempotently creates demo projects covering every Shared With Me status', async () => {
     const projectUpsert = vi.fn().mockResolvedValue({});
+    const projectUpdate = vi.fn().mockResolvedValue({});
     const scanUpsert = vi.fn().mockResolvedValue({});
+    const scanAssetUpsert = vi.fn().mockResolvedValue({});
     const noteUpsert = vi.fn().mockResolvedValue({});
     const projectAccessUpsert = vi.fn().mockResolvedValue({});
     const invitationUpsert = vi.fn().mockResolvedValue({});
     const transaction = vi.fn(async (operation: unknown) => {
       return (
         operation as (tx: {
-          project: { upsert: typeof projectUpsert };
+          project: { upsert: typeof projectUpsert; update: typeof projectUpdate };
           scan: { upsert: typeof scanUpsert };
+          scanAsset: { upsert: typeof scanAssetUpsert };
           note: { upsert: typeof noteUpsert };
           projectAccess: { upsert: typeof projectAccessUpsert };
           invitation: { upsert: typeof invitationUpsert };
         }) => Promise<unknown>
       )({
-        project: { upsert: projectUpsert },
+        project: { upsert: projectUpsert, update: projectUpdate },
         scan: { upsert: scanUpsert },
+        scanAsset: { upsert: scanAssetUpsert },
         note: { upsert: noteUpsert },
         projectAccess: { upsert: projectAccessUpsert },
         invitation: { upsert: invitationUpsert },
@@ -84,6 +88,14 @@ describe('seedLocalTestProject', () => {
       0,
     );
     expect(scanUpsert).toHaveBeenCalledTimes(totalScans + LOCAL_TEST_SHARED_PROJECTS.length);
+    expect(scanAssetUpsert).toHaveBeenCalledTimes(
+      LOCAL_TEST_PROJECTS.flatMap((project) => project.scans).filter(
+        (scan) => scan.assetStatus !== 'NONE',
+      ).length + LOCAL_TEST_SHARED_PROJECTS.length,
+    );
+    expect(projectUpdate).toHaveBeenCalledTimes(
+      LOCAL_TEST_PROJECTS.length + LOCAL_TEST_SHARED_PROJECTS.length,
+    );
     for (const project of LOCAL_TEST_PROJECTS) {
       for (const scan of project.scans) {
         expect(scanUpsert).toHaveBeenCalledWith({

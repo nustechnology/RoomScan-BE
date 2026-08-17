@@ -1,6 +1,7 @@
 import { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
 
 import { ErrorResponseSchema } from '../../common/schemas/error.js';
+import { IdempotencyKeyHeaderSchema } from '../../common/schemas/sync-headers.js';
 import { ProjectIdParamSchema } from '../project/project.schemas.js';
 import {
   InvitationAcceptResponseSchema,
@@ -160,10 +161,11 @@ shareOpenApiRegistry.registerPath({
   tags: ['Shares'],
   summary: 'Create an invitation link for a project',
   description:
-    'Owner only. The project must have at least one scan with an uploaded model before it can be shared. Sends the invitation email to the recipient.',
+    'Owner only. Requires Idempotency-Key. The project must have at least one scan with an uploaded model before it can be shared. The email is sent only after the first successful commit and is not re-sent on replay.',
   security: [{ [bearerAuth.name]: [] }],
   request: {
     params: ProjectIdParamSchema,
+    headers: IdempotencyKeyHeaderSchema,
     body: {
       required: true,
       content: {

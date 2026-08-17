@@ -97,6 +97,7 @@ function assetMetadata(overrides: Partial<ScanAssetMetadata> = {}): ScanAssetMet
     sizeBytes: 1024,
     checksum: 'abc-checksum',
     modelVersion: '1',
+    revision: 1,
     uploadedAt: NOW.toISOString(),
     uploadSessionId: UPLOAD_SESSION_ID,
     uploadUrlExpiresAt: null,
@@ -114,6 +115,7 @@ function createSessionResult(created = true): CreateUploadSessionResult {
     uploadUrl: 'http://storage/upload',
     uploadUrlExpiresAt: NOW.toISOString(),
     created,
+    revision: 1,
   };
 }
 
@@ -246,6 +248,7 @@ describe('Scan asset HTTP endpoints', () => {
       const response = await request(app)
         .post(`/api/v1/scans/${SCAN_ID}/assets/upload-sessions`)
         .set('Authorization', `Bearer ${tokenA}`)
+        .set('Idempotency-Key', 'asset-session-1')
         .send({
           assetType: 'MODEL',
           contentType: 'model/gltf-binary',
@@ -272,6 +275,7 @@ describe('Scan asset HTTP endpoints', () => {
       const response = await request(app)
         .post(`/api/v1/scans/${SCAN_ID}/assets/upload-sessions`)
         .set('Authorization', `Bearer ${tokenA}`)
+        .set('Idempotency-Key', 'mutation-1')
         .send({
           assetType: 'MODEL',
           contentType: 'model/gltf-binary',
@@ -337,6 +341,7 @@ describe('Scan asset HTTP endpoints', () => {
       const response = await request(app)
         .post(`/api/v1/scans/${SCAN_ID}/assets/upload-sessions`)
         .set('Authorization', `Bearer ${tokenB}`)
+        .set('Idempotency-Key', 'asset-session-viewer')
         .send({
           assetType: 'MODEL',
           contentType: 'model/gltf-binary',
@@ -356,6 +361,7 @@ describe('Scan asset HTTP endpoints', () => {
       const response = await request(app)
         .post(`/api/v1/scans/${SCAN_ID}/assets/upload-sessions`)
         .set('Authorization', `Bearer ${tokenA}`)
+        .set('Idempotency-Key', 'asset-session-error')
         .send({
           assetType: 'MODEL',
           contentType: 'model/gltf-binary',

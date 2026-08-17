@@ -35,7 +35,8 @@ nvm use
 corepack enable
 corepack install
 cp .env.example .env
-# Replace APPLE_CLIENT_ID and both AUTH_*_TOKEN_SECRET placeholders.
+# Replace APPLE_CLIENT_ID, both AUTH_*_TOKEN_SECRET placeholders, and
+# SYNC_CRYPTO_KEY (base64 for exactly 32 random bytes).
 yarn install --immutable
 yarn prisma:generate
 docker compose up db -d
@@ -48,9 +49,9 @@ yarn dev
 The API is available at <http://localhost:3000>. The application validates all
 required environment variables before opening the HTTP port.
 
-The committed Prisma migration creates the user storage required by Apple
-authentication. Local production-style startup applies committed migrations
-through the Compose `migrate` service.
+Committed Prisma migrations create the authentication, domain, sharing, sync,
+idempotency-receipt, and conflict-ledger storage. Local production-style
+startup applies them through the Compose `migrate` service.
 
 The standard local workflow uses Docker only for the PostgreSQL `db` service.
 Run migrations, seeds, the API, validation, tests, coverage and builds natively
@@ -129,6 +130,8 @@ the local PostgreSQL and MinIO data volumes.
 | `GET`    | `/api/v1/shared-projects`                              | List projects shared with the current user                 |
 | `GET`    | `/api/v1/shared-projects/:projectId`                   | Get a shared project read-only                             |
 | `DELETE` | `/api/v1/shared-projects/:projectId`                   | Remove a project from the user's Shared With Me list       |
+| `GET`    | `/api/v1/sync/changes`                                 | Pull visible snapshot/incremental resource changes         |
+| `GET`    | `/api/v1/sync/status`                                  | Get sync readiness for accessible projects                 |
 | `GET`    | `/api-doc`                                             | Interactive Swagger UI                                     |
 | `GET`    | `/api-doc.json`                                        | Generated OpenAPI 3.1 document                             |
 
@@ -147,6 +150,24 @@ Errors use a stable envelope:
 
 Clients may send `x-request-id`; otherwise the API generates one and returns it
 in the response header.
+
+Offline-first creates require `Idempotency-Key` on Project, Scan, Note, Upload
+Session, and Invitation POSTs. The server stores only a scoped key hash and an
+encrypted original response. Same-key/same-payload retries replay that response;
+another payload returns `409 IDEMPOTENCY_KEY_CONFLICT`. Project, Scan, and Note
+detail responses expose `revision` plus `ETag: "N"`; their Owner PATCH/DELETE
+routes require the same strong value in `If-Match` and return
+`409 REVISION_CONFLICT` for stale writes. Delete tombstones win over stale
+updates.
+
+`GET /api/v1/sync/changes` starts with a watermark-stable normalized snapshot,
+then continues through an opaque signed, user-bound cursor in immutable event
+sequence order. Optional `since` is RFC3339 and cannot be combined with
+`cursor`; `limit` defaults to 100 and is capped at 500. Owners see their project
+resources; active Viewers see only currently accessible project resources and
+their own access lifecycle. `GET /api/v1/sync/status` returns required MODEL
+readiness, lifecycle counts, unresolved conflict counts, and `lastSyncedAt` for
+all accessible projects or one optional `projectId`.
 
 Apple authentication accepts:
 
@@ -213,8 +234,9 @@ Scans are metadata records owned by a project. `POST` and `GET` at
 `/api/v1/projects/:projectId/scans` create and list scans; `GET`, `PATCH`, and
 `DELETE` at `/api/v1/scans/:scanId` read, rename, and soft-delete a scan. The
 project Owner has full scan control; an active Viewer may only read scan list
-and detail. Create accepts an optional `clientMutationId` for idempotency
-(returning the existing active scan with `200` on a repeat). A scan name is
+and detail. Create accepts optional `clientMutationId` only as a deprecated
+alias that must match `Idempotency-Key`; a deleted collision returns 409 and is
+never restored. A scan name is
 required (1–100 trimmed characters, not whitespace-only) and description is
 optional (≤500). Scan deletion is soft and idempotent and touches the parent
 project `updatedAt`. Missing, deleted, or inaccessible scans are hidden behind
@@ -229,7 +251,9 @@ upload session for each present descriptor and return its `uploadUrl` under
 `uploads.thumbnail` / `uploads.scanFile`. The descriptors are independent — a
 call may include `thumbnail` only, `scanFile` only, or both. The client then
 PUTs each file directly to its own `uploadUrl` and marks each session complete
-with `POST /api/v1/upload-sessions/:uploadSessionId/complete`.
+with `POST /api/v1/upload-sessions/:uploadSessionId/complete`. Scan metadata,
+optional session rows, sync events, revision roll-up, and the receipt commit
+together after all URLs are successfully presigned.
 
 Scan assets use minted URLs: the Owner creates an upload session
 (`POST /api/v1/scans/:scanId/assets/upload-sessions`), the client uploads to the
@@ -242,7 +266,8 @@ metadata and request download URLs
 (`GET /api/v1/scans/:scanId/assets/:assetType/download-url`); revoked Viewers
 and deleted projects/scans are denied. The raw `storageKey` field is omitted
 from API responses, although the local provider's URLs embed the object key
-path.
+path. Once a MODEL is `UPLOADED`, another session returns
+`409 MODEL_ALREADY_COMPLETED`; replacement/versioning is outside SIT-39.
 
 Project list and detail responses include each project's active scans under
 `scans`, with `id`, `name`, `description`, `thumbnail`, `noteCount`,
@@ -258,15 +283,16 @@ Content is required on create (1–2000
 trimmed characters), color is a preset (`YELLOW`, `RED`, `BLUE`, `GREEN`,
 `ORANGE`, `PURPLE`), position is a `{ x, y, z }` vector, and `modelVersion` must
 match the scan's current model version (`409` otherwise). Note content is never
-written to logs. Deleting a scan or project makes its notes inaccessible.
+written to logs. Note deletion is soft and emits a tombstone; deleting a scan
+or project soft-deletes descendant notes/assets and emits their tombstones.
 
 Projects are shared through expiring invitation links addressed to a recipient
 email. The Owner creates an invitation (`POST /api/v1/projects/:projectId/invitations`,
 with `recipientEmail` and optional `expiresInSeconds`) only after the project
 has at least one scan with an uploaded model; the API returns an `invitationUrl`
 whose raw token is random and never stored (only its SHA-256 hash is) and is
-redacted from request access logs, and sends
-an invitation email to the recipient. One pending invitation is allowed per
+redacted from request access logs, and sends an invitation email only after the
+first successful idempotent commit (receipt replay does not resend it). One pending invitation is allowed per
 `(project, email)` (`409` otherwise), and an expired link does not block
 re-inviting the recipient. Recipients can preview the link without
 signing in, then accept to gain Viewer access or decline; a pending link can be
@@ -331,6 +357,7 @@ assets, and the upload flow.
 | `APPLE_CLIENT_ID`                                        | Yes      | —                                           | Native app bundle identifier used as Apple `aud`                    |
 | `AUTH_ACCESS_TOKEN_SECRET`                               | Yes      | —                                           | HS256 access-token secret, at least 32 characters                   |
 | `AUTH_REFRESH_TOKEN_SECRET`                              | Yes      | —                                           | HS256 refresh-token secret, at least 32 characters                  |
+| `SYNC_CRYPTO_KEY`                                        | Yes      | —                                           | Stable base64-encoded 32-byte master key for receipts and cursors   |
 | `AUTH_ACCESS_TOKEN_TTL_SECONDS`                          | No       | `3600`                                      | RoomScan access-token lifetime                                      |
 | `AUTH_REFRESH_TOKEN_TTL_SECONDS`                         | No       | `2592000`                                   | RoomScan refresh-token lifetime                                     |
 | `LOCAL_TEST_AUTH_ENABLED`                                | No       | `false`                                     | Enable the seeded login only in `development`                       |
@@ -354,6 +381,10 @@ The remaining PostgreSQL, MinIO and `ROOMSCAN_PORT` values in `.env.example`
 configure Docker Compose. The refresh TTL must exceed the access TTL. Replace
 all authentication placeholders before deployment; never commit `.env` or real
 credentials.
+
+Configure `SYNC_CRYPTO_KEY` before applying/deploying SIT-39 and keep it
+unchanged; V1 does not provide key rotation. Change events and idempotency
+receipts have no automatic expiry or compaction in V1.
 
 The default `STORAGE_PROVIDER=local` uses an unsigned in-process adapter for
 development and tests; it mints URLs whose TTL is metadata only (not encoded or
@@ -398,6 +429,7 @@ send is logged and never fails the invitation request.
 | `yarn prisma:generate`              | Regenerate the ignored Prisma Client                                      |
 | `yarn prisma:migrate:dev`           | Create/apply a development migration                                      |
 | `yarn prisma:migrate:deploy`        | Apply committed migrations                                                |
+| `yarn prisma:migrate:reset`         | Reset the database with Prisma migrations (development only)              |
 | `yarn prisma:studio`                | Open Prisma Studio                                                        |
 | `yarn seed:local`                   | Create or refresh the development-only login user and demo projects/scans |
 

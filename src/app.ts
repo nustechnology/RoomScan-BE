@@ -34,6 +34,8 @@ import { createShareRouter } from './modules/share/share.routes.js';
 import type { ShareService } from './modules/share/share.service.js';
 import { createSharedProjectsRouter } from './modules/shared-projects/shared-projects.routes.js';
 import type { SharedProjectsService } from './modules/shared-projects/shared-projects.service.js';
+import { createSyncRouter } from './modules/sync/sync.routes.js';
+import type { SyncService } from './modules/sync/sync.service.js';
 import { createOpenApiDocument } from './openapi/document.js';
 
 export interface AppDependencies {
@@ -48,6 +50,7 @@ export interface AppDependencies {
   noteService: NoteService;
   shareService: ShareService;
   sharedProjectsService: SharedProjectsService;
+  syncService?: SyncService;
   accessTokenVerifier: AccessTokenVerifier;
   currentUserRepository: CurrentUserRepository;
   rateLimiters: RateLimiters;
@@ -81,6 +84,7 @@ export function createApp({
   noteService,
   shareService,
   sharedProjectsService,
+  syncService,
   accessTokenVerifier,
   currentUserRepository,
   rateLimiters,
@@ -133,7 +137,7 @@ export function createApp({
     cors({
       origin: config.corsOrigins,
       credentials: config.corsOrigins !== '*',
-      exposedHeaders: ['RateLimit', 'RateLimit-Policy', 'Retry-After'],
+      exposedHeaders: ['ETag', 'RateLimit', 'RateLimit-Policy', 'Retry-After'],
     }),
   );
   app.use(compression());
@@ -164,6 +168,12 @@ export function createApp({
       refreshTokenService,
     }),
   );
+  if (syncService !== undefined) {
+    app.use(
+      API_PREFIX,
+      createSyncRouter({ syncService, accessTokenVerifier, currentUserRepository }),
+    );
+  }
   app.use(
     API_PREFIX,
     createProjectRouter({

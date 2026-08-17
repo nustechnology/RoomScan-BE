@@ -104,13 +104,14 @@ function createService(overrides: Partial<ShareRepository> = {}) {
     listActiveViewers: vi.fn<ShareRepository['listActiveViewers']>().mockResolvedValue([
       {
         userId: RECIPIENT_ID,
+        revision: 1,
         user: { id: RECIPIENT_ID, email: RECIPIENT_EMAIL },
         grantedAt: NOW,
       },
     ]),
     revokeViewerAccess: vi
       .fn<ShareRepository['revokeViewerAccess']>()
-      .mockResolvedValue({ revokedAt: NOW }),
+      .mockResolvedValue({ revokedAt: NOW, revision: 2 }),
   };
   const repository: ShareRepository = { ...mocks, ...overrides };
   const sendMail = vi.fn<Mailer['sendMail']>().mockResolvedValue(undefined);
@@ -587,6 +588,7 @@ describe('ShareService.listShares', () => {
       viewers: [
         {
           userId: RECIPIENT_ID,
+          revision: 1,
           recipientUser: { id: RECIPIENT_ID, email: RECIPIENT_EMAIL },
           grantedAt: NOW.toISOString(),
         },
@@ -632,6 +634,7 @@ describe('ShareService.revokeViewer', () => {
     expect(result).toEqual({
       projectId: PROJECT_ID,
       userId: RECIPIENT_ID,
+      revision: 2,
       revokedAt: NOW.toISOString(),
     });
     expect(mocks.revokeViewerAccess).toHaveBeenCalledWith(PROJECT_ID, RECIPIENT_ID, NOW);
@@ -639,7 +642,7 @@ describe('ShareService.revokeViewer', () => {
 
   it('returns the existing revokedAt when access was already revoked', async () => {
     const { service } = createService({
-      revokeViewerAccess: vi.fn().mockResolvedValue({ revokedAt: NOW }),
+      revokeViewerAccess: vi.fn().mockResolvedValue({ revokedAt: NOW, revision: 2 }),
     });
 
     const result = await service.revokeViewer(OWNER_ID, PROJECT_ID, RECIPIENT_ID);

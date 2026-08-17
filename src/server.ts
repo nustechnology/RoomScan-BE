@@ -24,6 +24,9 @@ import { LogMailer } from './infrastructure/mail/log-mailer.js';
 import { SmtpMailer, createNodemailerTransport } from './infrastructure/mail/smtp-mailer.js';
 import type { Mailer } from './infrastructure/mail/mailer.types.js';
 import { createLogger } from './infrastructure/logging/logger.js';
+import { SyncCrypto } from './infrastructure/crypto/sync-crypto.js';
+import { PrismaIdempotencyExecutor } from './infrastructure/database/prisma-idempotency.js';
+import { PrismaSyncRepository } from './infrastructure/database/prisma-sync-repository.js';
 import { AuthService, RefreshTokenService } from './modules/auth/auth.service.js';
 import { ProjectPermissionService } from './modules/project/project.permissions.js';
 import { ProjectService } from './modules/project/project.service.js';
@@ -32,19 +35,26 @@ import { ScanAssetService } from './modules/scan-asset/scan-asset.service.js';
 import { NoteService } from './modules/note/note.service.js';
 import { ShareService } from './modules/share/share.service.js';
 import { SharedProjectsService } from './modules/shared-projects/shared-projects.service.js';
+import { SyncService } from './modules/sync/sync.service.js';
 
 const config = loadConfig();
 const logger = createLogger(config);
 const prismaClient = createPrismaClient(config.databaseUrl);
 const database = new PrismaDatabase(prismaClient);
+if (config.syncCryptoKey === undefined) {
+  throw new Error('SYNC_CRYPTO_KEY is required');
+}
+const syncCrypto = new SyncCrypto(config.syncCryptoKey);
+const idempotency = new PrismaIdempotencyExecutor(prismaClient, syncCrypto);
 const userRepository = new PrismaAppleUserRepository(prismaClient);
 const currentUserRepository = new PrismaCurrentUserRepository(prismaClient);
-const projectRepository = new PrismaProjectRepository(prismaClient);
-const scanRepository = new PrismaScanRepository(prismaClient);
-const scanAssetRepository = new PrismaScanAssetRepository(prismaClient);
-const noteRepository = new PrismaNoteRepository(prismaClient);
-const shareRepository = new PrismaShareRepository(prismaClient);
+const projectRepository = new PrismaProjectRepository(prismaClient, idempotency);
+const scanRepository = new PrismaScanRepository(prismaClient, idempotency);
+const scanAssetRepository = new PrismaScanAssetRepository(prismaClient, idempotency);
+const noteRepository = new PrismaNoteRepository(prismaClient, idempotency);
+const shareRepository = new PrismaShareRepository(prismaClient, idempotency);
 const sharedProjectsRepository = new PrismaSharedProjectsRepository(prismaClient);
+const syncRepository = new PrismaSyncRepository(prismaClient);
 function createStorageAdapter(): StorageAdapter {
   if (config.storageProvider === 'minio') {
     return new MinioStorageAdapter({
@@ -107,10 +117,7 @@ const projectPermissions = new ProjectPermissionService(projectRepository);
 const projectService = new ProjectService({
   repository: projectRepository,
   permissions: projectPermissions,
-});
-const scanService = new ScanService({
-  repository: scanRepository,
-  permissions: projectPermissions,
+  idempotency,
 });
 const scanAssetService = new ScanAssetService({
   repository: scanAssetRepository,
@@ -122,10 +129,18 @@ const scanAssetService = new ScanAssetService({
   minModelSizeBytes: config.assetMinModelSizeBytes,
   maxModelSizeBytes: config.assetMaxModelSizeBytes,
   maxThumbnailSizeBytes: config.assetMaxThumbnailSizeBytes,
+  idempotency,
+});
+const scanService = new ScanService({
+  repository: scanRepository,
+  permissions: projectPermissions,
+  idempotency,
+  uploadPreparer: scanAssetService,
 });
 const noteService = new NoteService({
   repository: noteRepository,
   permissions: projectPermissions,
+  idempotency,
 });
 const shareService = new ShareService({
   repository: shareRepository,
@@ -133,10 +148,12 @@ const shareService = new ShareService({
   logger,
   invitationTtlSeconds: config.invitationTtlSeconds,
   invitationBaseUrl: config.invitationBaseUrl,
+  idempotency,
 });
 const sharedProjectsService = new SharedProjectsService({
   repository: sharedProjectsRepository,
 });
+const syncService = new SyncService({ repository: syncRepository, crypto: syncCrypto });
 const rateLimiters = createRateLimiters(config, logger);
 const app = createApp({
   config,
@@ -150,6 +167,7 @@ const app = createApp({
   noteService,
   shareService,
   sharedProjectsService,
+  syncService,
   accessTokenVerifier,
   currentUserRepository,
   rateLimiters,

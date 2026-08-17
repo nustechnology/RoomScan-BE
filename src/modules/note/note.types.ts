@@ -1,3 +1,8 @@
+import type {
+  IdempotencyContext,
+  IdempotencyResult,
+} from '../../common/idempotency/idempotency.types.js';
+
 export type NoteRole = 'OWNER' | 'VIEWER';
 export type NoteColor = 'YELLOW' | 'RED' | 'BLUE' | 'GREEN' | 'ORANGE' | 'PURPLE';
 export type NoteSort = 'createdAt:desc' | 'createdAt:asc' | 'updatedAt:desc' | 'updatedAt:asc';
@@ -23,6 +28,8 @@ export interface NoteRecord {
   position: Vector3;
   orientation: Vector3 | null;
   modelVersion: string;
+  revision?: number;
+  deletedAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -42,6 +49,7 @@ export interface NoteResult {
   position: Vector3;
   orientation: Vector3 | null;
   modelVersion: string;
+  revision?: number;
   creator: NoteCreator;
   createdAt: string;
   updatedAt: string;
@@ -91,7 +99,14 @@ export interface NoteScanContext {
 export interface NoteRepository {
   findScanContext(scanId: string): Promise<NoteScanContext | null>;
   findNoteContext(noteId: string): Promise<NoteScanContext | null>;
+  findOwnedMutationContext?(noteId: string, ownerId: string): Promise<NoteScanContext | null>;
   create(scanId: string, createdById: string, data: NoteCreateInput): Promise<NoteRecord>;
+  createIdempotently?(
+    scanId: string,
+    createdById: string,
+    data: NoteCreateInput,
+    context: IdempotencyContext,
+  ): Promise<IdempotencyResult<NoteResult>>;
   listByScan(
     scanId: string,
     options: NoteListOptions,
@@ -103,11 +118,17 @@ export interface NoteRepository {
     noteId: string,
     userId: string,
   ): Promise<{ record: NoteRecord; role: NoteRole } | null>;
-  update(noteId: string, ownerId: string, data: NoteUpdateInput): Promise<NoteRecord>;
+  update(
+    noteId: string,
+    ownerId: string,
+    expectedRevisionOrData: number | NoteUpdateInput,
+    data?: NoteUpdateInput,
+  ): Promise<NoteRecord>;
   updatePosition(
     noteId: string,
     ownerId: string,
-    data: NotePositionUpdateInput,
+    expectedRevisionOrData: number | NotePositionUpdateInput,
+    data?: NotePositionUpdateInput,
   ): Promise<NoteRecord>;
-  delete(noteId: string, ownerId: string): Promise<void>;
+  delete(noteId: string, ownerId: string, expectedRevision?: number): Promise<number | undefined>;
 }

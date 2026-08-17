@@ -58,6 +58,7 @@ export const ScanAssetMetadataSchema = z.object({
   sizeBytes: z.number().int().nonnegative(),
   checksum: z.string().nullable(),
   modelVersion: z.string().nullable(),
+  revision: z.number().int().positive().default(1),
   uploadedAt: z.iso.datetime().nullable(),
   uploadSessionId: z.uuid(),
   uploadUrlExpiresAt: z.iso.datetime().nullable(),
@@ -71,6 +72,7 @@ export const CreateUploadSessionResponseSchema = z.object({
   status: z.enum(['PENDING', 'UPLOADING', 'UPLOADED', 'FAILED']),
   uploadUrl: z.url(),
   uploadUrlExpiresAt: z.iso.datetime(),
+  revision: z.number().int().positive().default(1),
 });
 
 export const AssetMetadataResponseSchema = ScanAssetMetadataSchema;

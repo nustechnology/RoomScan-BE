@@ -92,6 +92,7 @@ function scanResult(overrides: Partial<ScanResult> = {}): ScanResult {
     assetStatus: 'NONE',
     syncStatus: 'PENDING',
     modelVersion: 1,
+    revision: 1,
     createdAt: NOW.toISOString(),
     updatedAt: NOW.toISOString(),
     permissions: {
@@ -232,6 +233,7 @@ describe('Scan HTTP endpoints', () => {
       const response = await request(app)
         .post(`/api/v1/projects/${PROJECT_ID}/scans`)
         .set('Authorization', `Bearer ${tokenA}`)
+        .set('Idempotency-Key', 'scan-create-1')
         .send({ name: 'Living Room' })
         .expect(201);
       const body = ScanResponseSchema.parse(response.body as unknown);
@@ -258,6 +260,7 @@ describe('Scan HTTP endpoints', () => {
       const response = await request(app)
         .post(`/api/v1/projects/${PROJECT_ID}/scans`)
         .set('Authorization', `Bearer ${tokenA}`)
+        .set('Idempotency-Key', 'scan-create-with-assets')
         .send({
           name: 'Living Room',
           thumbnail: { contentType: 'image/png', sizeBytes: 2048 },
@@ -372,6 +375,7 @@ describe('Scan HTTP endpoints', () => {
       const response = await request(app)
         .post(`/api/v1/projects/${PROJECT_ID}/scans`)
         .set('Authorization', `Bearer ${tokenB}`)
+        .set('Idempotency-Key', 'scan-create-viewer')
         .send({ name: 'Living Room' })
         .expect(404);
       const body = ErrorResponseSchema.parse(response.body as unknown);
@@ -385,6 +389,7 @@ describe('Scan HTTP endpoints', () => {
       const response = await request(app)
         .post(`/api/v1/projects/${PROJECT_ID}/scans`)
         .set('Authorization', `Bearer ${tokenA}`)
+        .set('Idempotency-Key', 'scan-create-error')
         .send({ name: 'Living Room' })
         .expect(500);
       const body = ErrorResponseSchema.parse(response.body as unknown);
@@ -517,18 +522,20 @@ describe('Scan HTTP endpoints', () => {
       const response = await request(app)
         .patch(`/api/v1/scans/${SCAN_ID}`)
         .set('Authorization', `Bearer ${tokenA}`)
+        .set('If-Match', '"1"')
         .send({ name: 'Updated Room' })
         .expect(200);
       const body = ScanResponseSchema.parse(response.body as unknown);
 
       expect(body.name).toBe('Updated Room');
-      expect(update).toHaveBeenCalledWith(USER_A, SCAN_ID, { name: 'Updated Room' });
+      expect(update).toHaveBeenCalledWith(USER_A, SCAN_ID, 1, { name: 'Updated Room' });
     });
 
     it('clears description with null', async () => {
       await request(app)
         .patch(`/api/v1/scans/${SCAN_ID}`)
         .set('Authorization', `Bearer ${tokenA}`)
+        .set('If-Match', '"1"')
         .send({ description: null })
         .expect(200);
     });
@@ -579,6 +586,7 @@ describe('Scan HTTP endpoints', () => {
       const response = await request(app)
         .patch(`/api/v1/scans/${SCAN_ID}`)
         .set('Authorization', `Bearer ${tokenB}`)
+        .set('If-Match', '"1"')
         .send({ name: 'Forbidden' })
         .expect(404);
       const body = ErrorResponseSchema.parse(response.body as unknown);
@@ -592,6 +600,7 @@ describe('Scan HTTP endpoints', () => {
       const response = await request(app)
         .patch(`/api/v1/scans/${SCAN_ID}`)
         .set('Authorization', `Bearer ${tokenA}`)
+        .set('If-Match', '"1"')
         .send({ name: 'Updated' })
         .expect(500);
       const body = ErrorResponseSchema.parse(response.body as unknown);
@@ -606,14 +615,16 @@ describe('Scan HTTP endpoints', () => {
       await request(app)
         .delete(`/api/v1/scans/${SCAN_ID}`)
         .set('Authorization', `Bearer ${tokenA}`)
+        .set('If-Match', '"1"')
         .expect(204);
       await request(app)
         .delete(`/api/v1/scans/${SCAN_ID}`)
         .set('Authorization', `Bearer ${tokenA}`)
+        .set('If-Match', '"1"')
         .expect(204);
 
       expect(remove).toHaveBeenCalledTimes(2);
-      expect(remove).toHaveBeenLastCalledWith(USER_A, SCAN_ID);
+      expect(remove).toHaveBeenLastCalledWith(USER_A, SCAN_ID, 1);
     });
 
     it('hides deletion from a Viewer or unrelated user', async () => {
@@ -622,6 +633,7 @@ describe('Scan HTTP endpoints', () => {
       const response = await request(app)
         .delete(`/api/v1/scans/${SCAN_ID}`)
         .set('Authorization', `Bearer ${tokenB}`)
+        .set('If-Match', '"1"')
         .expect(404);
       const body = ErrorResponseSchema.parse(response.body as unknown);
 

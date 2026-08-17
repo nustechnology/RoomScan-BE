@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { Prisma, type PrismaClient } from '../src/generated/prisma/client.js';
 import { PrismaNoteRepository } from '../src/infrastructure/database/prisma-note-repository.js';
+import type { PrismaIdempotencyExecutor } from '../src/infrastructure/database/prisma-idempotency.js';
 import { NoteNotFoundError } from '../src/modules/note/note.errors.js';
 
 const OWNER_ID = 'eb5d278f-c857-45c7-887d-7be65288cb75';
@@ -26,6 +27,8 @@ const noteSelect = {
   position: true,
   orientation: true,
   modelVersion: true,
+  revision: true,
+  deletedAt: true,
   createdAt: true,
   updatedAt: true,
 };
@@ -44,6 +47,8 @@ function createNoteRow(overrides: Record<string, unknown> = {}) {
     position: { x: 1.5, y: -2, z: 3.25 },
     orientation: { x: 0, y: 0, z: 1 },
     modelVersion: '1',
+    revision: 1,
+    deletedAt: null,
     createdAt: NOW,
     updatedAt: NOW,
     scan: {
@@ -62,6 +67,7 @@ function createClient() {
     findMany: vi.fn().mockResolvedValue([createNoteRow()]),
     count: vi.fn().mockResolvedValue(1),
     update: vi.fn().mockResolvedValue(createNoteRow()),
+    updateMany: vi.fn().mockResolvedValue({ count: 1 }),
     delete: vi.fn().mockResolvedValue({}),
   };
   const scan = {
@@ -155,19 +161,18 @@ describe('PrismaNoteRepository', () => {
       modelVersion: '1',
     });
 
-    expect(note.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: {
-          scanId: SCAN_ID,
-          createdById: OWNER_ID,
-          content: 'Cabinet hinge is loose',
-          color: 'YELLOW',
-          position: { x: 1.5, y: -2, z: 3.25 },
-          orientation: Prisma.JsonNull,
-          modelVersion: '1',
-        },
-      }),
-    );
+    const [createArguments] = note.create.mock.calls[0] as unknown as [
+      { data: Record<string, unknown> },
+    ];
+    expect(createArguments.data).toMatchObject({
+      scanId: SCAN_ID,
+      createdById: OWNER_ID,
+      content: 'Cabinet hinge is loose',
+      color: 'YELLOW',
+      position: { x: 1.5, y: -2, z: 3.25 },
+      orientation: Prisma.JsonNull,
+      modelVersion: '1',
+    });
     expect(scan.update).toHaveBeenCalledOnce();
     expect(project.update).toHaveBeenCalledOnce();
     expect(result.id).toBe(NOTE_ID);
@@ -206,14 +211,14 @@ describe('PrismaNoteRepository', () => {
 
     expect(note.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { scanId: SCAN_ID, scan: { deletedAt: null } },
+        where: { scanId: SCAN_ID, deletedAt: null, scan: { deletedAt: null } },
         orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
         skip: 0,
         take: 20,
       }),
     );
     expect(note.count).toHaveBeenCalledWith({
-      where: { scanId: SCAN_ID, scan: { deletedAt: null } },
+      where: { scanId: SCAN_ID, deletedAt: null, scan: { deletedAt: null } },
     });
     expect(result.total).toBe(3);
     expect(result.items).toHaveLength(1);
@@ -243,6 +248,7 @@ describe('PrismaNoteRepository', () => {
     expect(note.findFirst).toHaveBeenCalledWith({
       where: {
         id: NOTE_ID,
+        deletedAt: null,
         scan: {
           deletedAt: null,
           project: {
@@ -356,6 +362,25 @@ describe('PrismaNoteRepository', () => {
     expect(note.delete).toHaveBeenCalledWith({ where: { id: NOTE_ID } });
     expect(scan.update).toHaveBeenCalledOnce();
     expect(project.update).toHaveBeenCalledOnce();
+  });
+
+  it('soft-deletes a note with an atomic revision predicate', async () => {
+    const { client, note } = createClient();
+    note.findFirst.mockResolvedValueOnce(createNoteRow({ revision: 3, deletedAt: null }));
+    const repository = new PrismaNoteRepository(client, {} as unknown as PrismaIdempotencyExecutor);
+
+    await expect(repository.delete(NOTE_ID, OWNER_ID, 3)).resolves.toBe(4);
+
+    expect(note.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: NOTE_ID,
+          revision: 3,
+          deletedAt: null,
+          scan: { project: { ownerId: OWNER_ID } },
+        },
+      }),
+    );
   });
 
   it('hides deletion from a Viewer or unrelated user', async () => {

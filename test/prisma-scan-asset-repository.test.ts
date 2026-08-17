@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { Prisma, type PrismaClient } from '../src/generated/prisma/client.js';
 import { PrismaScanAssetRepository } from '../src/infrastructure/database/prisma-scan-asset-repository.js';
+import type { PrismaIdempotencyExecutor } from '../src/infrastructure/database/prisma-idempotency.js';
 
 const SCAN_ID = 'f1e2d3c4-a5b6-7890-abcd-ef1234567890';
 const ASSET_ID = 'a1b2c3d4-e5f6-4890-abcd-ef1234567890';
@@ -185,6 +186,46 @@ describe('PrismaScanAssetRepository', () => {
       data: { status: 'UPLOADED', uploadedAt: NOW },
       select: scanAssetSelect,
     });
+  });
+
+  it('persists the thumbnail URL on the scan inside the asset update transaction', async () => {
+    const scanAssetUpdate = vi.fn().mockResolvedValue(createAssetRow({ assetType: 'THUMBNAIL' }));
+    const scanUpdate = vi.fn().mockResolvedValue({});
+    const scanFindFirst = vi.fn().mockResolvedValue(null);
+    const transactionClient = {
+      scanAsset: { update: scanAssetUpdate },
+      scan: { update: scanUpdate, findFirst: scanFindFirst },
+    };
+    const $transaction = vi.fn(async (operation: unknown) => {
+      if (Array.isArray(operation)) {
+        return Promise.all(operation);
+      }
+      return (operation as (transaction: unknown) => Promise<unknown>)(transactionClient);
+    });
+    const client = {
+      scanAsset: {},
+      $transaction,
+    } as unknown as Pick<PrismaClient, 'scanAsset' | '$transaction'>;
+    const repository = new PrismaScanAssetRepository(client, {} as PrismaIdempotencyExecutor);
+
+    await repository.update(ASSET_ID, {
+      status: 'UPLOADED',
+      uploadedAt: NOW,
+      thumbnailUrl: 'http://storage/display/thumbnail',
+    });
+
+    const [assetUpdate] = scanAssetUpdate.mock.calls[0] as unknown as [
+      { data: Record<string, unknown> },
+    ];
+    expect(assetUpdate.data).toMatchObject({ status: 'UPLOADED', uploadedAt: NOW });
+    expect(assetUpdate.data).not.toHaveProperty('thumbnailUrl');
+
+    const [scanUpdateArg] = scanUpdate.mock.calls[0] as unknown as [
+      { where: { id: string }; data: { thumbnail: string; updatedAt: Date } },
+    ];
+    expect(scanUpdateArg.where).toEqual({ id: SCAN_ID });
+    expect(scanUpdateArg.data.thumbnail).toBe('http://storage/display/thumbnail');
+    expect(scanUpdateArg.data.updatedAt).toBeInstanceOf(Date);
   });
 
   it('lists assets by scan with stable ordering', async () => {

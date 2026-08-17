@@ -276,6 +276,7 @@ describe('Share HTTP endpoints', () => {
       viewers: [
         {
           userId: USER_RECIPIENT,
+          revision: 1,
           recipientUser: { id: USER_RECIPIENT, email: 'recipient@example.com' },
           grantedAt: NOW.toISOString(),
         },
@@ -284,6 +285,7 @@ describe('Share HTTP endpoints', () => {
     revokeViewer.mockResolvedValue({
       projectId: PROJECT_ID,
       userId: USER_RECIPIENT,
+      revision: 2,
       revokedAt: NOW.toISOString(),
     });
   });
@@ -293,6 +295,7 @@ describe('Share HTTP endpoints', () => {
       const response = await request(app)
         .post(`/api/v1/projects/${PROJECT_ID}/invitations`)
         .set('Authorization', `Bearer ${ownerToken}`)
+        .set('Idempotency-Key', 'invitation-create-1')
         .send({ recipientEmail: RECIPIENT_EMAIL, expiresInSeconds: 3600 })
         .expect(201);
 
@@ -315,6 +318,7 @@ describe('Share HTTP endpoints', () => {
       await request(app)
         .post(`/api/v1/projects/${PROJECT_ID}/invitations`)
         .set('Authorization', `Bearer ${ownerToken}`)
+        .set('Idempotency-Key', 'invitation-create-default-expiry')
         .send({ recipientEmail: RECIPIENT_EMAIL })
         .expect(201);
 
@@ -329,6 +333,7 @@ describe('Share HTTP endpoints', () => {
       const response = await request(app)
         .post(`/api/v1/projects/${PROJECT_ID}/invitations`)
         .set('Authorization', `Bearer ${ownerToken}`)
+        .set('Idempotency-Key', 'invitation-create-duplicate')
         .send({ recipientEmail: RECIPIENT_EMAIL })
         .expect(409);
 
@@ -343,6 +348,7 @@ describe('Share HTTP endpoints', () => {
       const response = await request(app)
         .post(`/api/v1/projects/${PROJECT_ID}/invitations`)
         .set('Authorization', `Bearer ${recipientToken}`)
+        .set('Idempotency-Key', 'invitation-create-non-owner')
         .send({ recipientEmail: RECIPIENT_EMAIL })
         .expect(403);
 
@@ -355,6 +361,7 @@ describe('Share HTTP endpoints', () => {
       const response = await request(app)
         .post(`/api/v1/projects/${PROJECT_ID}/invitations`)
         .set('Authorization', `Bearer ${ownerToken}`)
+        .set('Idempotency-Key', 'invitation-create-missing-project')
         .send({ recipientEmail: RECIPIENT_EMAIL })
         .expect(404);
 
@@ -369,6 +376,7 @@ describe('Share HTTP endpoints', () => {
       const response = await request(app)
         .post(`/api/v1/projects/${PROJECT_ID}/invitations`)
         .set('Authorization', `Bearer ${ownerToken}`)
+        .set('Idempotency-Key', 'invitation-create-not-ready')
         .send({ recipientEmail: RECIPIENT_EMAIL })
         .expect(409);
 
@@ -666,6 +674,7 @@ describe('Share HTTP endpoints', () => {
         viewers: [
           {
             userId: USER_RECIPIENT,
+            revision: 1,
             recipientUser: { id: USER_RECIPIENT, email: 'recipient@example.com' },
             grantedAt: NOW.toISOString(),
           },
@@ -697,6 +706,7 @@ describe('Share HTTP endpoints', () => {
       expect(body).toEqual({
         projectId: PROJECT_ID,
         userId: USER_RECIPIENT,
+        revision: 2,
         revokedAt: NOW.toISOString(),
       });
       expect(revokeViewer).toHaveBeenCalledWith(USER_OWNER, PROJECT_ID, USER_RECIPIENT);

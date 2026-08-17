@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { Prisma, type PrismaClient } from '../src/generated/prisma/client.js';
 import { PrismaScanRepository } from '../src/infrastructure/database/prisma-scan-repository.js';
+import type { PrismaIdempotencyExecutor } from '../src/infrastructure/database/prisma-idempotency.js';
+import { IdempotencyKeyConflictError } from '../src/common/idempotency/idempotency.errors.js';
 import { ScanNotFoundError } from '../src/modules/scan/scan.errors.js';
 
 const OWNER_ID = 'eb5d278f-c857-45c7-887d-7be65288cb75';
@@ -27,13 +29,14 @@ const scanSelect = {
   assetStatus: true,
   syncStatus: true,
   modelVersion: true,
+  revision: true,
   clientMutationId: true,
   deletedAt: true,
   createdAt: true,
   updatedAt: true,
   _count: {
     select: {
-      notes: true,
+      notes: { where: { deletedAt: null } },
     },
   },
 };
@@ -53,6 +56,7 @@ function createScanRow(overrides: Record<string, unknown> = {}) {
     assetStatus: 'NONE',
     syncStatus: 'PENDING',
     modelVersion: 1,
+    revision: 1,
     clientMutationId: null,
     deletedAt: null,
     createdAt: NOW,
@@ -103,15 +107,18 @@ describe('PrismaScanRepository', () => {
       description: null,
     });
 
-    expect(scan.create).toHaveBeenCalledWith({
-      data: {
-        projectId: PROJECT_ID,
-        createdById: OWNER_ID,
-        name: 'Living Room',
-        description: null,
-      },
-      select: scanSelect,
+    const [createArguments] = scan.create.mock.calls[0] as unknown as [
+      { data: Record<string, unknown>; select: unknown },
+    ];
+    expect(createArguments.data).toMatchObject({
+      projectId: PROJECT_ID,
+      createdById: OWNER_ID,
+      name: 'Living Room',
+      description: null,
     });
+    expect(createArguments.data.createdAt).toBeInstanceOf(Date);
+    expect(createArguments.data.updatedAt).toBeInstanceOf(Date);
+    expect(createArguments.select).toEqual(scanSelect);
     expect(result.created).toBe(true);
     expect(result.record.name).toBe('Living Room');
     expect(result.record.projectId).toBe(PROJECT_ID);
@@ -136,17 +143,121 @@ describe('PrismaScanRepository', () => {
         },
       }),
     );
-    expect(scan.create).toHaveBeenCalledWith({
-      data: {
-        projectId: PROJECT_ID,
-        createdById: OWNER_ID,
-        name: 'Living Room',
-        description: null,
-        clientMutationId: 'mutation-abc',
-      },
-      select: scanSelect,
+    const [createArguments] = scan.create.mock.calls[0] as unknown as [
+      { data: Record<string, unknown>; select: unknown },
+    ];
+    expect(createArguments.data).toMatchObject({
+      projectId: PROJECT_ID,
+      createdById: OWNER_ID,
+      name: 'Living Room',
+      description: null,
+      clientMutationId: 'mutation-abc',
     });
+    expect(createArguments.data.createdAt).toBeInstanceOf(Date);
+    expect(createArguments.data.updatedAt).toBeInstanceOf(Date);
+    expect(createArguments.select).toEqual(scanSelect);
     expect(result.created).toBe(true);
+  });
+
+  it('creates scan metadata and optional asset sessions inside the receipt transaction', async () => {
+    const { client, scan } = createClient();
+    const scanAssetCreate = vi.fn().mockResolvedValue({});
+    const execute = vi.fn(
+      async (
+        _context: unknown,
+        statusCode: number,
+        work: (transaction: unknown) => Promise<unknown>,
+      ) => ({
+        body: await work({ scan, scanAsset: { create: scanAssetCreate } }),
+        statusCode,
+        replayed: false,
+      }),
+    );
+    const repository = new PrismaScanRepository(client, {
+      execute,
+    } as unknown as PrismaIdempotencyExecutor);
+    const context = {
+      userId: OWNER_ID,
+      operation: 'CREATE_SCAN' as const,
+      parentScope: `project:${PROJECT_ID}`,
+      keyHash: 'key-hash',
+      requestHash: 'request-hash',
+    };
+    const assetId = 'c0ffee00-0000-4000-8000-000000000001';
+
+    const result = await repository.createWithUploadsIdempotently(
+      SCAN_ID,
+      PROJECT_ID,
+      OWNER_ID,
+      { name: 'Living Room', description: null },
+      [
+        {
+          data: {
+            id: assetId,
+            scanId: SCAN_ID,
+            assetType: 'MODEL',
+            contentType: 'model/usdz',
+            sizeBytes: 20_000_000,
+            checksum: 'checksum',
+            modelVersion: '1',
+            storageKey: `scans/${SCAN_ID}/model`,
+            idempotencyKey: null,
+            uploadUrlExpiresAt: NOW,
+          },
+          response: {
+            uploadSessionId: assetId,
+            assetId,
+            uploadUrl: 'https://storage/upload',
+            uploadUrlExpiresAt: NOW.toISOString(),
+          },
+        },
+      ],
+      context,
+    );
+
+    expect(execute).toHaveBeenCalledWith(context, 201, expect.any(Function));
+    const [scanArguments] = scan.create.mock.calls[0] as unknown as [
+      { data: Record<string, unknown> },
+    ];
+    expect(scanArguments.data).toMatchObject({ id: SCAN_ID, assetStatus: 'PENDING' });
+    const [assetArguments] = scanAssetCreate.mock.calls[0] as unknown as [
+      { data: Record<string, unknown> },
+    ];
+    expect(assetArguments.data).toMatchObject({ id: assetId, idempotencyKey: null });
+    expect(result.body.uploads?.scanFile?.assetId).toBe(assetId);
+  });
+
+  it('maps a historical legacy-key collision during transactional scan creation to 409', async () => {
+    const { client } = createClient();
+    const conflict = new Prisma.PrismaClientKnownRequestError('unique constraint', {
+      code: 'P2002',
+      clientVersion: 'test',
+      meta: { target: ['projectId', 'clientMutationId'] },
+    });
+    const repository = new PrismaScanRepository(client, {
+      execute: vi.fn().mockRejectedValue(conflict),
+    } as unknown as PrismaIdempotencyExecutor);
+
+    await expect(
+      repository.createWithUploadsIdempotently(
+        SCAN_ID,
+        PROJECT_ID,
+        OWNER_ID,
+        {
+          name: 'Living Room',
+          description: null,
+          clientMutationId: 'historical-mutation',
+        },
+        [],
+        {
+          userId: OWNER_ID,
+          operation: 'CREATE_SCAN',
+          parentScope: `project:${PROJECT_ID}`,
+          keyHash: 'key-hash',
+          requestHash: 'request-hash',
+        },
+      ),
+    ).rejects.toBeInstanceOf(IdempotencyKeyConflictError);
   });
 
   it('returns an existing active scan as not-created when clientMutationId collides in the project', async () => {
@@ -172,32 +283,21 @@ describe('PrismaScanRepository', () => {
     expect(result.record.id).toBe(SCAN_ID);
   });
 
-  it('restores a deleted scan applying submitted fields and reports it as not-created', async () => {
-    const { client, scan, transaction } = createClient();
-    scan.findFirst
-      .mockResolvedValueOnce(createScanRow({ deletedAt: new Date('2026-08-01T00:00:00.000Z') }))
-      .mockResolvedValueOnce(createScanRow({ name: 'Renamed Room' }));
+  it('never restores a deleted scan when the legacy clientMutationId collides', async () => {
+    const { client, scan } = createClient();
+    scan.findFirst.mockResolvedValueOnce(
+      createScanRow({ deletedAt: new Date('2026-08-01T00:00:00.000Z') }),
+    );
     const repository = new PrismaScanRepository(client);
 
-    const result = await repository.create(PROJECT_ID, OWNER_ID, {
-      name: 'Renamed Room',
-      description: 'Restored after soft delete',
-      clientMutationId: 'deleted-mutation',
-    });
-
-    expect(transaction).toHaveBeenCalledOnce();
-    expect(scan.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { id: SCAN_ID },
-        data: {
-          deletedAt: null,
-          name: 'Renamed Room',
-          description: 'Restored after soft delete',
-        },
+    await expect(
+      repository.create(PROJECT_ID, OWNER_ID, {
+        name: 'Renamed Room',
+        description: 'Must stay deleted',
+        clientMutationId: 'deleted-mutation',
       }),
-    );
-    expect(result.created).toBe(false);
-    expect(result.record.name).toBe('Renamed Room');
+    ).rejects.toBeInstanceOf(IdempotencyKeyConflictError);
+    expect(scan.update).not.toHaveBeenCalled();
   });
 
   it('returns the existing scan when a concurrent duplicate insert raises P2002', async () => {
@@ -372,7 +472,9 @@ describe('PrismaScanRepository', () => {
 
   it('soft-deletes a scan and touches the parent project updatedAt', async () => {
     const { client, scan, project } = createClient();
-    scan.findFirst.mockResolvedValueOnce(createScanRow({ projectId: PROJECT_ID, deletedAt: null }));
+    scan.findFirst.mockResolvedValueOnce(
+      createScanRow({ projectId: PROJECT_ID, revision: undefined, deletedAt: null }),
+    );
     const repository = new PrismaScanRepository(client);
 
     await repository.softDelete(SCAN_ID, OWNER_ID);
@@ -390,9 +492,32 @@ describe('PrismaScanRepository', () => {
     expect(projectUpdate?.data.updatedAt).toBeInstanceOf(Date);
   });
 
+  it('claims an Owner delete with an atomic revision predicate', async () => {
+    const { client, scan } = createClient();
+    scan.findFirst.mockResolvedValueOnce(
+      createScanRow({ revision: 3, deletedAt: null, notes: [], assets: [] }),
+    );
+    const repository = new PrismaScanRepository(client);
+
+    await expect(repository.softDelete(SCAN_ID, OWNER_ID, 3)).resolves.toBe(4);
+
+    expect(scan.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: SCAN_ID,
+          revision: 3,
+          deletedAt: null,
+          project: { ownerId: OWNER_ID },
+        },
+      }),
+    );
+  });
+
   it('keeps repeated deletion idempotent for the same Owner', async () => {
     const { client, scan, project, transaction } = createClient();
-    scan.findFirst.mockResolvedValueOnce(createScanRow({ projectId: PROJECT_ID, deletedAt: NOW }));
+    scan.findFirst.mockResolvedValueOnce(
+      createScanRow({ projectId: PROJECT_ID, revision: undefined, deletedAt: NOW }),
+    );
     const repository = new PrismaScanRepository(client);
 
     await repository.softDelete(SCAN_ID, OWNER_ID);

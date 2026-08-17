@@ -26,6 +26,7 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate:dev": "prisma migrate dev",
     "prisma:migrate:deploy": "prisma migrate deploy",
+    "prisma:migrate:reset": "node scripts/prisma-migrate-reset.mjs",
     "prisma:studio": "prisma studio",
     "seed:local": "tsx prisma/seed-local.ts",
     "prepare": "node .husky/install.mjs"

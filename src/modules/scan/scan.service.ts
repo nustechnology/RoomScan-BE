@@ -1,8 +1,14 @@
 import { ProjectNotFoundError } from '../project/project.errors.js';
+import type {
+  IdempotencyGateway,
+  IdempotencyResult,
+} from '../../common/idempotency/idempotency.types.js';
 import type { ProjectPermissionService } from '../project/project.permissions.js';
 import { ScanNotFoundError } from './scan.errors.js';
 import type {
   ScanCreateInput,
+  ScanCreateUploadDescriptor,
+  ScanCreateWithUploadsResult,
   ScanListOptions,
   ScanListResult,
   ScanRecord,
@@ -10,11 +16,14 @@ import type {
   ScanResult,
   ScanRole,
   ScanUpdateInput,
+  ScanUploadPreparer,
 } from './scan.types.js';
 
 export interface ScanServiceDependencies {
   repository: ScanRepository;
   permissions: ProjectPermissionService;
+  idempotency?: IdempotencyGateway;
+  uploadPreparer?: ScanUploadPreparer;
 }
 
 export interface ScanCreateOutcome {
@@ -45,6 +54,7 @@ function toResult(record: ScanRecord, role: ScanRole): ScanResult {
     assetStatus: record.assetStatus,
     syncStatus: record.syncStatus,
     modelVersion: record.modelVersion,
+    revision: record.revision ?? 1,
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString(),
     permissions: permissionsFor(role),
@@ -54,10 +64,14 @@ function toResult(record: ScanRecord, role: ScanRole): ScanResult {
 export class ScanService {
   readonly #repository: ScanRepository;
   readonly #permissions: ProjectPermissionService;
+  readonly #idempotency: IdempotencyGateway | undefined;
+  readonly #uploadPreparer: ScanUploadPreparer | undefined;
 
-  constructor({ repository, permissions }: ScanServiceDependencies) {
+  constructor({ repository, permissions, idempotency, uploadPreparer }: ScanServiceDependencies) {
     this.#repository = repository;
     this.#permissions = permissions;
+    this.#idempotency = idempotency;
+    this.#uploadPreparer = uploadPreparer;
   }
 
   async create(
@@ -76,6 +90,79 @@ export class ScanService {
 
     const { record, created } = await this.#repository.create(projectId, userId, data);
     return { scan: toResult(record, 'OWNER'), created };
+  }
+
+  async createIdempotently(
+    userId: string,
+    projectId: string,
+    data: ScanCreateInput,
+    key: string,
+    requestPayload: unknown = data,
+  ): Promise<IdempotencyResult<ScanResult>> {
+    if (this.#idempotency === undefined || this.#repository.createIdempotently === undefined) {
+      throw new Error('Scan idempotency is not configured');
+    }
+    const context = this.#idempotency.createContext({
+      userId,
+      operation: 'CREATE_SCAN',
+      parentScope: `project:${projectId}`,
+      key,
+      request: requestPayload,
+    });
+    const replay = await this.#idempotency.lookup<ScanResult>(context);
+    if (replay !== null) return replay;
+
+    try {
+      await this.#permissions.requireOwner(projectId, userId);
+    } catch (error) {
+      if (error instanceof ProjectNotFoundError) throw new ScanNotFoundError();
+      throw error;
+    }
+    return await this.#repository.createIdempotently(projectId, userId, data, context);
+  }
+
+  async createWithUploadsIdempotently(
+    userId: string,
+    projectId: string,
+    data: ScanCreateInput,
+    uploads: ScanCreateUploadDescriptor[],
+    key: string,
+    requestPayload: unknown,
+  ): Promise<IdempotencyResult<ScanCreateWithUploadsResult>> {
+    if (
+      this.#idempotency === undefined ||
+      this.#uploadPreparer === undefined ||
+      this.#repository.createWithUploadsIdempotently === undefined
+    ) {
+      throw new Error('Transactional scan upload creation is not configured');
+    }
+    const context = this.#idempotency.createContext({
+      userId,
+      operation: 'CREATE_SCAN',
+      parentScope: `project:${projectId}`,
+      key,
+      request: requestPayload,
+    });
+    const replay = await this.#idempotency.lookup<ScanCreateWithUploadsResult>(context);
+    if (replay !== null) return replay;
+
+    try {
+      await this.#permissions.requireOwner(projectId, userId);
+    } catch (error) {
+      if (error instanceof ProjectNotFoundError) throw new ScanNotFoundError();
+      throw error;
+    }
+
+    const scanId = randomUUID();
+    const prepared = await this.#uploadPreparer.prepareScanCreateUploads(scanId, uploads);
+    return await this.#repository.createWithUploadsIdempotently(
+      scanId,
+      projectId,
+      userId,
+      data,
+      prepared,
+      context,
+    );
   }
 
   async list(userId: string, projectId: string, options: ScanListOptions): Promise<ScanListResult> {
@@ -113,42 +200,31 @@ export class ScanService {
     return toResult(result.record, result.role);
   }
 
-  async update(userId: string, scanId: string, data: ScanUpdateInput): Promise<ScanResult> {
-    const projectId = await this.#repository.findProjectId(scanId);
-
-    if (projectId === null) {
-      throw new ScanNotFoundError();
-    }
-
-    try {
-      await this.#permissions.requireOwner(projectId, userId);
-    } catch (error) {
-      if (error instanceof ProjectNotFoundError) {
-        throw new ScanNotFoundError();
-      }
-      throw error;
-    }
-
-    const record = await this.#repository.update(scanId, userId, data);
+  async update(
+    userId: string,
+    scanId: string,
+    expectedRevisionOrData: number | ScanUpdateInput,
+    maybeData?: ScanUpdateInput,
+  ): Promise<ScanResult> {
+    const expectedRevision =
+      typeof expectedRevisionOrData === 'number' ? expectedRevisionOrData : undefined;
+    const data =
+      typeof expectedRevisionOrData === 'number' ? (maybeData ?? {}) : expectedRevisionOrData;
+    const record =
+      expectedRevision === undefined
+        ? await this.#repository.update(scanId, userId, data)
+        : await this.#repository.update(scanId, userId, expectedRevision, data);
     return toResult(record, 'OWNER');
   }
 
-  async delete(userId: string, scanId: string): Promise<void> {
-    const projectId = await this.#repository.findProjectId(scanId);
-
-    if (projectId === null) {
-      throw new ScanNotFoundError();
-    }
-
-    try {
-      await this.#permissions.requireOwner(projectId, userId);
-    } catch (error) {
-      if (error instanceof ProjectNotFoundError) {
-        throw new ScanNotFoundError();
-      }
-      throw error;
-    }
-
-    await this.#repository.softDelete(scanId, userId);
+  async delete(
+    userId: string,
+    scanId: string,
+    expectedRevision?: number,
+  ): Promise<number | undefined> {
+    return expectedRevision === undefined
+      ? await this.#repository.softDelete(scanId, userId)
+      : await this.#repository.softDelete(scanId, userId, expectedRevision);
   }
 }
+import { randomUUID } from 'node:crypto';

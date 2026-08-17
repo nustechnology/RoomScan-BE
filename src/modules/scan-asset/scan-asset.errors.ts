@@ -39,3 +39,10 @@ export class InvalidAssetRequestError extends Error {
     this.name = 'InvalidAssetRequestError';
   }
 }
+
+export class ModelAlreadyCompletedError extends Error {
+  constructor() {
+    super('Completed scan model cannot be overwritten');
+    this.name = 'ModelAlreadyCompletedError';
+  }
+}

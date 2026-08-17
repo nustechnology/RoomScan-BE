@@ -94,6 +94,16 @@ const environmentBooleanSchema = z
   .enum(['true', 'false'])
   .default('false')
   .transform((value) => value === 'true');
+const syncCryptoKeySchema = z
+  .string()
+  .trim()
+  .refine((value) => {
+    try {
+      return Buffer.from(value, 'base64').length === 32;
+    } catch {
+      return false;
+    }
+  }, 'SYNC_CRYPTO_KEY must be a base64-encoded 32-byte key');
 
 export const environmentSchema = z
   .object({
@@ -114,6 +124,7 @@ export const environmentSchema = z
     APPLE_CLIENT_ID: z.string().trim().min(1).max(255),
     AUTH_ACCESS_TOKEN_SECRET: z.string().min(32),
     AUTH_REFRESH_TOKEN_SECRET: z.string().min(32),
+    SYNC_CRYPTO_KEY: syncCryptoKeySchema,
     AUTH_ACCESS_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(3600),
     AUTH_REFRESH_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(2_592_000),
     LOCAL_TEST_AUTH_ENABLED: environmentBooleanSchema,
@@ -242,6 +253,7 @@ export interface AppConfig {
   appleClientId: string;
   accessTokenSecret: string;
   refreshTokenSecret: string;
+  syncCryptoKey?: string;
   accessTokenTtlSeconds: number;
   refreshTokenTtlSeconds: number;
   localTestAuthEnabled: boolean;
@@ -293,6 +305,7 @@ export function loadConfig(input: NodeJS.ProcessEnv = process.env): AppConfig {
     appleClientId: environment.APPLE_CLIENT_ID,
     accessTokenSecret: environment.AUTH_ACCESS_TOKEN_SECRET,
     refreshTokenSecret: environment.AUTH_REFRESH_TOKEN_SECRET,
+    syncCryptoKey: environment.SYNC_CRYPTO_KEY,
     accessTokenTtlSeconds: environment.AUTH_ACCESS_TOKEN_TTL_SECONDS,
     refreshTokenTtlSeconds: environment.AUTH_REFRESH_TOKEN_TTL_SECONDS,
     localTestAuthEnabled: environment.LOCAL_TEST_AUTH_ENABLED,

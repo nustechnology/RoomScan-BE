@@ -1,7 +1,11 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 
 import type { Logger } from 'pino';
 
+import type {
+  IdempotencyGateway,
+  IdempotencyResult,
+} from '../../common/idempotency/idempotency.types.js';
 import type { Mailer } from '../../infrastructure/mail/mailer.types.js';
 import { ProjectNotFoundError } from '../project/project.errors.js';
 import { buildInvitationEmail } from './share.email.js';
@@ -39,6 +43,7 @@ export interface ShareServiceDependencies {
   clock?: () => Date;
   invitationTtlSeconds: number;
   invitationBaseUrl: string;
+  idempotency?: IdempotencyGateway;
 }
 
 export function generateInvitationToken(): string {
@@ -56,6 +61,7 @@ export class ShareService {
   readonly #clock: () => Date;
   readonly #invitationTtlSeconds: number;
   readonly #invitationBaseUrl: string;
+  readonly #idempotency: IdempotencyGateway | undefined;
 
   constructor({
     repository,
@@ -64,6 +70,7 @@ export class ShareService {
     clock,
     invitationTtlSeconds,
     invitationBaseUrl,
+    idempotency,
   }: ShareServiceDependencies) {
     this.#repository = repository;
     this.#mailer = mailer;
@@ -71,6 +78,7 @@ export class ShareService {
     this.#clock = clock ?? (() => new Date());
     this.#invitationTtlSeconds = invitationTtlSeconds;
     this.#invitationBaseUrl = invitationBaseUrl;
+    this.#idempotency = idempotency;
   }
 
   #viewStatus(record: InvitationRecord): InvitationViewStatus {
@@ -197,6 +205,74 @@ export class ShareService {
       status: 'PENDING',
       sentAt: now.toISOString(),
     };
+  }
+
+  async createInvitationIdempotently(
+    userId: string,
+    projectId: string,
+    data: InvitationCreateInput,
+    key: string,
+  ): Promise<IdempotencyResult<InvitationCreateResult>> {
+    if (
+      this.#idempotency === undefined ||
+      this.#repository.createInvitationIdempotently === undefined
+    ) {
+      throw new Error('Invitation idempotency is not configured');
+    }
+    const context = this.#idempotency.createContext({
+      userId,
+      operation: 'CREATE_INVITATION',
+      parentScope: `project:${projectId}`,
+      key,
+      request: data,
+    });
+    const replay = await this.#idempotency.lookup<InvitationCreateResult>(context);
+    if (replay !== null) return replay;
+
+    const info = await this.#repository.findProjectInfo(projectId);
+    if (info === null) throw new ProjectNotFoundError();
+    if (info.ownerId !== userId) throw new NotOwnerError();
+    if (!(await this.#repository.hasUploadedModel(projectId))) {
+      throw new ProjectNotShareableError();
+    }
+
+    const now = this.#clock();
+    const ttlSeconds = data.expiresInSeconds ?? this.#invitationTtlSeconds;
+    const expiresAt = new Date(now.getTime() + ttlSeconds * 1000);
+    const rawToken = generateInvitationToken();
+    const invitationId = randomUUID();
+    const invitationUrl = `${this.#invitationBaseUrl}/invitations/${rawToken}`;
+    const responseBody: InvitationCreateResult = {
+      invitationId,
+      invitationUrl,
+      recipientEmail: data.recipientEmail,
+      expiresAt: expiresAt.toISOString(),
+      status: 'PENDING',
+      sentAt: now.toISOString(),
+    };
+    const result = await this.#repository.createInvitationIdempotently(
+      {
+        id: invitationId,
+        projectId,
+        createdById: userId,
+        recipientEmail: data.recipientEmail,
+        tokenHash: hashInvitationToken(rawToken),
+        expiresAt,
+        sentAt: now,
+      },
+      context,
+      responseBody,
+    );
+    if (!result.replayed) {
+      await this.#sendInvitationEmail({
+        recipientEmail: data.recipientEmail,
+        ownerDisplay: info.ownerEmail ?? 'the project owner',
+        entityName: info.name,
+        invitationUrl,
+        expiresInSeconds: ttlSeconds,
+      });
+    }
+    return result;
   }
 
   async previewInvitation(rawToken: string, userId?: string): Promise<InvitationPreviewResult> {
@@ -406,6 +482,7 @@ export class ShareService {
       })),
       viewers: viewers.map((viewer) => ({
         userId: viewer.userId,
+        revision: viewer.revision,
         recipientUser: viewer.user,
         grantedAt: viewer.grantedAt.toISOString(),
       })),
@@ -432,6 +509,7 @@ export class ShareService {
     return {
       projectId,
       userId: targetUserId,
+      revision: result.revision,
       revokedAt: result.revokedAt.toISOString(),
     };
   }

@@ -1,3 +1,8 @@
+import type {
+  IdempotencyContext,
+  IdempotencyResult,
+} from '../../common/idempotency/idempotency.types.js';
+
 export type InvitationStatus = 'PENDING' | 'ACCEPTED' | 'DECLINED' | 'REVOKED';
 export type InvitationViewStatus = 'PENDING' | 'EXPIRED' | 'ACCEPTED' | 'DECLINED' | 'REVOKED';
 
@@ -97,6 +102,7 @@ export interface PendingInvitationResult {
 
 export interface ViewerResult {
   userId: string;
+  revision: number;
   recipientUser: {
     id: string;
     email: string | null;
@@ -112,6 +118,7 @@ export interface SharesListResult {
 export interface ViewerRevokeResult {
   projectId: string;
   userId: string;
+  revision: number;
   revokedAt: string;
 }
 
@@ -133,6 +140,19 @@ export interface ShareRepository {
     expiresAt: Date;
     sentAt: Date;
   }): Promise<InvitationRecord>;
+  createInvitationIdempotently?(
+    data: {
+      id: string;
+      projectId: string;
+      createdById: string;
+      recipientEmail: string;
+      tokenHash: string;
+      expiresAt: Date;
+      sentAt: Date;
+    },
+    context: IdempotencyContext,
+    result: InvitationCreateResult,
+  ): Promise<IdempotencyResult<InvitationCreateResult>>;
   findByTokenHash(tokenHash: string): Promise<InvitationWithProject | null>;
   findInvitationById(id: string): Promise<InvitationRecord | null>;
   acceptInvitation(
@@ -149,14 +169,17 @@ export interface ShareRepository {
   ): Promise<InvitationRecord | null>;
   listPendingByProject(projectId: string): Promise<InvitationRecord[]>;
   findActiveViewerAccess(projectId: string, userId: string): Promise<{ id: string } | null>;
-  listActiveViewers(
-    projectId: string,
-  ): Promise<
-    Array<{ userId: string; user: { id: string; email: string | null }; grantedAt: Date }>
+  listActiveViewers(projectId: string): Promise<
+    Array<{
+      userId: string;
+      revision: number;
+      user: { id: string; email: string | null };
+      grantedAt: Date;
+    }>
   >;
   revokeViewerAccess(
     projectId: string,
     userId: string,
     revokedAt: Date,
-  ): Promise<{ revokedAt: Date } | null>;
+  ): Promise<{ revokedAt: Date; revision: number } | null>;
 }

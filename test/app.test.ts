@@ -278,6 +278,41 @@ describe('RoomScan HTTP application', () => {
     expect(body.paths).toHaveProperty('/api/v1/health');
     expect(body.paths).toHaveProperty('/api/v1/ready');
     expect(body.paths).toHaveProperty('/api/v1/auth/apple');
+    expect(body.paths).toHaveProperty('/api/v1/sync/changes');
+    expect(body.paths).toHaveProperty('/api/v1/sync/status');
+    const projectCreate = z
+      .object({
+        post: z.object({
+          parameters: z.array(
+            z.object({ name: z.string(), in: z.string(), required: z.boolean() }),
+          ),
+          responses: z.record(z.string(), z.unknown()),
+        }),
+      })
+      .parse(body.paths['/api/v1/projects']);
+    expect(projectCreate.post.parameters).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'Idempotency-Key', in: 'header', required: true }),
+      ]),
+    );
+    expect(projectCreate.post.responses).toHaveProperty('409');
+
+    const projectMutation = z
+      .object({
+        patch: z.object({
+          parameters: z.array(
+            z.object({ name: z.string(), in: z.string(), required: z.boolean() }),
+          ),
+          responses: z.record(z.string(), z.unknown()),
+        }),
+      })
+      .parse(body.paths['/api/v1/projects/{projectId}']);
+    expect(projectMutation.patch.parameters).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'If-Match', in: 'header', required: true }),
+      ]),
+    );
+    expect(projectMutation.patch.responses).toHaveProperty('409');
     const authPath = z
       .object({
         post: z.object({
@@ -399,7 +434,7 @@ describe('RoomScan HTTP application', () => {
       .expect(200);
 
     expect(response.headers['access-control-expose-headers']).toBe(
-      'RateLimit,RateLimit-Policy,Retry-After',
+      'ETag,RateLimit,RateLimit-Policy,Retry-After',
     );
   });
 

@@ -1,12 +1,21 @@
 import { Router } from 'express';
 
 import { AppError } from '../../common/errors/app-error.js';
+import {
+  idempotencyErrorToAppError,
+  resolveIdempotencyKey,
+} from '../../common/idempotency/idempotency.js';
 import { authenticate, getUserId } from '../../common/middleware/authenticate.js';
 import type {
   AccessTokenVerifier,
   CurrentUserRepository,
 } from '../../common/middleware/authenticate.js';
 import { validateRequest } from '../../common/middleware/validate-request.js';
+import {
+  parseIfMatch,
+  revisionErrorToAppError,
+  setRevisionEtag,
+} from '../../common/revision/revision.js';
 import { ProjectNotFoundError } from './project.errors.js';
 import {
   CreateProjectBodySchema,
@@ -30,6 +39,10 @@ export interface ProjectRouterDependencies {
 }
 
 function projectNotFoundToAppError(error: unknown): AppError | undefined {
+  const commonError = idempotencyErrorToAppError(error) ?? revisionErrorToAppError(error);
+  if (commonError !== undefined) {
+    return commonError;
+  }
   if (error instanceof ProjectNotFoundError) {
     return new AppError({
       statusCode: 404,
@@ -56,12 +69,18 @@ export function createProjectRouter({
       try {
         const userId = getUserId(request);
         const { body } = response.locals.validated as { body: CreateProjectBody };
-        const result = await projectService.create(userId, body);
-        const responseBody = ProjectResponseSchema.parse(result);
+        const header = request.headers['idempotency-key'];
+        const key = resolveIdempotencyKey(typeof header === 'string' ? header : undefined);
+        const result =
+          typeof projectService.createIdempotently === 'function'
+            ? await projectService.createIdempotently(userId, body, key)
+            : { body: await projectService.create(userId, body), statusCode: 201, replayed: false };
+        const responseBody = ProjectResponseSchema.parse(result.body);
 
-        response.status(201).json(responseBody);
+        setRevisionEtag(response, responseBody.revision);
+        response.status(result.statusCode).json(responseBody);
       } catch (error) {
-        next(error);
+        next(projectNotFoundToAppError(error) ?? error);
       }
     },
   );
@@ -100,6 +119,7 @@ export function createProjectRouter({
         const result = await projectService.getById(userId, params.projectId);
         const responseBody = ProjectResponseSchema.parse(result);
 
+        setRevisionEtag(response, responseBody.revision);
         response.status(200).json(responseBody);
       } catch (error) {
         next(projectNotFoundToAppError(error) ?? error);
@@ -119,15 +139,22 @@ export function createProjectRouter({
           params: ProjectIdParam;
         };
         const data: ProjectUpdateInput = {};
+        const expectedRevision = parseIfMatch(request.headers['if-match']);
         if (body.name !== undefined) {
           data.name = body.name;
         }
         if (body.description !== undefined) {
           data.description = body.description;
         }
-        const result = await projectService.update(userId, params.projectId, data);
+        const result = await projectService.update(
+          userId,
+          params.projectId,
+          expectedRevision,
+          data,
+        );
         const responseBody = ProjectResponseSchema.parse(result);
 
+        setRevisionEtag(response, responseBody.revision);
         response.status(200).json(responseBody);
       } catch (error) {
         next(projectNotFoundToAppError(error) ?? error);
@@ -143,8 +170,10 @@ export function createProjectRouter({
       try {
         const userId = getUserId(request);
         const { params } = response.locals.validated as { params: ProjectIdParam };
-        await projectService.delete(userId, params.projectId);
+        const expectedRevision = parseIfMatch(request.headers['if-match']);
+        const revision = await projectService.delete(userId, params.projectId, expectedRevision);
 
+        if (revision !== undefined) setRevisionEtag(response, revision);
         response.status(204).end();
       } catch (error) {
         next(projectNotFoundToAppError(error) ?? error);

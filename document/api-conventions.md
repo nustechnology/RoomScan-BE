@@ -27,6 +27,8 @@
   current Viewer at `GET /api/v1/shared-projects`,
   `GET /api/v1/shared-projects/:projectId`, and
   `DELETE /api/v1/shared-projects/:projectId`.
+- Offline synchronization pulls visible changes and readiness at
+  `GET /api/v1/sync/changes` and `GET /api/v1/sync/status`.
 - Swagger UI remains at `/api-doc`; raw OpenAPI is `/api-doc.json`.
 - Resource paths use plural nouns and kebab-case when business modules arrive.
 
@@ -94,7 +96,8 @@ Allowed and rejected limited requests expose draft-8 `RateLimit` and
 ```
 
 Rate-limit responses never expose the raw client IP, token, unhashed store key
-or store details. Browser clients may read the three headers through CORS.
+or store details. Browser clients may read those headers and resource `ETag`
+through CORS.
 
 ## Apple authentication
 
@@ -186,6 +189,113 @@ stale token.
 The same per-IP rate-limit headers (`RateLimit`, `RateLimit-Policy`, and
 `Retry-After` on 429) apply to this endpoint.
 
+## Offline mutation contract
+
+The following authenticated creates require `Idempotency-Key`:
+
+- `POST /api/v1/projects`
+- `POST /api/v1/projects/:projectId/scans`
+- `POST /api/v1/scans/:scanId/notes`
+- `POST /api/v1/scans/:scanId/assets/upload-sessions`
+- `POST /api/v1/projects/:projectId/invitations`
+
+The key is trimmed, must contain 1–128 non-control characters, and is scoped by
+authenticated user, operation, and concrete parent. Only a SHA-256 key hash is
+stored. The canonical request hash excludes deprecated body aliases. A retry
+with the same request replays the exact committed HTTP status and JSON body;
+reuse with another validated payload returns
+`409 IDEMPOTENCY_KEY_CONFLICT`. Validation, authorization, business failures,
+and presign `503` failures do not claim the key. `clientMutationId` on Create
+Scan and body `idempotencyKey` on Create Upload Session remain deprecated
+aliases; when the header is also present the values must match. A legacy scan
+key collision never restores a deleted scan.
+
+Project, Scan, and Note single-resource responses include `revision` and return
+the strong `ETag: "N"` header. Project PATCH/DELETE, Scan PATCH/DELETE, and Note
+PATCH/move/DELETE require `If-Match: "N"`. Missing and malformed headers return
+`400 REVISION_REQUIRED` and `400 INVALID_REVISION`. An atomic guarded write that
+loses to a newer revision returns `409 REVISION_CONFLICT` with
+`details.currentRevision` and `details.deleted`. Delete wins over stale update;
+a stale mutation cannot clear any Project, Scan, or Note tombstone. Repeating a
+completed Owner delete still returns `204`.
+
+Revision roll-up is hierarchical: Note changes increment Note + Scan + Project;
+Scan and ScanAsset changes increment Scan + Project; access lifecycle changes
+increment ProjectAccess + Project. A fully synced project updates
+`lastSyncedAt` after a successful mutation or conflict acknowledgement; a
+project that becomes pending/syncing/failed keeps the prior successful time.
+
+## Sync
+
+Both sync endpoints require Bearer authentication.
+
+`GET /api/v1/sync/changes` accepts optional `since`, optional `cursor`, and
+`limit` (default 100, maximum 500). `since` must be RFC3339 and is mutually
+exclusive with `cursor`. Without either value the API freezes a sequence
+watermark and returns the latest visible UPSERT for every active resource,
+paged stably by resource type and ID. The returned opaque cursor continues that
+snapshot and then switches the client to incremental sequence order. `since`
+returns events whose `changedAt >= since` and also switches to a cursor.
+Malformed, tampered, wrong-user, or ambiguous cursors return 400.
+
+```json
+{
+  "changes": [
+    {
+      "resourceType": "NOTE",
+      "resourceId": "b1a2c3d4-e5f6-4890-abcd-ef1234567890",
+      "operation": "UPSERT",
+      "revision": 3,
+      "syncStatus": "SYNCED",
+      "changedAt": "2026-08-17T04:00:00.000Z",
+      "cursor": "opaque-user-bound-cursor",
+      "deletedAt": null,
+      "data": {
+        "id": "b1a2c3d4-e5f6-4890-abcd-ef1234567890",
+        "scanId": "f1e2d3c4-a5b6-7890-abcd-ef1234567890",
+        "content": "Cabinet hinge is loose"
+      }
+    }
+  ],
+  "nextCursor": "opaque-user-bound-cursor"
+}
+```
+
+`resourceType` is `PROJECT | SCAN | NOTE | SCAN_ASSET | PROJECT_ACCESS`.
+DELETE items always have `data: null` and a non-null `deletedAt`. Normalized
+UPSERT data includes public identity/metadata and lifecycle timestamps, but
+never storage keys, raw idempotency keys, presigned URLs, secrets, or internal
+SQL fields. Owners receive their project resources and access records. An
+active Viewer receives project resources plus only their own access record. A
+grant emits a targeted access UPSERT and current project bootstrap; revocation
+emits a self-access tombstone, after which no later project event is visible to
+that Viewer.
+
+`GET /api/v1/sync/status` accepts optional `projectId` and always returns
+`{ "items": [...] }`. Without it, results include every owned or actively
+shared project; with it, an inaccessible project is hidden as
+`404 PROJECT_NOT_FOUND`. Counts classify active scans by required MODEL asset
+lifecycle. `requiredAssetsUploaded` is true only when every active scan has an
+UPLOADED MODEL; it is also true for zero scans. Status priority is `CONFLICT >
+FAILED > SYNCING > PENDING > SYNCED`.
+
+```json
+{
+  "items": [
+    {
+      "projectId": "a1b2c3d4-e5f6-4890-abcd-ef1234567890",
+      "syncStatus": "PENDING",
+      "pendingCount": 1,
+      "syncingCount": 0,
+      "failedCount": 0,
+      "conflictCount": 0,
+      "lastSyncedAt": null,
+      "requiredAssetsUploaded": false
+    }
+  ]
+}
+```
+
 ## Projects
 
 Every project endpoint requires a valid Bearer access token in the
@@ -227,7 +337,9 @@ Project response:
   ],
   "sharedCount": 0,
   "thumbnail": null,
-  "syncStatus": null,
+  "syncStatus": "SYNCED",
+  "revision": 1,
+  "lastSyncedAt": "2026-07-29T10:00:00.000Z",
   "createdAt": "2026-07-29T10:00:00.000Z",
   "updatedAt": "2026-07-29T10:00:00.000Z",
   "permissions": {
@@ -246,8 +358,9 @@ Project response:
 `scanCount` counts active (non-deleted) scans in the project, and `scans` lists
 those scans ordered by newest `createdAt` first with `id`, `name`,
 `description`, `thumbnail`, `noteCount`, `assetStatus`, `syncStatus`, and
-`createdAt`. `thumbnail` and `syncStatus` are `null` until the downstream
-thumbnail and sync persistence features are present.
+`createdAt`. `thumbnail` remains nullable. Project `syncStatus` and
+`lastSyncedAt` are persisted readiness fields; a new zero-scan project starts
+`SYNCED`.
 
 The owned-project list supports case-insensitive name search and page-based
 pagination:
@@ -334,6 +447,7 @@ Scan response:
   "assetStatus": "NONE",
   "syncStatus": "PENDING",
   "modelVersion": 1,
+  "revision": 1,
   "createdAt": "2026-07-29T10:00:00.000Z",
   "updatedAt": "2026-07-29T10:00:00.000Z",
   "permissions": {
@@ -365,6 +479,7 @@ descriptor, returning the scan plus `uploads`:
   "assetStatus": "NONE",
   "syncStatus": "PENDING",
   "modelVersion": 1,
+  "revision": 1,
   "createdAt": "2026-07-29T10:00:00.000Z",
   "updatedAt": "2026-07-29T10:00:00.000Z",
   "permissions": {
@@ -436,12 +551,11 @@ Authorization and deletion rules:
 - Create with a reused active `clientMutationId` in the same project returns the
   existing scan with `200` instead of creating a duplicate.
 - Reusing a `clientMutationId` that matches a soft-deleted scan in the same
-  project restores that scan (clears its `deletedAt`), applies the submitted
-  `name` and `description`, and returns the restored scan with `200` (not
-  created) instead of inserting a new row. A `clientMutationId` is unique per
-  project, so the same value in a different project creates a new scan.
-- Delete sets `deletedAt` and touches the parent project `updatedAt` in one
-  transaction.
+  project returns `409 IDEMPOTENCY_KEY_CONFLICT`; it never restores the scan.
+  A `clientMutationId` is unique per project, so the same value in a different
+  project creates a new scan.
+- Delete sets `deletedAt`, soft-deletes active notes/assets, emits descendant
+  tombstones, and rolls up the parent project in one transaction.
 - Repeating delete as the same Owner returns `204`; other users receive the
   hidden not-found response.
 
@@ -482,8 +596,10 @@ Create-session request:
   maximum (200 MB), and for
   `THUMBNAIL` assets at most the configured maximum (10 MB).
 - `checksum` and `modelVersion`: required for `MODEL` assets.
-- `idempotencyKey`: optional; a repeated create with an active, unexpired
-  session returns the existing session with `200`.
+- `Idempotency-Key` header: required. Body `idempotencyKey` is a deprecated
+  alias and must match the header if both are sent. A repeated create with an
+  active, unexpired session returns the original response without another
+  active session.
 
 Asset metadata response fields: `assetId`, `scanId`, `assetType`, `status`, and
 for the download response `downloadUrl` plus `downloadUrlExpiresAt`. The target
@@ -497,6 +613,8 @@ Behavior and rules:
 - Completed uploads are idempotent: repeating `complete` returns the stored
   asset without creating duplicates and, for a model, re-applies the parent scan
   status update so a retry recovers from an earlier failed scan update.
+- A completed MODEL cannot be reset or overwritten directly; another session
+  request returns `409 MODEL_ALREADY_COMPLETED`.
 - Completed model uploads mark the scan `assetStatus = UPLOADED` and
   `syncStatus = SYNCED`; a reported failure marks the scan `FAILED`. Thumbnail
   completion leaves the scan status unchanged but persists a display URL onto
@@ -558,6 +676,7 @@ Note response:
   "position": { "x": 1.5, "y": -2, "z": 3.25 },
   "orientation": { "x": 0, "y": 0, "z": 1 },
   "modelVersion": "1",
+  "revision": 1,
   "creator": {
     "id": "eb5d278f-c857-45c7-887d-7be65288cb75",
     "email": "owner@example.com"
@@ -610,7 +729,8 @@ Authorization and behavior rules:
 - A note cannot exist outside a scan. Deleting a scan or project makes its notes
   inaccessible: scan endpoints filter notes on the non-deleted scan, and the
   `notes` foreign key cascades when a scan row is physically removed.
-- Deleting a note is a physical delete that returns `204`.
+- Deleting a note sets `deletedAt`, increments its revision, writes a tombstone,
+  and returns `204`; stale updates cannot restore it.
 
 Error behavior:
 
@@ -760,6 +880,7 @@ List shares `200`:
   "viewers": [
     {
       "userId": "f1a2b3c4-d5e6-7890-abcd-ef1234567890",
+      "revision": 1,
       "recipientUser": {
         "id": "f1a2b3c4-d5e6-7890-abcd-ef1234567890",
         "email": "recipient@example.com"
@@ -773,7 +894,7 @@ List shares `200`:
 `pendingInvitations` includes every `PENDING` invitation (labelled `EXPIRED`
 once past `expiresAt`) so the owner can still revoke or resend stale links.
 `viewers` lists active (`revokedAt` null) Viewer access records with the
-recipient and the date access was granted.
+recipient, current access revision, and the date access was granted.
 
 Revoke Viewer access `200`:
 
@@ -781,6 +902,7 @@ Revoke Viewer access `200`:
 {
   "projectId": "a1b2c3d4-e5f6-4890-abcd-ef1234567890",
   "userId": "f1a2b3c4-d5e6-7890-abcd-ef1234567890",
+  "revision": 2,
   "revokedAt": "2026-07-29T10:00:00.000Z"
 }
 ```
@@ -958,7 +1080,8 @@ Business rules:
   project can no longer be opened.
 - Removing a project is a Viewer-only self-service action: it sets `revokedAt`
   on the current user's access row only, never the Owner's project, and never
-  other Viewers' access.
+  other Viewers' access. The access revision, project revision, Owner event,
+  and targeted self-access tombstone commit in the same transaction.
 - Removing an entry that is not in Shared With Me (already removed, Owner-revoked,
   or never shared) returns `409`.
 

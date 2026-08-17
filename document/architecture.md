@@ -125,11 +125,11 @@ Viewer role in one repository lookup. An Owner update performs its guarded
 write and response read in one transaction, so an overlapping deletion cannot
 turn an already-applied update into a not-found response.
 
-Deletion marks `Project.deletedAt` and revokes active `ProjectAccess` records in
-one database transaction. A repeated deletion by the same Owner is idempotent.
-Physical cleanup remains outside this module. Note, thumbnail, sync-state, and
-asset cleanup are not claimed here because their persistence models are not yet
-present on this branch; invitation cleanup is owned by the Share module below.
+Deletion marks `Project.deletedAt`, revokes active `ProjectAccess` records,
+soft-deletes active scans, notes, and assets, and emits tombstones for every
+affected resource in one transaction. A repeated deletion by the same Owner is
+idempotent. Physical cleanup remains outside this module; invitation cleanup is
+owned by the Share module below.
 
 The owner relation uses `onDelete: Restrict` to prevent accidental project loss
 when a user is deleted. Project names are not unique per owner.
@@ -152,16 +152,16 @@ database boundary scoped to the parent project, backed by the composite
 `@@unique([projectId, clientMutationId])` constraint, so the same value in a
 different project never collides. Creating a scan with a reused active
 `clientMutationId` returns the existing scan as not created; a reused value
-matching a soft-deleted scan restores it (clears `deletedAt`) while applying the
-submitted `name` and `description` and returns it as not created. A concurrent
+matching a soft-deleted scan returns `409 IDEMPOTENCY_KEY_CONFLICT` and never
+restores the tombstone. A concurrent
 duplicate insert raises `P2002`, which the repository catches and resolves to
 the existing row instead of rethrowing. The repository also performs
 allow-listed sorting with a stable `id` tie-breaker and offset pagination. An
 Owner update runs its guarded write and response read in one transaction.
-Deleting a scan marks `Scan.deletedAt` and touches the parent project
-`updatedAt` in the same transaction; a repeated delete by the same Owner is
-idempotent. Deleting a scan cascades to its `ScanAsset` and `Note` rows because
-asset and note behavior is owned by the scan.
+Deleting a scan marks `Scan.deletedAt`, soft-deletes its active `ScanAsset` and
+`Note` descendants, rolls up the project revision/readiness, and writes all
+tombstones in the same transaction; a repeated delete by the same Owner is
+idempotent.
 
 The `Scan` model stores metadata only: name, description, thumbnail reference,
 `assetStatus`, `syncStatus`, and `modelVersion`, plus a real `noteCount` derived
@@ -201,6 +201,12 @@ and the raw `storageKey` field is omitted from responses. Storage failures
 while minting upload or download URLs or while verifying an upload surface as
 `503 STORAGE_UNAVAILABLE`.
 
+Create-session retries use the required `Idempotency-Key` header. The deprecated
+body `idempotencyKey` remains an alias and must match the header when both are
+present; new asset rows never store the raw key. A MODEL asset that reached
+`UPLOADED` is immutable in SIT-39: a new session returns
+`409 MODEL_ALREADY_COMPLETED` instead of resetting or replacing it.
+
 Permissions mirror the Scan module: the project Owner creates/completes uploads,
 and the Owner or active Viewers list metadata and receive download URLs. All
 permission failures surface as hidden 404s, and revoked Viewers or deleted
@@ -226,13 +232,57 @@ note validates that its `modelVersion` equals the parent scan's current model
 version and rejects a mismatch with `409 MODEL_VERSION_MISMATCH`, so notes
 cannot be anchored to a stale model revision.
 
-`PrismaNoteRepository` filters every note lookup through a non-deleted scan, so
-deleting a scan makes its notes inaccessible. Note mutations run in one
-transaction that also touches the parent scan and project `updatedAt`, keeping
-latest-activity ordering in sync with note edits. Note content is never written
-to logs; the error envelope returns only stable codes and messages. The
-repository derives the scan's real `noteCount` from note rows so scan list and
-detail reflect the note total.
+`PrismaNoteRepository` filters active reads through `Note.deletedAt` and a
+non-deleted scan. Note delete is a soft-delete tombstone. Every note mutation
+increments the note revision, rolls up the scan and project revisions, and
+writes normalized change snapshots in one transaction. Note content is never
+written to logs; the error envelope returns only stable codes and messages.
+The repository derives the scan's real `noteCount` from active note rows.
+
+## Sync, idempotency, and optimistic concurrency
+
+The Sync module owns `GET /api/v1/sync/changes` and
+`GET /api/v1/sync/status`. `SyncChange` is an append-only event log ordered by
+a `BigInt` sequence. Each event stores a normalized immutable client DTO (or a
+DELETE tombstone), resource revision, project/owner visibility scope, optional
+target user, readiness state, and timestamps. Snapshots and incremental pages
+read historical event data instead of reconstructing old state from mutable
+domain tables. Owner events are project-wide; Viewer grants append a targeted
+access UPSERT and project bootstrap, while revocation appends a targeted
+self-access tombstone and active access controls later event visibility.
+
+Initial pulls freeze a sequence watermark and page the latest visible UPSERT
+per resource by `(resourceType, resourceId)`. Incremental and `since` pulls are
+ordered by sequence. Cursors are versioned, user-bound payloads authenticated
+with HMAC; cross-user, malformed, or tampered cursors fail closed. Status is
+derived from active MODEL asset lifecycles plus unresolved per-user
+`SyncConflict` rows, with priority `CONFLICT > FAILED > SYNCING > PENDING >
+SYNCED`. A zero-scan project is fully synced.
+
+Selected creates store an encrypted `IdempotencyReceipt` in the same Prisma
+transaction as domain writes, revision roll-ups, and sync events. Scope is
+authenticated user + operation + concrete parent + SHA-256 key hash; request
+hashing uses canonical validated JSON. AES-256-GCM receipt encryption and
+cursor HMAC keys are independently derived from `SYNC_CRYPTO_KEY` with HKDF.
+Same-key/same-request retries return the original status and body; another
+payload returns `409`. Presigned URLs are prepared before the transaction, so
+storage failure writes no receipt. Create Scan commits optional asset sessions
+together with the scan and one receipt.
+
+`Idempotency-Key` and `If-Match` are read and validated by the shared helpers
+`resolveIdempotencyKey` and `parseIfMatch` (backed by the Zod header schemas in
+`common/schemas/sync-headers.ts`) rather than the generic `validateRequest`
+middleware: the idempotency key may arrive through a deprecated body alias, and
+each malformed header must surface a distinct stable error code.
+
+Project, Scan, Note, ScanAsset, and ProjectAccess carry integer revisions.
+Owner PATCH/DELETE routes require a strong `If-Match: "N"`; guarded writes use
+the expected revision atomically. A stale write commits a per-user conflict
+ledger row plus a targeted refresh snapshot/tombstone, then returns
+`409 REVISION_CONFLICT`. Delete wins over stale update and no stale mutation can
+clear a tombstone. Consuming the refresh cursor acknowledges the conflict and
+appends a targeted non-conflict snapshot. Successful current-revision writes
+resolve earlier conflicts in their domain transaction.
 
 ## Share module
 
@@ -310,9 +360,10 @@ revoked, deleted, and never-shared projects are hidden behind the standard
 `PrismaSharedProjectsRepository` restricts every `project_accesses` lookup to
 `VIEWER` rows: list filters by `userId` and the `VIEWER` role, detail and
 access-status checks match on `(projectId, userId)` with the same role filter,
-and removal runs a guarded `updateMany` on the access row
-(`role: VIEWER`, `revokedAt: null`), so owner records are never returned or
-revoked and a concurrent removal or Owner revocation resolves to
+and removal runs a transactionally guarded revision update on the access row
+(`role: VIEWER`, `revokedAt: null`). That transaction increments the access and
+project revisions and emits Owner plus targeted Viewer tombstones, so owner
+records are never returned or revoked and a concurrent removal or Owner revocation resolves to
 `409 NOT_IN_SHARED_WITH_ME` instead of succeeding. Lookups apply
 case-insensitive name search against the parent project, sort by a to-one
 relation field with a stable project `id` tie-breaker, and paginate with an
@@ -409,12 +460,14 @@ The composition root creates one Prisma Client and injects it into the database
 health/lifecycle adapter, the Apple user repository, the current-user
 repository, the project repository, the scan repository, the scan-asset
 repository, the refresh-token repository, the note repository, the share
-repository, and the shared-projects repository, plus the storage and mail
-adapters. It also creates the three
+repository, the shared-projects repository, the sync repository, and the
+idempotency executor, plus the storage, sync-cryptography, and mail adapters. It
+also creates the three
 rate-limit middleware instances, the access-token and refresh-token verifiers,
 the project permission service, the project service, the scan service, the
 scan-asset service, the refresh-token service, the note service, the share
-service, and the shared-projects service once per process. Product modules never import the Prisma client
+service, the shared-projects service, and the sync service once per process.
+Product modules never import the Prisma client
 directly. The unique provider identity constraint makes concurrent first-time
 Apple logins idempotent at the database boundary. The projects table has a
 foreign key to users with `onDelete: Restrict`; project access has unique

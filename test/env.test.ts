@@ -12,6 +12,7 @@ const validEnvironment = {
   APPLE_CLIENT_ID: 'com.example.roomscan',
   AUTH_ACCESS_TOKEN_SECRET: 'access-secret-that-is-at-least-32-characters',
   AUTH_REFRESH_TOKEN_SECRET: 'refresh-secret-that-is-at-least-32-characters',
+  SYNC_CRYPTO_KEY: 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=',
 };
 
 describe('loadConfig', () => {
@@ -34,6 +35,7 @@ describe('loadConfig', () => {
       appleClientId: 'com.example.roomscan',
       accessTokenSecret: 'access-secret-that-is-at-least-32-characters',
       refreshTokenSecret: 'refresh-secret-that-is-at-least-32-characters',
+      syncCryptoKey: validEnvironment.SYNC_CRYPTO_KEY,
       accessTokenTtlSeconds: 3600,
       refreshTokenTtlSeconds: 2_592_000,
       localTestAuthEnabled: false,

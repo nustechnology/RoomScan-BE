@@ -1,6 +1,10 @@
 import { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
 
 import { ErrorResponseSchema } from '../../common/schemas/error.js';
+import {
+  IdempotencyKeyHeaderSchema,
+  IfMatchHeaderSchema,
+} from '../../common/schemas/sync-headers.js';
 import { ProjectIdParamSchema } from '../project/project.schemas.js';
 import {
   CreateScanBodySchema,
@@ -39,6 +43,21 @@ const rateLimitHeaders = {
       type: 'string' as const,
     },
   },
+};
+
+const revisionHeaders = {
+  ...rateLimitHeaders,
+  ETag: {
+    description: 'Strong ETag containing the current scan revision',
+    schema: { type: 'string' as const, example: '"3"' },
+  },
+};
+
+const conflictResponse = {
+  description:
+    'The revision is stale, the retry payload differs, or a legacy key points at a deleted scan',
+  headers: rateLimitHeaders,
+  content: { 'application/json': { schema: errorResponse } },
 };
 
 const commonErrorResponses = {
@@ -114,9 +133,12 @@ scanOpenApiRegistry.registerPath({
   path: '/api/v1/projects/{projectId}/scans',
   tags: ['Scans'],
   summary: 'Create scan metadata under a project',
+  description:
+    'Requires Idempotency-Key. clientMutationId remains a deprecated alias and must match the header when both are sent.',
   security: [{ [bearerAuth]: [] }],
   request: {
     params: ProjectIdParamSchema,
+    headers: IdempotencyKeyHeaderSchema,
     body: {
       required: true,
       content: {
@@ -129,7 +151,7 @@ scanOpenApiRegistry.registerPath({
   responses: {
     201: {
       description: 'The scan was created',
-      headers: rateLimitHeaders,
+      headers: revisionHeaders,
       content: {
         'application/json': {
           schema: createScanResponse,
@@ -137,9 +159,8 @@ scanOpenApiRegistry.registerPath({
       },
     },
     200: {
-      description:
-        'A scan already exists for the same project and clientMutationId (active or restored)',
-      headers: rateLimitHeaders,
+      description: 'The original successful response is replayed for the same idempotency request',
+      headers: revisionHeaders,
       content: {
         'application/json': {
           schema: createScanResponse,
@@ -148,6 +169,12 @@ scanOpenApiRegistry.registerPath({
     },
     ...commonErrorResponses,
     404: projectNotFoundResponse,
+    409: conflictResponse,
+    503: {
+      description: 'Storage provider is unavailable while preparing an optional upload session',
+      headers: rateLimitHeaders,
+      content: { 'application/json': { schema: errorResponse } },
+    },
   },
 });
 
@@ -188,7 +215,7 @@ scanOpenApiRegistry.registerPath({
   responses: {
     200: {
       description: 'The scan',
-      headers: rateLimitHeaders,
+      headers: revisionHeaders,
       content: {
         'application/json': {
           schema: scanResponse,
@@ -208,6 +235,7 @@ scanOpenApiRegistry.registerPath({
   security: [{ [bearerAuth]: [] }],
   request: {
     params: ScanIdParamSchema,
+    headers: IfMatchHeaderSchema,
     body: {
       required: true,
       content: {
@@ -220,7 +248,7 @@ scanOpenApiRegistry.registerPath({
   responses: {
     200: {
       description: 'The updated scan',
-      headers: rateLimitHeaders,
+      headers: revisionHeaders,
       content: {
         'application/json': {
           schema: scanResponse,
@@ -229,6 +257,7 @@ scanOpenApiRegistry.registerPath({
     },
     ...commonErrorResponses,
     404: scanNotFoundResponse,
+    409: conflictResponse,
   },
 });
 
@@ -240,13 +269,15 @@ scanOpenApiRegistry.registerPath({
   security: [{ [bearerAuth]: [] }],
   request: {
     params: ScanIdParamSchema,
+    headers: IfMatchHeaderSchema,
   },
   responses: {
     204: {
       description: 'The scan was deleted',
-      headers: rateLimitHeaders,
+      headers: revisionHeaders,
     },
     ...commonErrorResponses,
     404: scanNotFoundResponse,
+    409: conflictResponse,
   },
 });

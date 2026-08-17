@@ -6,6 +6,7 @@ import type {
   SharedProjectsRepository,
 } from '../../modules/shared-projects/shared-projects.types.js';
 import type { ProjectSort } from '../../modules/project/project.types.js';
+import { refreshProjectRollup, writeDeleteChange } from './prisma-sync-writer.js';
 
 const sharedProjectSelect = {
   revokedAt: true,
@@ -150,11 +151,42 @@ export class PrismaSharedProjectsRepository implements SharedProjectsRepository 
   }
 
   async removeFromShared(projectId: string, userId: string, removedAt: Date): Promise<boolean> {
-    const updated = await this.#client.projectAccess.updateMany({
-      where: { projectId, userId, role: PrismaProjectRole.VIEWER, revokedAt: null },
-      data: { revokedAt: removedAt },
-    });
+    return await this.#client.$transaction(async (transaction) => {
+      const access = await transaction.projectAccess.findFirst({
+        where: { projectId, userId, role: PrismaProjectRole.VIEWER },
+        select: {
+          id: true,
+          revision: true,
+          revokedAt: true,
+          project: { select: { ownerId: true } },
+        },
+      });
+      if (access === null || access.revokedAt !== null) return false;
 
-    return updated.count > 0;
+      const updated = await transaction.projectAccess.updateMany({
+        where: {
+          id: access.id,
+          userId,
+          role: PrismaProjectRole.VIEWER,
+          revokedAt: null,
+          revision: access.revision,
+        },
+        data: { revokedAt: removedAt, revision: { increment: 1 }, updatedAt: removedAt },
+      });
+      if (updated.count === 0) return false;
+
+      const change = {
+        projectId,
+        ownerId: access.project.ownerId,
+        resourceType: 'PROJECT_ACCESS' as const,
+        resourceId: access.id,
+        revision: access.revision + 1,
+        deletedAt: removedAt,
+      };
+      await writeDeleteChange(transaction, change);
+      await writeDeleteChange(transaction, { ...change, targetUserId: userId });
+      await refreshProjectRollup(transaction, projectId, removedAt);
+      return true;
+    });
   }
 }

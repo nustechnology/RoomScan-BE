@@ -46,7 +46,7 @@ function createAssetRecord(overrides: Partial<ScanAssetRecord> = {}): ScanAssetR
   };
 }
 
-function createHarness() {
+function createHarness(options: { managesSyncRollups?: boolean } = {}) {
   const findProjectId = vi.fn<ScanRepository['findProjectId']>().mockResolvedValue(PROJECT_ID);
   const updateAssetStatus = vi
     .fn<ScanRepository['updateAssetStatus']>()
@@ -73,6 +73,7 @@ function createHarness() {
     create,
     update,
     listByScan,
+    ...(options.managesSyncRollups === undefined ? {} : { managesSyncRollups: true }),
   };
 
   const findAccessRole = vi
@@ -138,6 +139,31 @@ function createHarness() {
 }
 
 describe('ScanAssetService', () => {
+  it('presigns scan-create uploads without persisting a raw idempotency key', async () => {
+    const { service, createUploadUrl } = createHarness();
+
+    const [prepared] = await service.prepareScanCreateUploads(SCAN_ID, [
+      {
+        assetType: 'MODEL',
+        contentType: 'model/gltf-binary',
+        sizeBytes: 20_000_000,
+        checksum: 'abc',
+        modelVersion: '1',
+      },
+    ]);
+
+    expect(createUploadUrl).toHaveBeenCalledOnce();
+    expect(prepared).toMatchObject({
+      data: {
+        scanId: SCAN_ID,
+        assetType: 'MODEL',
+        idempotencyKey: null,
+        storageKey: `scans/${SCAN_ID}/model`,
+      },
+      response: { uploadUrl: 'http://storage/upload' },
+    });
+  });
+
   it('creates an upload session as the Owner', async () => {
     const { service, createUploadUrl } = createHarness();
 
@@ -302,6 +328,36 @@ describe('ScanAssetService', () => {
     expect(result.status).toBe('UPLOADED');
     expect(createDisplayUrl).toHaveBeenCalledWith(`scans/${SCAN_ID}/thumbnail`);
     expect(updateThumbnail).toHaveBeenCalledWith(SCAN_ID, 'http://storage/display/thumbnail');
+  });
+
+  it('persists the thumbnail display URL inside the asset update transaction', async () => {
+    const { service, findById, update, updateThumbnail, createDisplayUrl } = createHarness({
+      managesSyncRollups: true,
+    });
+    findById.mockResolvedValueOnce(
+      createAssetRecord({ assetType: 'THUMBNAIL', storageKey: `scans/${SCAN_ID}/thumbnail` }),
+    );
+    update.mockResolvedValueOnce(
+      createAssetRecord({
+        assetType: 'THUMBNAIL',
+        status: 'UPLOADED',
+        uploadedAt: NOW,
+      }),
+    );
+    createDisplayUrl.mockResolvedValueOnce('http://storage/display/thumbnail');
+
+    const result = await service.completeUpload(OWNER_ID, ASSET_ID, {});
+
+    expect(result.status).toBe('UPLOADED');
+    expect(createDisplayUrl).toHaveBeenCalledWith(`scans/${SCAN_ID}/thumbnail`);
+    expect(update).toHaveBeenCalledWith(
+      ASSET_ID,
+      expect.objectContaining({
+        status: 'UPLOADED',
+        thumbnailUrl: 'http://storage/display/thumbnail',
+      }),
+    );
+    expect(updateThumbnail).not.toHaveBeenCalled();
   });
 
   it('completes an upload and marks the model synced', async () => {

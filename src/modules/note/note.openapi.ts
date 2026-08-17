@@ -1,6 +1,10 @@
 import { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
 
 import { ErrorResponseSchema } from '../../common/schemas/error.js';
+import {
+  IdempotencyKeyHeaderSchema,
+  IfMatchHeaderSchema,
+} from '../../common/schemas/sync-headers.js';
 import { ScanIdParamSchema } from '../scan/scan.schemas.js';
 import {
   CreateNoteBodySchema,
@@ -36,6 +40,20 @@ const rateLimitHeaders = {
       type: 'string' as const,
     },
   },
+};
+
+const revisionHeaders = {
+  ...rateLimitHeaders,
+  ETag: {
+    description: 'Strong ETag containing the current note revision',
+    schema: { type: 'string' as const, example: '"3"' },
+  },
+};
+
+const revisionConflictResponse = {
+  description: 'The submitted revision is stale',
+  headers: rateLimitHeaders,
+  content: { 'application/json': { schema: errorResponse } },
 };
 
 const commonErrorResponses = {
@@ -121,9 +139,11 @@ noteOpenApiRegistry.registerPath({
   path: '/api/v1/scans/{scanId}/notes',
   tags: ['Notes'],
   summary: 'Create a note on a scan model as its project Owner',
+  description: 'Requires Idempotency-Key. A successful retry replays the original response.',
   security: [{ [bearerAuth]: [] }],
   request: {
     params: ScanIdParamSchema,
+    headers: IdempotencyKeyHeaderSchema,
     body: {
       required: true,
       content: {
@@ -136,7 +156,7 @@ noteOpenApiRegistry.registerPath({
   responses: {
     201: {
       description: 'The note was created',
-      headers: rateLimitHeaders,
+      headers: revisionHeaders,
       content: {
         'application/json': {
           schema: noteResponse,
@@ -145,7 +165,11 @@ noteOpenApiRegistry.registerPath({
     },
     ...commonErrorResponses,
     404: scanNotFoundResponse,
-    409: modelVersionMismatchResponse,
+    409: {
+      ...modelVersionMismatchResponse,
+      description:
+        'The model version is incompatible or the idempotency key was reused with another payload',
+    },
   },
 });
 
@@ -186,7 +210,7 @@ noteOpenApiRegistry.registerPath({
   responses: {
     200: {
       description: 'The note',
-      headers: rateLimitHeaders,
+      headers: revisionHeaders,
       content: {
         'application/json': {
           schema: noteResponse,
@@ -206,6 +230,7 @@ noteOpenApiRegistry.registerPath({
   security: [{ [bearerAuth]: [] }],
   request: {
     params: NoteIdParamSchema,
+    headers: IfMatchHeaderSchema,
     body: {
       required: true,
       content: {
@@ -218,7 +243,7 @@ noteOpenApiRegistry.registerPath({
   responses: {
     200: {
       description: 'The updated note',
-      headers: rateLimitHeaders,
+      headers: revisionHeaders,
       content: {
         'application/json': {
           schema: noteResponse,
@@ -227,6 +252,7 @@ noteOpenApiRegistry.registerPath({
     },
     ...commonErrorResponses,
     404: noteNotFoundResponse,
+    409: revisionConflictResponse,
   },
 });
 
@@ -238,6 +264,7 @@ noteOpenApiRegistry.registerPath({
   security: [{ [bearerAuth]: [] }],
   request: {
     params: NoteIdParamSchema,
+    headers: IfMatchHeaderSchema,
     body: {
       required: true,
       content: {
@@ -250,7 +277,7 @@ noteOpenApiRegistry.registerPath({
   responses: {
     200: {
       description: 'The moved note',
-      headers: rateLimitHeaders,
+      headers: revisionHeaders,
       content: {
         'application/json': {
           schema: noteResponse,
@@ -259,7 +286,10 @@ noteOpenApiRegistry.registerPath({
     },
     ...commonErrorResponses,
     404: noteNotFoundResponse,
-    409: modelVersionMismatchResponse,
+    409: {
+      ...modelVersionMismatchResponse,
+      description: 'The model version is incompatible or the submitted revision is stale',
+    },
   },
 });
 
@@ -271,13 +301,15 @@ noteOpenApiRegistry.registerPath({
   security: [{ [bearerAuth]: [] }],
   request: {
     params: NoteIdParamSchema,
+    headers: IfMatchHeaderSchema,
   },
   responses: {
     204: {
       description: 'The note was deleted',
-      headers: rateLimitHeaders,
+      headers: revisionHeaders,
     },
     ...commonErrorResponses,
     404: noteNotFoundResponse,
+    409: revisionConflictResponse,
   },
 });

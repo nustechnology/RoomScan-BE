@@ -42,12 +42,13 @@ function createClient() {
   };
   const projectAccess = {
     findFirst: vi.fn().mockResolvedValue({ id: 'access-id' }),
-    findUnique: vi.fn().mockResolvedValue({ id: 'access-id', revokedAt: null }),
+    findUnique: vi.fn().mockResolvedValue({ id: 'access-id', revision: 1, revokedAt: null }),
     upsert: vi.fn().mockResolvedValue({}),
-    update: vi.fn().mockResolvedValue({ revokedAt: NOW }),
+    update: vi.fn().mockResolvedValue({ revokedAt: NOW, revision: 2 }),
     findMany: vi.fn().mockResolvedValue([
       {
         userId: VIEWER_ID,
+        revision: 1,
         acceptedAt: NOW,
         createdAt: NOW,
         user: { id: VIEWER_ID, email: RECIPIENT_EMAIL },
@@ -322,7 +323,10 @@ describe('PrismaShareRepository', () => {
         invitationId: INVITATION_ID,
         acceptedAt: NOW,
         revokedAt: null,
+        revision: { increment: 1 },
+        updatedAt: NOW,
       },
+      select: { id: true },
     });
   });
 
@@ -460,12 +464,14 @@ describe('PrismaShareRepository', () => {
     projectAccess.findMany.mockResolvedValue([
       {
         userId: VIEWER_ID,
+        revision: 1,
         acceptedAt: NOW,
         createdAt: NOW,
         user: { id: VIEWER_ID, email: RECIPIENT_EMAIL },
       },
       {
         userId: '11111111-2222-4333-8444-555555555555',
+        revision: 2,
         acceptedAt: null,
         createdAt: NOW,
         user: { id: '11111111-2222-4333-8444-555555555555', email: null },
@@ -477,11 +483,13 @@ describe('PrismaShareRepository', () => {
     expect(result).toEqual([
       {
         userId: VIEWER_ID,
+        revision: 1,
         user: { id: VIEWER_ID, email: RECIPIENT_EMAIL },
         grantedAt: NOW,
       },
       {
         userId: '11111111-2222-4333-8444-555555555555',
+        revision: 2,
         user: { id: '11111111-2222-4333-8444-555555555555', email: null },
         grantedAt: NOW,
       },
@@ -505,25 +513,25 @@ describe('PrismaShareRepository', () => {
 
   it('revokeViewerAccess returns the existing revokedAt when already revoked', async () => {
     const { client, projectAccess } = createClient();
-    projectAccess.findUnique.mockResolvedValue({ id: 'access-id', revokedAt: NOW });
+    projectAccess.findUnique.mockResolvedValue({ id: 'access-id', revision: 2, revokedAt: NOW });
 
     await expect(
       new PrismaShareRepository(client).revokeViewerAccess(PROJECT_ID, VIEWER_ID, NOW),
-    ).resolves.toEqual({ revokedAt: NOW });
+    ).resolves.toEqual({ revokedAt: NOW, revision: 2 });
     expect(projectAccess.update).not.toHaveBeenCalled();
   });
 
   it('revokeViewerAccess revokes an active access idempotently', async () => {
     const { client, projectAccess } = createClient();
-    projectAccess.findUnique.mockResolvedValue({ id: 'access-id', revokedAt: null });
+    projectAccess.findUnique.mockResolvedValue({ id: 'access-id', revision: 1, revokedAt: null });
 
     await expect(
       new PrismaShareRepository(client).revokeViewerAccess(PROJECT_ID, VIEWER_ID, NOW),
-    ).resolves.toEqual({ revokedAt: NOW });
+    ).resolves.toEqual({ revokedAt: NOW, revision: 2 });
     expect(projectAccess.update).toHaveBeenCalledWith({
       where: { id: 'access-id' },
-      data: { revokedAt: NOW },
-      select: { revokedAt: true },
+      data: { revokedAt: NOW, revision: { increment: 1 }, updatedAt: NOW },
+      select: { revokedAt: true, revision: true },
     });
   });
 });

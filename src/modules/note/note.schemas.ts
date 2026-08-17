@@ -23,6 +23,7 @@ export const NoteResponseSchema = z.object({
   position: Vector3Schema,
   orientation: Vector3Schema.nullable(),
   modelVersion: z.string(),
+  revision: z.number().int().positive().default(1),
   creator: z.object({
     id: z.uuid(),
     email: z.email().nullable(),

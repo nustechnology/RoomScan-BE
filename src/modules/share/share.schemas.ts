@@ -89,6 +89,7 @@ export const SharesListResponseSchema = z.object({
   viewers: z.array(
     z.object({
       userId: z.uuid(),
+      revision: z.number().int().positive(),
       recipientUser: z.object({
         id: z.uuid(),
         email: z.email().nullable(),
@@ -101,6 +102,7 @@ export const SharesListResponseSchema = z.object({
 export const ViewerRevokeResponseSchema = z.object({
   projectId: z.uuid(),
   userId: z.uuid(),
+  revision: z.number().int().positive(),
   revokedAt: z.iso.datetime(),
 });
 

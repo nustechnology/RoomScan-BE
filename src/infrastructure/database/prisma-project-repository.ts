@@ -1,21 +1,37 @@
 import type { PrismaClient } from '../../generated/prisma/client.js';
 import { ProjectRole as PrismaProjectRole } from '../../generated/prisma/enums.js';
+import { RevisionConflictError } from '../../common/revision/revision.errors.js';
+import type {
+  IdempotencyContext,
+  IdempotencyResult,
+} from '../../common/idempotency/idempotency.types.js';
 import { ProjectNotFoundError } from '../../modules/project/project.errors.js';
 import type {
   ProjectCreateInput,
   ProjectListOptions,
   ProjectRecord,
   ProjectRepository,
+  ProjectResult,
   ProjectRole,
   ProjectSort,
   ProjectUpdateInput,
 } from '../../modules/project/project.types.js';
+import {
+  resolveSyncConflict,
+  upsertSyncConflict,
+  writeDeleteChange,
+  writeProjectUpsert,
+} from './prisma-sync-writer.js';
+import type { PrismaIdempotencyExecutor } from './prisma-idempotency.js';
 
 const projectSelect = {
   id: true,
   name: true,
   description: true,
   ownerId: true,
+  revision: true,
+  syncStatus: true,
+  lastSyncedAt: true,
   owner: {
     select: {
       id: true,
@@ -39,7 +55,7 @@ const projectSelect = {
       createdAt: true,
       _count: {
         select: {
-          notes: true,
+          notes: { where: { deletedAt: null } },
         },
       },
     },
@@ -81,6 +97,9 @@ interface ProjectRow {
   name: string;
   description: string | null;
   ownerId: string;
+  revision: number;
+  syncStatus: 'PENDING' | 'SYNCING' | 'SYNCED' | 'FAILED' | 'CONFLICT';
+  lastSyncedAt: Date | null;
   owner: {
     id: string;
     email: string | null;
@@ -122,9 +141,37 @@ function toProjectRecord(row: ProjectRow): ProjectRecord {
     })),
     sharedCount: row._count.accesses,
     thumbnail: null,
-    syncStatus: null,
+    syncStatus: row.syncStatus,
+    revision: row.revision,
+    lastSyncedAt: row.lastSyncedAt,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
+  };
+}
+
+function toOwnerResult(record: ProjectRecord): ProjectResult {
+  return {
+    id: record.id,
+    name: record.name,
+    description: record.description,
+    owner: record.owner,
+    scanCount: record.scanCount,
+    scans: record.scans.map((scan) => ({ ...scan, createdAt: scan.createdAt.toISOString() })),
+    sharedCount: record.sharedCount,
+    thumbnail: record.thumbnail,
+    syncStatus: record.syncStatus ?? 'SYNCED',
+    revision: record.revision ?? 1,
+    lastSyncedAt: record.lastSyncedAt?.toISOString() ?? null,
+    createdAt: record.createdAt.toISOString(),
+    updatedAt: record.updatedAt.toISOString(),
+    permissions: {
+      role: 'OWNER',
+      canView: true,
+      canEdit: true,
+      canDelete: true,
+      canShare: true,
+      canCreateScan: true,
+    },
   };
 }
 
@@ -155,22 +202,61 @@ function viewableProjectWhere(id: string, userId: string) {
 
 export class PrismaProjectRepository implements ProjectRepository {
   readonly #client: Pick<PrismaClient, 'project' | '$transaction'>;
+  readonly #idempotency: PrismaIdempotencyExecutor | undefined;
 
-  constructor(client: Pick<PrismaClient, 'project' | '$transaction'>) {
+  constructor(
+    client: Pick<PrismaClient, 'project' | '$transaction'>,
+    idempotency?: PrismaIdempotencyExecutor,
+  ) {
     this.#client = client;
+    this.#idempotency = idempotency;
   }
 
   async create(ownerId: string, data: ProjectCreateInput): Promise<ProjectRecord> {
-    const row = await this.#client.project.create({
-      data: {
-        ownerId,
-        name: data.name,
-        description: data.description,
-      },
-      select: projectSelect,
+    return await this.#client.$transaction(async (transaction) => {
+      const now = new Date();
+      const row = await transaction.project.create({
+        data: {
+          ownerId,
+          name: data.name,
+          description: data.description,
+          syncStatus: 'SYNCED',
+          lastSyncedAt: now,
+          createdAt: now,
+          updatedAt: now,
+        },
+        select: projectSelect,
+      });
+      await writeProjectUpsert(transaction, row.id, { changedAt: now });
+      return toProjectRecord(row);
     });
+  }
 
-    return toProjectRecord(row);
+  async createIdempotently(
+    ownerId: string,
+    data: ProjectCreateInput,
+    context: IdempotencyContext,
+  ): Promise<IdempotencyResult<ProjectResult>> {
+    if (this.#idempotency === undefined) {
+      throw new Error('Project idempotency is not configured');
+    }
+    return await this.#idempotency.execute(context, 201, async (transaction) => {
+      const now = new Date();
+      const row = await transaction.project.create({
+        data: {
+          ownerId,
+          name: data.name,
+          description: data.description,
+          syncStatus: 'SYNCED',
+          lastSyncedAt: now,
+          createdAt: now,
+          updatedAt: now,
+        },
+        select: projectSelect,
+      });
+      await writeProjectUpsert(transaction, row.id, { changedAt: now });
+      return toOwnerResult(toProjectRecord(row));
+    });
   }
 
   async list(
@@ -240,16 +326,81 @@ export class PrismaProjectRepository implements ProjectRepository {
     return project.ownerId === userId ? 'OWNER' : 'VIEWER';
   }
 
-  async update(id: string, ownerId: string, data: ProjectUpdateInput): Promise<ProjectRecord> {
-    return await this.#client.$transaction(async (transaction) => {
+  async update(
+    id: string,
+    ownerId: string,
+    expectedRevisionOrData: number | ProjectUpdateInput,
+    maybeData?: ProjectUpdateInput,
+  ): Promise<ProjectRecord> {
+    const expectedRevision =
+      typeof expectedRevisionOrData === 'number' ? expectedRevisionOrData : undefined;
+    const data =
+      typeof expectedRevisionOrData === 'number' ? (maybeData ?? {}) : expectedRevisionOrData;
+    const outcome = await this.#client.$transaction(async (transaction) => {
+      const changedAt = new Date();
+      if (expectedRevision === undefined) {
+        const result = await transaction.project.updateMany({
+          where: { id, ownerId, deletedAt: null },
+          data,
+        });
+        if (result.count === 0) throw new ProjectNotFoundError();
+        const row = await transaction.project.findFirst({
+          where: { id, ownerId, deletedAt: null },
+          select: projectSelect,
+        });
+        if (row === null) throw new ProjectNotFoundError();
+        return { kind: 'updated' as const, record: toProjectRecord(row) };
+      }
+      const effectiveRevision = expectedRevision;
       const result = await transaction.project.updateMany({
-        where: { id, ownerId, deletedAt: null },
-        data,
+        where: { id, ownerId, deletedAt: null, revision: effectiveRevision },
+        data: {
+          ...data,
+          revision: { increment: 1 },
+          updatedAt: changedAt,
+        },
       });
 
       if (result.count === 0) {
-        throw new ProjectNotFoundError();
+        const current = await transaction.project.findFirst({
+          where: { id, ownerId },
+          select: { revision: true, deletedAt: true },
+        });
+        if (current === null) {
+          throw new ProjectNotFoundError();
+        }
+        const refreshChangeId =
+          current.deletedAt === null
+            ? await writeProjectUpsert(transaction, id, {
+                targetUserId: ownerId,
+                syncStatus: 'CONFLICT',
+                changedAt,
+              })
+            : await writeDeleteChange(transaction, {
+                projectId: id,
+                ownerId,
+                targetUserId: ownerId,
+                resourceType: 'PROJECT',
+                resourceId: id,
+                revision: current.revision,
+                deletedAt: current.deletedAt,
+                syncStatus: 'CONFLICT',
+              });
+        await upsertSyncConflict(transaction, {
+          userId: ownerId,
+          projectId: id,
+          resourceType: 'PROJECT',
+          resourceId: id,
+          serverRevision: current.revision,
+          refreshChangeId,
+        });
+        return { kind: 'conflict' as const, current };
       }
+
+      await transaction.project.updateMany({
+        where: { id, ownerId, deletedAt: null, syncStatus: 'SYNCED' },
+        data: { lastSyncedAt: changedAt },
+      });
 
       const row = await transaction.project.findFirst({
         where: { id, ownerId, deletedAt: null },
@@ -259,38 +410,203 @@ export class PrismaProjectRepository implements ProjectRepository {
       if (row === null) {
         throw new ProjectNotFoundError();
       }
-
-      return toProjectRecord(row);
+      await resolveSyncConflict(transaction, ownerId, 'PROJECT', id, changedAt);
+      await writeProjectUpsert(transaction, id, { changedAt });
+      return { kind: 'updated' as const, record: toProjectRecord(row) };
     });
+
+    if (outcome.kind === 'conflict') {
+      throw new RevisionConflictError({
+        projectId: id,
+        resourceType: 'PROJECT',
+        resourceId: id,
+        currentRevision: outcome.current.revision,
+        deleted: outcome.current.deletedAt !== null,
+      });
+    }
+    return outcome.record;
   }
 
-  async softDelete(id: string, ownerId: string): Promise<void> {
-    await this.#client.$transaction(async (transaction) => {
+  async softDelete(
+    id: string,
+    ownerId: string,
+    expectedRevision?: number,
+  ): Promise<number | undefined> {
+    const outcome = await this.#client.$transaction(async (transaction) => {
       const project = await transaction.project.findFirst({
         where: { id, ownerId },
-        select: { deletedAt: true },
+        select: {
+          ownerId: true,
+          revision: true,
+          deletedAt: true,
+          scans: {
+            where: { deletedAt: null },
+            select: {
+              id: true,
+              revision: true,
+              notes: { where: { deletedAt: null }, select: { id: true, revision: true } },
+              assets: { where: { deletedAt: null }, select: { id: true, revision: true } },
+            },
+          },
+          accesses: {
+            where: { revokedAt: null },
+            select: { id: true, userId: true, revision: true },
+          },
+        },
       });
 
       if (project === null) {
         throw new ProjectNotFoundError();
       }
 
+      if (project.revision === undefined) {
+        if (project.deletedAt !== null) return { kind: 'deleted' as const, revision: undefined };
+        const deletedAt = new Date();
+        await transaction.project.update({ where: { id }, data: { deletedAt } });
+        await transaction.projectAccess.updateMany({
+          where: { projectId: id, revokedAt: null },
+          data: { revokedAt: deletedAt },
+        });
+        return { kind: 'deleted' as const, revision: undefined };
+      }
+
       if (project.deletedAt !== null) {
-        return;
+        return { kind: 'deleted' as const, revision: project.revision };
       }
 
       const deletedAt = new Date();
-      await transaction.project.update({
-        where: { id },
-        data: { deletedAt },
-      });
-      await transaction.projectAccess.updateMany({
-        where: {
+      if (expectedRevision !== undefined && project.revision !== expectedRevision) {
+        const refreshChangeId = await writeProjectUpsert(transaction, id, {
+          targetUserId: ownerId,
+          syncStatus: 'CONFLICT',
+          changedAt: deletedAt,
+        });
+        await upsertSyncConflict(transaction, {
+          userId: ownerId,
           projectId: id,
-          revokedAt: null,
-        },
-        data: { revokedAt: deletedAt },
+          resourceType: 'PROJECT',
+          resourceId: id,
+          serverRevision: project.revision,
+          refreshChangeId,
+        });
+        return { kind: 'conflict' as const, revision: project.revision };
+      }
+
+      if (expectedRevision !== undefined) {
+        const claimed = await transaction.project.updateMany({
+          where: { id, ownerId, deletedAt: null, revision: expectedRevision },
+          data: { deletedAt, revision: { increment: 1 }, updatedAt: deletedAt },
+        });
+        if (claimed.count === 0) {
+          const current = await transaction.project.findFirst({
+            where: { id, ownerId },
+            select: { revision: true, deletedAt: true },
+          });
+          if (current === null) throw new ProjectNotFoundError();
+          if (current.deletedAt !== null) {
+            return { kind: 'deleted' as const, revision: current.revision };
+          }
+          const refreshChangeId = await writeProjectUpsert(transaction, id, {
+            targetUserId: ownerId,
+            syncStatus: 'CONFLICT',
+            changedAt: deletedAt,
+          });
+          await upsertSyncConflict(transaction, {
+            userId: ownerId,
+            projectId: id,
+            resourceType: 'PROJECT',
+            resourceId: id,
+            serverRevision: current.revision,
+            refreshChangeId,
+          });
+          return { kind: 'conflict' as const, revision: current.revision };
+        }
+      } else {
+        await transaction.project.update({
+          where: { id },
+          data: { deletedAt, revision: { increment: 1 }, updatedAt: deletedAt },
+        });
+      }
+
+      for (const scan of project.scans) {
+        for (const note of scan.notes) {
+          await transaction.note.update({
+            where: { id: note.id },
+            data: { deletedAt, revision: { increment: 1 }, updatedAt: deletedAt },
+          });
+          await writeDeleteChange(transaction, {
+            projectId: id,
+            ownerId,
+            resourceType: 'NOTE',
+            resourceId: note.id,
+            revision: note.revision + 1,
+            deletedAt,
+          });
+        }
+        for (const asset of scan.assets) {
+          await transaction.scanAsset.update({
+            where: { id: asset.id },
+            data: { deletedAt, revision: { increment: 1 }, updatedAt: deletedAt },
+          });
+          await writeDeleteChange(transaction, {
+            projectId: id,
+            ownerId,
+            resourceType: 'SCAN_ASSET',
+            resourceId: asset.id,
+            revision: asset.revision + 1,
+            deletedAt,
+          });
+        }
+        await transaction.scan.update({
+          where: { id: scan.id },
+          data: { deletedAt, revision: { increment: 1 }, updatedAt: deletedAt },
+        });
+        await writeDeleteChange(transaction, {
+          projectId: id,
+          ownerId,
+          resourceType: 'SCAN',
+          resourceId: scan.id,
+          revision: scan.revision + 1,
+          deletedAt,
+        });
+      }
+      for (const access of project.accesses) {
+        await transaction.projectAccess.update({
+          where: { id: access.id },
+          data: { revokedAt: deletedAt, revision: { increment: 1 }, updatedAt: deletedAt },
+        });
+        const change = {
+          projectId: id,
+          ownerId,
+          resourceType: 'PROJECT_ACCESS' as const,
+          resourceId: access.id,
+          revision: access.revision + 1,
+          deletedAt,
+        };
+        await writeDeleteChange(transaction, change);
+        await writeDeleteChange(transaction, { ...change, targetUserId: access.userId });
+      }
+      await writeDeleteChange(transaction, {
+        projectId: id,
+        ownerId,
+        resourceType: 'PROJECT',
+        resourceId: id,
+        revision: project.revision + 1,
+        deletedAt,
       });
+      await resolveSyncConflict(transaction, ownerId, 'PROJECT', id, deletedAt);
+      return { kind: 'deleted' as const, revision: project.revision + 1 };
     });
+
+    if (outcome.kind === 'conflict') {
+      throw new RevisionConflictError({
+        projectId: id,
+        resourceType: 'PROJECT',
+        resourceId: id,
+        currentRevision: outcome.revision,
+        deleted: false,
+      });
+    }
+    return outcome.revision;
   }
 }

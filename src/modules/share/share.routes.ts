@@ -2,6 +2,10 @@ import { Router } from 'express';
 
 import { AppError } from '../../common/errors/app-error.js';
 import {
+  idempotencyErrorToAppError,
+  resolveIdempotencyKey,
+} from '../../common/idempotency/idempotency.js';
+import {
   authenticate,
   getUserId,
   optionalAuthenticate,
@@ -53,6 +57,8 @@ export interface ShareRouterDependencies {
 }
 
 function mapError(error: unknown): AppError | undefined {
+  const idempotencyError = idempotencyErrorToAppError(error);
+  if (idempotencyError !== undefined) return idempotencyError;
   if (error instanceof ProjectNotFoundError) {
     return new AppError({
       statusCode: 404,
@@ -160,15 +166,27 @@ export function createShareRouter({
           body: InvitationCreateBody;
           params: ProjectIdParam;
         };
-        const result = await shareService.createInvitation(userId, params.projectId, {
+        const key = resolveIdempotencyKey(
+          typeof request.headers['idempotency-key'] === 'string'
+            ? request.headers['idempotency-key']
+            : undefined,
+        );
+        const input = {
           recipientEmail: body.recipientEmail,
           ...(body.expiresInSeconds === undefined
             ? {}
             : { expiresInSeconds: body.expiresInSeconds }),
-        });
-        const responseBody = InvitationCreateResponseSchema.parse(result);
+        };
+        const result =
+          typeof shareService.createInvitationIdempotently === 'function'
+            ? await shareService.createInvitationIdempotently(userId, params.projectId, input, key)
+            : {
+                body: await shareService.createInvitation(userId, params.projectId, input),
+                statusCode: 201,
+              };
+        const responseBody = InvitationCreateResponseSchema.parse(result.body);
 
-        response.status(201).json(responseBody);
+        response.status(result.statusCode).json(responseBody);
       } catch (error) {
         next(mapError(error) ?? error);
       }

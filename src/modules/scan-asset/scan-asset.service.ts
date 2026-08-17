@@ -1,3 +1,9 @@
+import { randomUUID } from 'node:crypto';
+
+import type {
+  IdempotencyGateway,
+  IdempotencyResult,
+} from '../../common/idempotency/idempotency.types.js';
 import { ProjectNotFoundError } from '../project/project.errors.js';
 import type { ProjectPermissionService } from '../project/project.permissions.js';
 import { ScanNotFoundError } from '../scan/scan.errors.js';
@@ -6,6 +12,7 @@ import {
   AssetNotReadyError,
   AssetUploadFailedError,
   InvalidAssetRequestError,
+  ModelAlreadyCompletedError,
   ScanAssetNotFoundError,
   StorageUnavailableError,
   UploadSessionExpiredError,
@@ -28,6 +35,7 @@ import type {
   StorageUploadOptions,
   StorageUploadUrl,
 } from '../../infrastructure/storage/storage.types.js';
+import type { PreparedScanCreateUpload, ScanCreateUploadDescriptor } from '../scan/scan.types.js';
 
 export interface ScanAssetServiceDependencies {
   repository: ScanAssetRepository;
@@ -40,6 +48,7 @@ export interface ScanAssetServiceDependencies {
   minModelSizeBytes: number;
   maxModelSizeBytes: number;
   maxThumbnailSizeBytes: number;
+  idempotency?: IdempotencyGateway;
 }
 
 function toMetadata(record: ScanAssetRecord): ScanAssetMetadata {
@@ -52,6 +61,7 @@ function toMetadata(record: ScanAssetRecord): ScanAssetMetadata {
     sizeBytes: record.sizeBytes,
     checksum: record.checksum,
     modelVersion: record.modelVersion,
+    revision: record.revision ?? 1,
     uploadedAt: record.uploadedAt === null ? null : record.uploadedAt.toISOString(),
     uploadSessionId: record.id,
     uploadUrlExpiresAt:
@@ -71,6 +81,7 @@ export class ScanAssetService {
   readonly #minModelSizeBytes: number;
   readonly #maxModelSizeBytes: number;
   readonly #maxThumbnailSizeBytes: number;
+  readonly #idempotency: IdempotencyGateway | undefined;
 
   constructor({
     repository,
@@ -83,6 +94,7 @@ export class ScanAssetService {
     minModelSizeBytes,
     maxModelSizeBytes,
     maxThumbnailSizeBytes,
+    idempotency,
   }: ScanAssetServiceDependencies) {
     this.#repository = repository;
     this.#scanRepository = scanRepository;
@@ -94,6 +106,7 @@ export class ScanAssetService {
     this.#minModelSizeBytes = minModelSizeBytes;
     this.#maxModelSizeBytes = maxModelSizeBytes;
     this.#maxThumbnailSizeBytes = maxThumbnailSizeBytes;
+    this.#idempotency = idempotency;
   }
 
   async #requireView(scanId: string, userId: string): Promise<void> {
@@ -143,6 +156,46 @@ export class ScanAssetService {
     }
   }
 
+  async prepareScanCreateUploads(
+    scanId: string,
+    uploads: ScanCreateUploadDescriptor[],
+  ): Promise<PreparedScanCreateUpload[]> {
+    const now = this.#clock();
+    return await Promise.all(
+      uploads.map(async (upload) => {
+        this.#validateTypePayload(upload.assetType, upload.contentType, upload.sizeBytes);
+        const id = randomUUID();
+        const storageKey = this.#storage.buildObjectKey(scanId, upload.assetType);
+        const expiresAt = new Date(now.getTime() + this.#uploadUrlTtlSeconds * 1000);
+        const signed = await this.#mintUploadUrl(storageKey, {
+          contentType: upload.contentType,
+          sizeBytes: upload.sizeBytes,
+          expiresAt,
+        });
+        return {
+          data: {
+            id,
+            scanId,
+            assetType: upload.assetType,
+            contentType: upload.contentType,
+            sizeBytes: upload.sizeBytes,
+            checksum: upload.checksum ?? null,
+            modelVersion: upload.modelVersion ?? null,
+            storageKey,
+            idempotencyKey: null,
+            uploadUrlExpiresAt: expiresAt,
+          },
+          response: {
+            uploadSessionId: id,
+            assetId: id,
+            uploadUrl: signed.url,
+            uploadUrlExpiresAt: signed.expiresAt.toISOString(),
+          },
+        };
+      }),
+    );
+  }
+
   async #mintUploadUrl(
     objectKey: string,
     options: StorageUploadOptions,
@@ -154,14 +207,16 @@ export class ScanAssetService {
     }
   }
 
-  async #persistThumbnailUrl(asset: ScanAssetRecord): Promise<void> {
-    let displayUrl: string;
+  async #createDisplayUrl(storageKey: string): Promise<string> {
     try {
-      displayUrl = await this.#storage.createDisplayUrl(asset.storageKey);
+      return await this.#storage.createDisplayUrl(storageKey);
     } catch {
       throw new StorageUnavailableError();
     }
+  }
 
+  async #persistThumbnailUrl(asset: ScanAssetRecord): Promise<void> {
+    const displayUrl = await this.#createDisplayUrl(asset.storageKey);
     await this.#scanRepository.updateThumbnail(asset.scanId, displayUrl);
   }
 
@@ -183,6 +238,9 @@ export class ScanAssetService {
     const now = this.#clock();
     const objectKey = this.#storage.buildObjectKey(scanId, data.assetType);
     const existing = await this.#repository.findByScanAndType(scanId, data.assetType);
+    if (existing?.assetType === 'MODEL' && existing.status === 'UPLOADED') {
+      throw new ModelAlreadyCompletedError();
+    }
 
     const uploadOptions: StorageUploadOptions = {
       contentType: data.contentType,
@@ -207,6 +265,7 @@ export class ScanAssetService {
           uploadUrl: uploadUrl.url,
           uploadUrlExpiresAt: expiry.toISOString(),
           created: false,
+          revision: existing.revision ?? 1,
         };
       }
 
@@ -230,6 +289,7 @@ export class ScanAssetService {
         uploadUrl: uploadUrl.url,
         uploadUrlExpiresAt: uploadUrl.expiresAt.toISOString(),
         created: false,
+        revision: updated.revision ?? 1,
       };
     }
 
@@ -254,7 +314,101 @@ export class ScanAssetService {
       uploadUrl: uploadUrl.url,
       uploadUrlExpiresAt: uploadUrl.expiresAt.toISOString(),
       created,
+      revision: record.revision ?? 1,
     };
+  }
+
+  async createUploadSessionIdempotently(
+    userId: string,
+    scanId: string,
+    data: {
+      assetType: ScanAssetType;
+      contentType: string;
+      sizeBytes: number;
+      checksum?: string;
+      modelVersion?: string;
+      idempotencyKey?: string;
+    },
+    key: string,
+  ): Promise<IdempotencyResult<CreateUploadSessionResult>> {
+    if (
+      this.#idempotency === undefined ||
+      this.#repository.saveUploadSessionIdempotently === undefined
+    ) {
+      throw new Error('Scan asset idempotency is not configured');
+    }
+    const canonicalData = {
+      assetType: data.assetType,
+      contentType: data.contentType,
+      sizeBytes: data.sizeBytes,
+      ...(data.checksum === undefined ? {} : { checksum: data.checksum }),
+      ...(data.modelVersion === undefined ? {} : { modelVersion: data.modelVersion }),
+    };
+    const context = this.#idempotency.createContext({
+      userId,
+      operation: 'CREATE_UPLOAD_SESSION',
+      parentScope: `scan:${scanId}`,
+      key,
+      request: canonicalData,
+    });
+    const replay = await this.#idempotency.lookup<CreateUploadSessionResult>(context);
+    if (replay !== null) return replay;
+
+    this.#validateTypePayload(data.assetType, data.contentType, data.sizeBytes);
+    await this.#requireOwner(scanId, userId);
+    const now = this.#clock();
+    const existing = await this.#repository.findByScanAndType(scanId, data.assetType);
+    if (existing?.assetType === 'MODEL' && existing.status === 'UPLOADED') {
+      throw new ModelAlreadyCompletedError();
+    }
+
+    const active =
+      existing !== null &&
+      (existing.status === 'PENDING' || existing.status === 'UPLOADING') &&
+      existing.uploadUrlExpiresAt !== null &&
+      existing.uploadUrlExpiresAt > now;
+    const objectKey = active
+      ? existing.storageKey
+      : this.#storage.buildObjectKey(scanId, data.assetType);
+    const expiresAt = active
+      ? (existing.uploadUrlExpiresAt as Date)
+      : new Date(now.getTime() + this.#uploadUrlTtlSeconds * 1000);
+    const uploadUrl = await this.#mintUploadUrl(objectKey, {
+      contentType: data.contentType,
+      sizeBytes: data.sizeBytes,
+      expiresAt,
+    });
+    const assetId = existing?.id ?? randomUUID();
+    const revision = active ? (existing.revision ?? 1) : (existing?.revision ?? 0) + 1;
+    const result: CreateUploadSessionResult = {
+      uploadSessionId: assetId,
+      assetId,
+      assetType: data.assetType,
+      status: active ? existing.status : 'PENDING',
+      uploadUrl: uploadUrl.url,
+      uploadUrlExpiresAt: expiresAt.toISOString(),
+      created: existing === null,
+      revision,
+    };
+    const createData: ScanAssetCreateData = {
+      id: assetId,
+      scanId,
+      assetType: data.assetType,
+      contentType: data.contentType,
+      sizeBytes: data.sizeBytes,
+      checksum: data.checksum ?? existing?.checksum ?? null,
+      modelVersion: data.modelVersion ?? existing?.modelVersion ?? null,
+      storageKey: objectKey,
+      idempotencyKey: null,
+      uploadUrlExpiresAt: expiresAt,
+    };
+    return await this.#repository.saveUploadSessionIdempotently(
+      existing?.id ?? null,
+      createData,
+      context,
+      result,
+      active,
+    );
   }
 
   async completeUpload(
@@ -270,10 +424,12 @@ export class ScanAssetService {
 
     if (asset.status === 'UPLOADED') {
       if (asset.assetType === 'MODEL') {
-        await this.#scanRepository.updateAssetStatus(asset.scanId, {
-          assetStatus: 'UPLOADED',
-          syncStatus: 'SYNCED',
-        });
+        if (this.#repository.managesSyncRollups !== true) {
+          await this.#scanRepository.updateAssetStatus(asset.scanId, {
+            assetStatus: 'UPLOADED',
+            syncStatus: 'SYNCED',
+          });
+        }
       } else {
         await this.#persistThumbnailUrl(asset);
       }
@@ -319,14 +475,21 @@ export class ScanAssetService {
       uploadUrlExpiresAt: null,
     };
     if (data.checksum !== undefined) update.checksum = data.checksum;
+
+    if (asset.assetType === 'THUMBNAIL' && this.#repository.managesSyncRollups === true) {
+      update.thumbnailUrl = await this.#createDisplayUrl(asset.storageKey);
+    }
+
     const updated = await this.#repository.update(asset.id, update);
 
     if (asset.assetType === 'MODEL') {
-      await this.#scanRepository.updateAssetStatus(asset.scanId, {
-        assetStatus: 'UPLOADED',
-        syncStatus: 'SYNCED',
-      });
-    } else {
+      if (this.#repository.managesSyncRollups !== true) {
+        await this.#scanRepository.updateAssetStatus(asset.scanId, {
+          assetStatus: 'UPLOADED',
+          syncStatus: 'SYNCED',
+        });
+      }
+    } else if (this.#repository.managesSyncRollups !== true) {
       await this.#persistThumbnailUrl(asset);
     }
 
@@ -387,10 +550,12 @@ export class ScanAssetService {
     const updated = await this.#repository.update(asset.id, { status: 'FAILED' });
 
     if (asset.assetType === 'MODEL') {
-      await this.#scanRepository.updateAssetStatus(asset.scanId, {
-        assetStatus: 'FAILED',
-        syncStatus: 'FAILED',
-      });
+      if (this.#repository.managesSyncRollups !== true) {
+        await this.#scanRepository.updateAssetStatus(asset.scanId, {
+          assetStatus: 'FAILED',
+          syncStatus: 'FAILED',
+        });
+      }
     }
 
     return toMetadata(updated);
