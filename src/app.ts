@@ -35,6 +35,8 @@ import type { ShareLinkService } from './modules/share/share-link.service.js';
 import type { ShareService } from './modules/share/share.service.js';
 import { createSharedProjectsRouter } from './modules/shared-projects/shared-projects.routes.js';
 import type { SharedProjectsService } from './modules/shared-projects/shared-projects.service.js';
+import { createSharedScansRouter } from './modules/shared-scans/shared-scans.routes.js';
+import type { SharedScansService } from './modules/shared-scans/shared-scans.service.js';
 import { createOpenApiDocument } from './openapi/document.js';
 
 export interface AppDependencies {
@@ -50,6 +52,7 @@ export interface AppDependencies {
   shareService: ShareService;
   shareLinkService: ShareLinkService;
   sharedProjectsService: SharedProjectsService;
+  sharedScansService: SharedScansService;
   accessTokenVerifier: AccessTokenVerifier;
   currentUserRepository: CurrentUserRepository;
   rateLimiters: RateLimiters;
@@ -84,6 +87,7 @@ export function createApp({
   shareService,
   shareLinkService,
   sharedProjectsService,
+  sharedScansService,
   accessTokenVerifier,
   currentUserRepository,
   rateLimiters,
@@ -213,6 +217,14 @@ export function createApp({
     API_PREFIX,
     createSharedProjectsRouter({
       sharedProjectsService,
+      accessTokenVerifier,
+      currentUserRepository,
+    }),
+  );
+  app.use(
+    API_PREFIX,
+    createSharedScansRouter({
+      sharedScansService,
       accessTokenVerifier,
       currentUserRepository,
     }),

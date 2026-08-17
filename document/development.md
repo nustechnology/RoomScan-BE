@@ -82,7 +82,9 @@ the local user accepted (or was granted) as a Viewer — "Garden House"
 (`ACTIVE`), "Maple Cottage" (`REVOKED`), "Willow Townhouse"
 (`PROJECT_DELETED`), and "Cedar Bungalow" (`TEMPORARILY_UNAVAILABLE`) — so the
 Shared With Me list exercises every status and the viewer-removal flow is
-demoable locally. With the shortcut enabled, use:
+demoable locally. It also seeds a couple of scan-level Viewers for the local
+user — "Garden Studio" (`ACTIVE`) and "Cottage Living Room" (`REVOKED`) — so the
+Shared Scans surface is demoable locally too. With the shortcut enabled, use:
 
 ```json
 {
@@ -112,9 +114,10 @@ field, or response shape changes, add or update the matching request in the
 collection on the same branch. The collection description documents setup, the
 sequential upload flow, the project and scan invitation sharing flow (including
 the `409` states and token rotation), generic share links (project and scan),
-and the Shared With Me endpoints. The scanned sharing and generic share-link
-endpoints live in the _Sharing & Invitations_ folder (scan invitations, list
-scan shares, revoke scan viewer) and in a dedicated _Share Links_ folder.
+and the Shared With Me endpoints. The _Sharing & Invitations_ folder is split
+into _Projects_, _Scans_, and _General_ subfolders, as is the dedicated
+_Share Links_ folder (scan/project links plus the shared token preview/accept
+requests). The Shared With Me surface covers both projects and scans.
 
 ## Before handoff
 

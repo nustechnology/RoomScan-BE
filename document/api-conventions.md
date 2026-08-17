@@ -34,7 +34,9 @@
 - Shared With Me lists, opens, and self-removes accepted projects for the
   current Viewer at `GET /api/v1/shared-projects`,
   `GET /api/v1/shared-projects/:projectId`, and
-  `DELETE /api/v1/shared-projects/:projectId`.
+  `DELETE /api/v1/shared-projects/:projectId`; the same read-only surface is
+  available for scan-level sharing at `GET /api/v1/shared-scans`,
+  `GET /api/v1/shared-scans/:scanId`, and `DELETE /api/v1/shared-scans/:scanId`.
 - Swagger UI remains at `/api-doc`; raw OpenAPI is `/api-doc.json`.
 - Resource paths use plural nouns and kebab-case when business modules arrive.
 
@@ -1064,6 +1066,138 @@ Error behavior:
   inaccessible to the current user (detail only).
 - `409 NOT_IN_SHARED_WITH_ME`: the project is not in the current user's Shared
   With Me list (removal only).
+- `429 RATE_LIMIT_EXCEEDED`: API quota exceeded.
+- `500 INTERNAL_SERVER_ERROR`: unexpected failure without Prisma, SQL, or secret
+  leakage.
+
+## Shared Scans
+
+Every Shared Scans endpoint requires a valid Bearer access token and mirrors the
+project-level Shared With Me surface, but at scan granularity. The list contains
+every scan the current user accepted a scan-level invitation or share link for,
+each with a computed `status`; scans owned by the current user never appear.
+Removing a scan revokes only the current user's own `scan_accesses` row: the
+original scan, the Owner, and other Viewers are never affected.
+
+| Method   | Endpoint                       | Result                                             |
+| -------- | ------------------------------ | -------------------------------------------------- |
+| `GET`    | `/api/v1/shared-scans`         | List scans shared with the current user; paginated |
+| `GET`    | `/api/v1/shared-scans/:scanId` | Get shared scan detail; active Viewer only         |
+| `DELETE` | `/api/v1/shared-scans/:scanId` | Remove a scan from the current user's list         |
+
+Shared scan item (list and detail share the same shape):
+
+```json
+{
+  "id": "a1b2c3d4-e5f6-4890-abcd-ef1234567890",
+  "projectId": "11111111-2222-4333-8444-555555555555",
+  "name": "Living Room Scan",
+  "description": null,
+  "thumbnail": null,
+  "creator": {
+    "id": "eb5d278f-c857-45c7-887d-7be65288cb75",
+    "email": "owner@example.com"
+  },
+  "noteCount": 4,
+  "assetStatus": "UPLOADED",
+  "syncStatus": "SYNCED",
+  "modelVersion": 1,
+  "updatedAt": "2026-07-29T10:00:00.000Z",
+  "status": "ACTIVE",
+  "permissions": {
+    "role": "VIEWER",
+    "canView": true,
+    "canEdit": false,
+    "canDelete": false
+  }
+}
+```
+
+`creator.email` is nullable. `noteCount` counts notes on the scan. `permissions`
+is always `VIEWER` and read-only; `canView` is `true` only while the scan is
+`ACTIVE`. `status` is one of:
+
+- `ACTIVE`: the access row is active and the scan is not deleted; the scan can
+  be opened.
+- `REVOKED`: the Owner revoked the Viewer, or the Viewer removed the scan; the
+  scan cannot be opened.
+- `SCAN_DELETED`: the scan was soft-deleted and its access rows were revoked;
+  the scan cannot be opened.
+- `TEMPORARILY_UNAVAILABLE`: a defensive state for an inconsistent access record
+  (for example a deleted scan whose access row is still active); the scan cannot
+  be opened.
+
+The list supports case-insensitive name search and page-based pagination:
+
+```http
+GET /api/v1/shared-scans?search=living&page=1&limit=5&sort=updatedAt:desc
+```
+
+```json
+{
+  "items": [],
+  "pagination": {
+    "page": 1,
+    "limit": 5,
+    "total": 0,
+    "totalPages": 0
+  }
+}
+```
+
+Blank `search` values are treated as absent. `page` defaults to 1; `limit`
+defaults to 5 and may not exceed 100. `sort` defaults to `updatedAt:desc`.
+Supported values are the same allow-list as owned scans (`updatedAt`, `createdAt`,
+and `name`, each `:asc` or `:desc`), and every order uses the scan `id` as its
+final stable tie-breaker.
+
+Detail `200` returns a shared scan only while its status is `ACTIVE`; revoked,
+deleted, and never-shared scans are hidden behind `404 SCAN_NOT_FOUND`.
+
+Remove `200`:
+
+```json
+{
+  "scanId": "a1b2c3d4-e5f6-4890-abcd-ef1234567890",
+  "removedAt": "2026-07-29T10:00:00.000Z"
+}
+```
+
+Validation rules:
+
+- `scanId`: UUID.
+- `search`: optional trimmed string, maximum 50 characters; blank treated as
+  absent.
+- `page` and `limit`: positive integers, `limit` at most 100.
+- `sort`: allow-listed values only; unknown values are rejected.
+
+Business rules:
+
+- Shared Scans lists scans accepted by the current user; scans owned by the
+  current user never appear, so the Owner of a scan cannot open or remove it
+  here.
+- An active Viewer can open a shared scan read-only. Deeper navigation (notes,
+  assets) uses the canonical scan endpoints, which already authorize active
+  Viewers.
+- Revoking a Viewer (Owner action) or deleting the scan leaves the entry in the
+  Viewer's list with `status` `REVOKED` or `SCAN_DELETED`, but the scan can no
+  longer be opened.
+- Removing a scan is a Viewer-only self-service action: it sets `revokedAt` on
+  the current user's `scan_accesses` row only, never the Owner's scan, and never
+  other Viewers' access.
+- Removing an entry that is not in Shared Scans (already removed, Owner-revoked,
+  or never shared) returns `409`.
+
+Error behavior:
+
+- `400 VALIDATION_ERROR`: invalid path or query parameters.
+- `401 UNAUTHORIZED`: missing/invalid access token or missing current user.
+- `403 NOT_SHARED_SCAN`: the current user owns the scan, so it can never be in
+  their Shared With Me list (removal only).
+- `404 SCAN_NOT_FOUND`: the scan is missing, revoked, deleted, or inaccessible
+  to the current user (detail only).
+- `409 NOT_IN_SHARED_WITH_ME`: the scan is not in the current user's Shared With
+  Me list (removal only).
 - `429 RATE_LIMIT_EXCEEDED`: API quota exceeded.
 - `500 INTERNAL_SERVER_ERROR`: unexpected failure without Prisma, SQL, or secret
   leakage.

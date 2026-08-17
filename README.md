@@ -138,6 +138,9 @@ the local PostgreSQL and MinIO data volumes.
 | `GET`    | `/api/v1/shared-projects`                              | List projects shared with the current user                         |
 | `GET`    | `/api/v1/shared-projects/:projectId`                   | Get a shared project read-only                                     |
 | `DELETE` | `/api/v1/shared-projects/:projectId`                   | Remove a project from the user's Shared With Me list               |
+| `GET`    | `/api/v1/shared-scans`                                 | List scans shared with the current user                            |
+| `GET`    | `/api/v1/shared-scans/:scanId`                         | Get a shared scan read-only                                        |
+| `DELETE` | `/api/v1/shared-scans/:scanId`                         | Remove a scan from the user's Shared With Me list                  |
 | `GET`    | `/api-doc`                                             | Interactive Swagger UI                                             |
 | `GET`    | `/api-doc.json`                                        | Generated OpenAPI 3.1 document                                     |
 
@@ -305,6 +308,16 @@ hidden behind `404`), and
 `DELETE /api/v1/shared-projects/:projectId` removes the project from the user's
 own list without affecting the Owner, the project, or other Viewers. The list
 supports the same `search`/`page`/`limit`/`sort` pagination as owned projects.
+
+The scan-granularity surface mirrors this: `GET /api/v1/shared-scans` lists every
+scan the current user accepted a scan-level invitation or share link for, each
+with a computed `status` (`ACTIVE`, `REVOKED`, `SCAN_DELETED`, or
+`TEMPORARILY_UNAVAILABLE`) and read-only permissions. Owned scans never appear.
+`GET /api/v1/shared-scans/:scanId` opens an active shared scan read-only
+(revoked/deleted/never-shared scans are hidden behind `404`), and
+`DELETE /api/v1/shared-scans/:scanId` removes the scan from the user's own list
+without affecting the Owner, the scan, or other Viewers. The list supports the
+same `search`/`page`/`limit`/`sort` pagination as owned scans.
 
 For nonce-bound sign-in, the client generates a raw nonce, sends its lowercase
 hexadecimal SHA-256 digest to Apple, and sends the raw nonce in the request

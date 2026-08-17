@@ -27,6 +27,7 @@ import type { NoteService } from '../src/modules/note/note.service.js';
 import type { ShareService } from '../src/modules/share/share.service.js';
 import type { ShareLinkService } from '../src/modules/share/share-link.service.js';
 import type { SharedProjectsService } from '../src/modules/shared-projects/shared-projects.service.js';
+import type { SharedScansService } from '../src/modules/shared-scans/shared-scans.service.js';
 import type { ProjectResult, ProjectRole } from '../src/modules/project/project.types.js';
 
 const ACCESS_SECRET = 'access-secret-that-is-at-least-32-characters';
@@ -202,6 +203,11 @@ describe('Project HTTP endpoints', () => {
     detail: vi.fn(),
     remove: vi.fn(),
   } as unknown as SharedProjectsService;
+  const sharedScansService = {
+    list: vi.fn(),
+    detail: vi.fn(),
+    remove: vi.fn(),
+  } as unknown as SharedScansService;
   const app = createApp({
     config,
     database,
@@ -215,6 +221,7 @@ describe('Project HTTP endpoints', () => {
     shareService,
     shareLinkService,
     sharedProjectsService,
+    sharedScansService,
     accessTokenVerifier,
     currentUserRepository,
     rateLimiters,

@@ -11,6 +11,7 @@ export const LOCAL_TEST_PENDING_INVITE_EMAIL = 'pending-invite@roomscan.dev';
 export const LOCAL_TEST_SHARED_PROJECT_ID = '00000000-0000-4000-8000-000000000104';
 export const LOCAL_TEST_SHARED_PROJECT_NAME = 'Garden House';
 export const LOCAL_TEST_SHARED_SCAN_ID = '00000000-0000-4000-8000-000000000208';
+export const LOCAL_TEST_REVOKED_SHARED_SCAN_ID = '00000000-0000-4000-8000-000000000209';
 
 const LOCAL_TEST_DELETED_AT = new Date('2026-08-01T00:00:00.000Z');
 
@@ -172,6 +173,17 @@ export const LOCAL_TEST_PROJECTS: LocalTestProjectSeed[] = [
         modelVersion: 1,
       },
     ],
+  },
+];
+
+export const LOCAL_TEST_SCAN_ACCESSES = [
+  {
+    scanId: LOCAL_TEST_SHARED_SCAN_ID,
+    accessRevokedAt: null,
+  },
+  {
+    scanId: LOCAL_TEST_REVOKED_SHARED_SCAN_ID,
+    accessRevokedAt: LOCAL_TEST_DELETED_AT,
   },
 ];
 
@@ -369,6 +381,29 @@ export async function seedLocalTestProject(client: SeedClient): Promise<{ invita
         revokedAt: null,
       },
     });
+
+    for (const scanAccess of LOCAL_TEST_SCAN_ACCESSES) {
+      await transaction.scanAccess.upsert({
+        where: {
+          scanId_userId: {
+            scanId: scanAccess.scanId,
+            userId: LOCAL_TEST_USER_ID,
+          },
+        },
+        create: {
+          scanId: scanAccess.scanId,
+          userId: LOCAL_TEST_USER_ID,
+          role: 'VIEWER',
+          acceptedAt: new Date(),
+          revokedAt: scanAccess.accessRevokedAt,
+        },
+        update: {
+          role: 'VIEWER',
+          acceptedAt: new Date(),
+          revokedAt: scanAccess.accessRevokedAt,
+        },
+      });
+    }
 
     const rawToken = generateInvitationToken();
     await transaction.invitation.upsert({
