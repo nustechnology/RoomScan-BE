@@ -110,8 +110,11 @@ The `postman/` directory holds the operator-facing API test collection
 them in sync with the public HTTP surface: whenever a public route, request
 field, or response shape changes, add or update the matching request in the
 collection on the same branch. The collection description documents setup, the
-sequential upload flow, the invitation sharing flow (including the `409`
-states and token rotation), and the Shared With Me endpoints.
+sequential upload flow, the project and scan invitation sharing flow (including
+the `409` states and token rotation), generic share links (project and scan),
+and the Shared With Me endpoints. The scanned sharing and generic share-link
+endpoints live in the _Sharing & Invitations_ folder (scan invitations, list
+scan shares, revoke scan viewer) and in a dedicated _Share Links_ folder.
 
 ## Before handoff
 

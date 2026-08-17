@@ -2,7 +2,7 @@
 	"info": {
 		"_postman_id": "aff34309-3dd8-4bb2-ab68-c177c4ffa8f6",
 		"name": "RoomScan - Staging",
-		"description": "Postman collection covering the full RoomScan API surface at https://roomscan-be.onrender.com (all `/api/v1` routes plus the Swagger docs endpoints).\n\n## Setup\n1. Create an environment (or edit the collection variables) and fill in:\n   - `baseUrl` (default already set)\n   - `accessToken` + `refreshToken` from a working RoomScan session, or run **Auth > Apple Sign In** to mint a pair\n   - `projectId` (or run **Projects > Create Project** to populate it)\n2. For Apple Sign In on staging you need a real Apple identity token; for local development with `LOCAL_TEST_AUTH_ENABLED=true` use the sentinel `roomscan-local-test-user` as the `appleIdentityToken`.\n3. For model uploads, set these variables before running the upload requests:\n   - `contentType` (e.g. `model/usdz`)\n   - `sizeBytes` (exact file byte size: `stat -c%s model.usdz`)\n   - `checksum` (e.g. `sha256sum model.usdz | awk '{print $1}'`)\n   - `modelVersion`\n4. The thumbnail is optional. To upload one in the same call, set `thumbnailSizeBytes` (exact byte size) and `thumbnailContentType` (`image/jpeg` or `image/png`); otherwise delete the `thumbnail` block from the create-scan body.\n5. In **Upload Flow**, select your files in the Body tabs of the two PUT requests (`PUT model file to presigned URL` and `PUT thumbnail to presigned URL`).\n6. For the Sharing & Invitations flow, `recipientEmail` defaults to `recipient@example.com`; the **Create Invitation** request saves `invitationId` and the raw `invitationToken` automatically.\n7. The **RoomScan - Local** environment pre-fills `projectId`, `scanId`, `noteId`, and `invitationId` from the seeded data, but not `invitationToken`: the seed rotates it on every `yarn seed:local` run and stores only its SHA-256 hash. Copy the token from the seed's printed `Demo invitation link` (the part after `/invitations/`) or run **Create Invitation** to populate it.\n\nCollection-level **Bearer Token** auth ({{accessToken}}) is applied to every request except the presigned PUTs and the anonymous invitation preview, which deliberately override to No Auth.\n\n## Gotchas\n- Each presigned PUT must use a **binary/file body** (not form-data) and the byte size must match the matching `sizeBytes` variable exactly.\n- `scanFile` size must be between 10 MB and 100 MB; thumbnails are capped at 10 MB.\n- `thumbnail` and `scanFile` are independent: one create call may include both, only the model, or only the thumbnail.\n- Each minted session is completed separately (`Complete model upload session` and `Complete thumbnail upload session`).\n- Presigned upload URLs expire after the configured TTL, so run the upload flow steps in sequence.\n- `/auth/refresh` rotates tokens (old one is revoked) and is rate-limited (10 req / 15 min). Run it, then use the returned pair.\n- A project is shareable only after it has at least one non-deleted scan with an uploaded model (`assetStatus = UPLOADED`); otherwise creating an invitation returns `409 PROJECT_NOT_SHAREABLE`.\n- One pending invitation is allowed per `(project, recipientEmail)`; a duplicate returns `409 INVITATION_ALREADY_SENT`. An expired link does not block re-inviting the recipient.\n- `POST /invitations/:invitationId/resend` rotates the token — the previous link stops working and `invitationToken` is refreshed.\n- The project Owner cannot accept or decline their own invitation (`409 CANNOT_ACCEPT_OWN_INVITATION`) and cannot accept twice; use a second user's token (override the request auth) to exercise the accept/decline flow.\n- `DELETE` endpoints that return `204` have no response body.\n- `projectId` must be owned by your token's user, otherwise the API returns `403 NOT_OWNER` (share management) or `404 PROJECT_NOT_FOUND`.",
+		"description": "Postman collection covering the full RoomScan API surface at https://roomscan-be.onrender.com (all `/api/v1` routes plus the Swagger docs endpoints).\n\n## Setup\n1. Create an environment (or edit the collection variables) and fill in:\n   - `baseUrl` (default already set)\n   - `accessToken` + `refreshToken` from a working RoomScan session, or run **Auth > Apple Sign In** to mint a pair\n   - `projectId` (or run **Projects > Create Project** to populate it)\n2. For Apple Sign In on staging you need a real Apple identity token; for local development with `LOCAL_TEST_AUTH_ENABLED=true` use the sentinel `roomscan-local-test-user` as the `appleIdentityToken`.\n3. For model uploads, set these variables before running the upload requests:\n   - `contentType` (e.g. `model/usdz`)\n   - `sizeBytes` (exact file byte size: `stat -c%s model.usdz`)\n   - `checksum` (e.g. `sha256sum model.usdz | awk '{print $1}'`)\n   - `modelVersion`\n4. The thumbnail is optional. To upload one in the same call, set `thumbnailSizeBytes` (exact byte size) and `thumbnailContentType` (`image/jpeg` or `image/png`); otherwise delete the `thumbnail` block from the create-scan body.\n5. In **Upload Flow**, select your files in the Body tabs of the two PUT requests (`PUT model file to presigned URL` and `PUT thumbnail to presigned URL`).\n6. For the Sharing & Invitations flow, `recipientEmail` defaults to `recipient@example.com`; the **Create Invitation** request saves `invitationId` and the raw `invitationToken` automatically. Scan-scope invitations and generic **Share Links** are covered in the *Share Links* folder and the scan-sharing requests in *Sharing & Invitations*: create a scan invitation with **Create Scan Invitation**, list scan shares with **List Scan Shares**, and generate reusable links (no email) with the **Create ... Share Link** requests, which save `shareLinkId` and the raw `shareLinkToken`. The token preview/accept/decline endpoints resolve both invitations and share links for both scopes.\n7. The **RoomScan - Local** environment pre-fills `projectId`, `scanId`, `noteId`, and `invitationId` from the seeded data, but not `invitationToken`: the seed rotates it on every `yarn seed:local` run and stores only its SHA-256 hash. Copy the token from the seed's printed `Demo invitation link` (the part after `/invitations/`) or run **Create Invitation** to populate it.\n\nCollection-level **Bearer Token** auth ({{accessToken}}) is applied to every request except the presigned PUTs and the anonymous invitation preview, which deliberately override to No Auth.\n\n## Gotchas\n- Each presigned PUT must use a **binary/file body** (not form-data) and the byte size must match the matching `sizeBytes` variable exactly.\n- `scanFile` size must be between 10 MB and 100 MB; thumbnails are capped at 10 MB.\n- `thumbnail` and `scanFile` are independent: one create call may include both, only the model, or only the thumbnail.\n- Each minted session is completed separately (`Complete model upload session` and `Complete thumbnail upload session`).\n- Presigned upload URLs expire after the configured TTL, so run the upload flow steps in sequence.\n- `/auth/refresh` rotates tokens (old one is revoked) and is rate-limited (10 req / 15 min). Run it, then use the returned pair.\n- A project is shareable only after it has at least one non-deleted scan with an uploaded model (`assetStatus = UPLOADED`); otherwise creating an invitation returns `409 PROJECT_NOT_SHAREABLE`.\n- One pending invitation is allowed per `(project, recipientEmail)`; a duplicate returns `409 INVITATION_ALREADY_SENT`. An expired link does not block re-inviting the recipient.\n- `POST /invitations/:invitationId/resend` rotates the token — the previous link stops working and `invitationToken` is refreshed.\n- The project Owner cannot accept or decline their own invitation (`409 CANNOT_ACCEPT_OWN_INVITATION`) and cannot accept twice; use a second user's token (override the request auth) to exercise the accept/decline flow.\n- `DELETE` endpoints that return `204` have no response body.\n- `projectId` must be owned by your token's user, otherwise the API returns `403 NOT_OWNER` (share management) or `404 PROJECT_NOT_FOUND`.",
 		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
 		"_exporter_id": "12630530"
 	},
@@ -1292,64 +1292,64 @@
 					"response": []
 				},
 				{
-					"name": "Preview Invitation",
-					"request": {
-						"auth": {
-							"type": "noauth"
-						},
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/invitations/{{invitationToken}}",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"invitations",
-								"{{invitationToken}}"
-							]
-						},
-						"description": "Previews an invitation anonymously (this request deliberately overrides auth to No Auth). Returns the safe project summary, `status` (PENDING/EXPIRED/ACCEPTED/DECLINED/REVOKED), `recipientEmail`, `sentAt`, and `expiresAt`. A valid Bearer token can be added to also receive `hasAccess`."
+						"name": "Preview Invitation",
+						"request": {
+							"auth": {
+								"type": "noauth"
+							},
+							"method": "GET",
+							"header": [],
+							"url": {
+								"raw": "{{baseUrl}}/invitations/{{invitationToken}}",
+								"host": [
+									"{{baseUrl}}"
+								],
+								"path": [
+									"invitations",
+									"{{invitationToken}}"
+								]
+							},
+						"description": "Previews a token anonymously (this request deliberately overrides auth to No Auth). Resolves either an invitation or a generic share link for a project or scan, returning `type` (`invitation` or `share-link`), `scope` (`project` or `scan`), the matching `project`/`scan` entity, and a `status` (PENDING/EXPIRED/ACCEPTED/DECLINED/REVOKED for invitations; ACTIVE/EXPIRED/REVOKED for share links). Invitations also return `recipientEmail`, `sentAt`, and `expiresAt`. A valid Bearer token can be added to also receive `hasAccess`. Use the **Share Links > Preview Share Link** request when working from a `shareLinkToken`."
 					},
 					"response": []
 				},
 				{
-					"name": "Accept Invitation",
-					"request": {
-						"method": "POST",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/invitations/{{invitationToken}}/accept",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"invitations",
-								"{{invitationToken}}",
-								"accept"
-							]
-						},
-						"description": "Accepts the invitation with the current user's token and gains Viewer access (`200`). The project Owner cannot accept their own invitation (`409 CANNOT_ACCEPT_OWN_INVITATION`), and a user who already has active access gets `409 ACCESS_ALREADY_EXISTS` — override this request's auth with the invitee's token to exercise the flow. The first acceptance wins (`409 INVITATION_ALREADY_ACCEPTED` afterwards)."
+						"name": "Accept Invitation",
+						"request": {
+							"method": "POST",
+							"header": [],
+							"url": {
+								"raw": "{{baseUrl}}/invitations/{{invitationToken}}/accept",
+								"host": [
+									"{{baseUrl}}"
+								],
+								"path": [
+									"invitations",
+									"{{invitationToken}}",
+									"accept"
+								]
+							},
+						"description": "Accepts the token with the current user's token and gains Viewer access (`200`). Resolves invitations (project or scan scope) and generic share links; the response is discriminated by `type` and `scope`. The resource Owner cannot accept their own link (`409 CANNOT_ACCEPT_OWN_INVITATION`), and a user who already has active access gets `409 ACCESS_ALREADY_EXISTS` — override this request's auth with the invitee's token to exercise the flow. For invitations, the first acceptance wins (`409 INVITATION_ALREADY_ACCEPTED` afterwards); a share-link acceptance does not consume the link."
 					},
 					"response": []
 				},
 				{
-					"name": "Decline Invitation",
-					"request": {
-						"method": "POST",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/invitations/{{invitationToken}}/decline",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"invitations",
-								"{{invitationToken}}",
-								"decline"
-							]
-						},
-						"description": "Declines the invitation for the current user (`200`, status becomes DECLINED). Same ownership rules as accept: the Owner cannot decline their own link (`409 CANNOT_ACCEPT_OWN_INVITATION`)."
+						"name": "Decline Invitation",
+						"request": {
+							"method": "POST",
+							"header": [],
+							"url": {
+								"raw": "{{baseUrl}}/invitations/{{invitationToken}}/decline",
+								"host": [
+									"{{baseUrl}}"
+								],
+								"path": [
+									"invitations",
+									"{{invitationToken}}",
+									"decline"
+								]
+							},
+						"description": "Declines the invitation for the current user (`200`, status becomes DECLINED). Applies to per-recipient invitations only — the Owner cannot decline their own link (`409 CANNOT_ACCEPT_OWN_INVITATION`). Generic share links cannot be declined (they are not addressed to anyone)."
 					},
 					"response": []
 				},
@@ -1429,6 +1429,331 @@
 							]
 						},
 						"description": "Revokes a Viewer's project access (Owner only; `200`). The revoked Viewer immediately loses project, scan, note, and asset-download access. `404 ACCESS_NOT_FOUND` when no access record exists."
+					},
+					"response": []
+				},
+				{
+					"name": "Create Scan Invitation",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"const json = pm.response.json();",
+									"pm.test(\"Scan invitation created\", function () {",
+									"  pm.response.to.have.status(201);",
+									"  pm.expect(json.invitationId).to.be.a('string').and.not.empty;",
+									"  pm.expect(json.invitationUrl).to.be.a('string').and.not.empty;",
+									"  pm.expect(json.status).to.eql(\"PENDING\");",
+									"});",
+									"pm.environment.set(\"scanInvitationId\", json.invitationId);",
+									"pm.environment.set(\"invitationId\", json.invitationId);",
+									"pm.environment.set(\"recipientEmail\", json.recipientEmail);",
+									"const token = (json.invitationUrl || \"\").split(\"/invitations/\")[1] || \"\";",
+									"pm.environment.set(\"invitationToken\", token);"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"recipientEmail\": \"{{recipientEmail}}\",\n  \"expiresInSeconds\": 604800\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/scans/{{scanId}}/invitations",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"scans",
+								"{{scanId}}",
+								"invitations"
+							]
+						},
+						"description": "Creates a per-recipient scan-scope invitation (Owner of the parent project only; `201`) and emails it to the recipient, granting view access to only this scan and its notes (not other scans in the project). Saves `scanInvitationId`, `invitationId`, `recipientEmail`, and the raw `invitationToken`. `expiresInSeconds` is optional (60-2,592,000; defaults to the configured TTL).\n\nThe scan must have an uploaded model (`409 SCAN_NOT_SHAREABLE` otherwise). A second pending invitation for the same email and scan returns `409 INVITATION_ALREADY_SENT`. Resend, preview, accept, decline, and revoke use the same `/invitations` endpoints with the saved ids/token."
+					},
+					"response": []
+				},
+				{
+					"name": "List Scan Shares",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"const json = pm.response.json();",
+									"pm.test(\"Scan shares listed\", function () {",
+									"  pm.response.to.have.status(200);",
+									"  pm.expect(json.pendingInvitations).to.be.an('array');",
+									"  pm.expect(json.viewers).to.be.an('array');",
+									"});",
+									"if (Array.isArray(json.viewers) && json.viewers.length > 0) {",
+									"  pm.environment.set(\"scanViewerUserId\", json.viewers[0].userId);",
+									"}"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/scans/{{scanId}}/shares",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"scans",
+								"{{scanId}}",
+								"shares"
+							]
+						},
+						"description": "Lists scan-scope pending invitations (labelled EXPIRED once past `expiresAt`) and active scan Viewers for the owner. The first active scan Viewer's `userId` is saved to the `scanViewerUserId` environment variable for **Revoke Scan Viewer**."
+					},
+					"response": []
+				},
+				{
+					"name": "Revoke Scan Viewer",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/scans/{{scanId}}/shares/{{scanViewerUserId}}",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"scans",
+								"{{scanId}}",
+								"shares",
+								"{{scanViewerUserId}}"
+							]
+						},
+						"description": "Revokes a scan Viewer's access (Owner only; `200`). The revoked Viewer immediately loses read access to that scan, its notes, and its assets, but never had project access. `404 ACCESS_NOT_FOUND` when no scan access record exists."
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Share Links",
+			"item": [
+				{
+					"name": "Create Project Share Link",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"const json = pm.response.json();",
+									"pm.test(\"Project share link created\", function () {",
+									"  pm.response.to.have.status(201);",
+									"  pm.expect(json.shareLinkId).to.be.a('string').and.not.empty;",
+									"  pm.expect(json.shareLinkUrl).to.be.a('string').and.not.empty;",
+									"  pm.expect(json.scope).to.eql(\"project\");",
+									"});",
+									"pm.environment.set(\"shareLinkId\", json.shareLinkId);",
+									"const token = (json.shareLinkUrl || \"\").split(\"/invitations/\")[1] || \"\";",
+									"pm.environment.set(\"shareLinkToken\", token);"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/projects/{{projectId}}/share-links",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"projects",
+								"{{projectId}}",
+								"share-links"
+							]
+						},
+						"description": "Creates a generic, reusable project share link (Owner only; `201`) without sending an email. Anyone with the link can accept it and gain entire-project Viewer access. Saves `shareLinkId` and the raw `shareLinkToken` extracted from `shareLinkUrl`. The token namespace is shared with invitations, so **Preview / Accept using token** works directly on the saved `shareLinkToken`.\n\nThe project must have at least one scan with an uploaded model (`409 PROJECT_NOT_SHAREABLE` otherwise). The link stays valid until it expires (TTL) or is revoked via **Revoke Project Share Link**."
+					},
+					"response": []
+				},
+				{
+					"name": "List Project Share Links",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/projects/{{projectId}}/share-links",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"projects",
+								"{{projectId}}",
+								"share-links"
+							]
+						},
+						"description": "Lists active (non-revoked) project share links for the owner. Revoked and expired links are omitted."
+					},
+					"response": []
+				},
+				{
+					"name": "Revoke Project Share Link",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/projects/{{projectId}}/share-links/{{shareLinkId}}",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"projects",
+								"{{projectId}}",
+								"share-links",
+								"{{shareLinkId}}"
+							]
+						},
+						"description": "Revokes a project share link (Owner only; `200`, status becomes REVOKED). Stops further acceptances through that link; access already granted through it is not removed. Idempotent for already-revoked links."
+					},
+					"response": []
+				},
+				{
+					"name": "Create Scan Share Link",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"const json = pm.response.json();",
+									"pm.test(\"Scan share link created\", function () {",
+									"  pm.response.to.have.status(201);",
+									"  pm.expect(json.shareLinkId).to.be.a('string').and.not.empty;",
+									"  pm.expect(json.shareLinkUrl).to.be.a('string').and.not.empty;",
+									"  pm.expect(json.scope).to.eql(\"scan\");",
+									"});",
+									"pm.environment.set(\"shareLinkId\", json.shareLinkId);",
+									"const token = (json.shareLinkUrl || \"\").split(\"/invitations/\")[1] || \"\";",
+									"pm.environment.set(\"shareLinkToken\", token);"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/scans/{{scanId}}/share-links",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"scans",
+								"{{scanId}}",
+								"share-links"
+							]
+						},
+						"description": "Creates a generic, reusable scan share link (Owner of the parent project only; `201`) without sending an email. Anyone with the link can accept it and gain Viewer access to only this scan, its notes, and its assets. Saves `shareLinkId` and the raw `shareLinkToken`. The scan must have an uploaded model (`409 SCAN_NOT_SHAREABLE` otherwise)."
+					},
+					"response": []
+				},
+				{
+					"name": "List Scan Share Links",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/scans/{{scanId}}/share-links",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"scans",
+								"{{scanId}}",
+								"share-links"
+							]
+						},
+						"description": "Lists active (non-revoked) scan share links for the owner."
+					},
+					"response": []
+				},
+				{
+					"name": "Revoke Scan Share Link",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/scans/{{scanId}}/share-links/{{shareLinkId}}",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"scans",
+								"{{scanId}}",
+								"share-links",
+								"{{shareLinkId}}"
+							]
+						},
+						"description": "Revokes a scan share link (Owner only; `200`, status becomes REVOKED). Stops further acceptances through that link; access already granted through it is not removed."
+					},
+					"response": []
+				},
+				{
+					"name": "Preview Share Link (using token)",
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/invitations/{{shareLinkToken}}",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"invitations",
+								"{{shareLinkToken}}"
+							]
+						},
+						"description": "Previews a generic share link anonymously (No Auth) using the `shareLinkToken` saved by a create-share-link request. Returns `type: share-link`, the `scope` (`project` or `scan`), the matching `project`/`scan` entity, and `status` (ACTIVE/EXPIRED/REVOKED). A valid Bearer token can be added to also receive `hasAccess`."
+					},
+					"response": []
+				},
+				{
+					"name": "Accept Share Link (using token)",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/invitations/{{shareLinkToken}}/accept",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"invitations",
+								"{{shareLinkToken}}",
+								"accept"
+							]
+						},
+						"description": "Accepts a generic share link with the current user's token (`200`) and gains Viewer access (project or scan depending on the link's scope). Unlike invitations, acceptance does not consume the link, so it remains usable by other users. The Owner cannot accept their own link (`409 CANNOT_ACCEPT_OWN_INVITATION`); a user who already has active access gets `409 ACCESS_ALREADY_EXISTS`. Override the auth with another user's token to exercise the flow."
 					},
 					"response": []
 				}
@@ -1588,6 +1913,22 @@
 		},
 		{
 			"key": "viewerUserId",
+			"value": ""
+		},
+		{
+			"key": "scanViewerUserId",
+			"value": ""
+		},
+		{
+			"key": "scanInvitationId",
+			"value": ""
+		},
+		{
+			"key": "shareLinkId",
+			"value": ""
+		},
+		{
+			"key": "shareLinkToken",
 			"value": ""
 		},
 		{
