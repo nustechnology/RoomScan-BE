@@ -348,6 +348,23 @@ describe('RoomScan HTTP application', () => {
     expect(response.text).toContain('swagger-ui');
   });
 
+  it('serves the Apple App Site Association file for universal links', async () => {
+    const response = await request(app).get('/.well-known/apple-app-site-association').expect(200);
+
+    expect(response.headers['content-type']).toContain('application/json');
+    expect(response.body).toEqual({
+      applinks: {
+        apps: [],
+        details: [
+          {
+            appID: 'B66DTGYFS9.com.nus.roomscan',
+            paths: ['/invitations/*'],
+          },
+        ],
+      },
+    });
+  });
+
   it('returns the standard error envelope for an unknown route', async () => {
     const response = await request(app)
       .get('/missing')

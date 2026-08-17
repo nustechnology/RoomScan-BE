@@ -134,6 +134,7 @@ the local PostgreSQL and MinIO data volumes.
 | `GET`    | `/api/v1/sync/status`                                  | Get sync readiness for accessible projects                 |
 | `GET`    | `/api-doc`                                             | Interactive Swagger UI                                     |
 | `GET`    | `/api-doc.json`                                        | Generated OpenAPI 3.1 document                             |
+| `GET`    | `/.well-known/apple-app-site-association`              | Apple universal-link discovery file (host root, no auth)   |
 
 Errors use a stable envelope:
 
@@ -302,6 +303,13 @@ Viewers (`GET /api/v1/projects/:projectId/shares`), revoke a pending link, and
 revoke a Viewer's access (`DELETE /api/v1/projects/:projectId/shares/:userId`).
 Revoked Viewers lose project, scan, note, and asset-download access immediately.
 Share management is Owner-only (`403 NOT_OWNER` for others).
+
+Apple universal links for the invitation flow resolve through
+`GET /.well-known/apple-app-site-association`, served at the host root without
+authentication and returning `application/json`. It declares the
+`B66DTGYFS9.com.nus.roomscan` app with the `/invitations/*` path so the client
+(and `INVITATION_BASE_URL`) must be reachable over HTTPS on the same domain that
+the mobile app registers as an associated domain.
 
 `GET /api/v1/shared-projects` lists every project the current user accepted an
 invitation for, each with a computed `status` (`ACTIVE`, `REVOKED`,

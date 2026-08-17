@@ -30,6 +30,11 @@
 - Offline synchronization pulls visible changes and readiness at
   `GET /api/v1/sync/changes` and `GET /api/v1/sync/status`.
 - Swagger UI remains at `/api-doc`; raw OpenAPI is `/api-doc.json`.
+- The Apple App Site Association file is served without authentication at the
+  host root `GET /.well-known/apple-app-site-association` with content type
+  `application/json`, declaring the `B66DTGYFS9.com.nus.roomscan` app and the
+  `/invitations/*` path so universal links can open invitation links in the
+  native app.
 - Resource paths use plural nouns and kebab-case when business modules arrive.
 
 ## Validation and documentation
