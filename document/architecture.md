@@ -27,8 +27,11 @@ schema owns the `User`, `RefreshToken`, `Project`, `ProjectAccess`, `Scan`,
 4. Compression and body parsers apply transport policies.
 5. Swagger or versioned API routers handle the request.
 6. Zod validates request/response data and supplies OpenAPI schemas.
-7. Unknown routes and thrown errors pass through the central error middleware.
-8. The response contains a request ID without exposing internal exceptions.
+7. The well-known router serves the Apple App Site Association file at the
+   host root `/.well-known/apple-app-site-association`, outside `/api/v1` and
+   without authentication or rate limiting.
+8. Unknown routes and thrown errors pass through the central error middleware.
+9. The response contains a request ID without exposing internal exceptions.
 
 ## Boundaries
 
@@ -39,6 +42,14 @@ schema owns the `User`, `RefreshToken`, `Project`, `ProjectAccess`, `Scan`,
 - `modules`: product-facing route modules. Each module owns its schemas,
   router and OpenAPI registration.
 - `openapi`: combines module registries into the public OpenAPI document.
+
+The `well-known` module serves static discovery files at the host root, not under
+`/api/v1` and not part of the OpenAPI document. It currently exposes
+`/.well-known/apple-app-site-association`, which returns the Apple universal-link
+app-links declaration (`application/json`) so invitation links
+(`{INVITATION_BASE_URL}/invitations/{token}`) can open the native app. Because
+Apple fetches this without credentials, the route requires no authentication and
+is exempt from the API rate limiter.
 
 Business modules should depend on small interfaces rather than importing the
 global Prisma client directly. Runtime composition belongs in `server.ts`.
