@@ -80,6 +80,7 @@ function noteResult(overrides: Partial<NoteResult> = {}): NoteResult {
   return {
     id: NOTE_ID,
     scanId: SCAN_ID,
+    title: 'Cabinet hinge',
     content: 'Cabinet hinge is loose',
     color: 'YELLOW',
     position: { x: 1.5, y: -2, z: 3.25 },
@@ -232,7 +233,7 @@ describe('Note HTTP endpoints', () => {
       pagination: { page: 1, limit: 20, total: 1, totalPages: 1 },
     });
     getById.mockResolvedValue(noteResult());
-    update.mockResolvedValue(noteResult({ content: 'Updated content' }));
+    update.mockResolvedValue(noteResult({ title: 'Updated title', content: 'Updated content' }));
     move.mockResolvedValue(noteResult({ position: { x: 9, y: 8, z: 7 } }));
     remove.mockResolvedValue(undefined);
   });
@@ -243,6 +244,7 @@ describe('Note HTTP endpoints', () => {
         .post(`/api/v1/scans/${SCAN_ID}/notes`)
         .set('Authorization', `Bearer ${tokenA}`)
         .send({
+          title: 'Cabinet hinge',
           content: 'Cabinet hinge is loose',
           color: 'YELLOW',
           position: { x: 1.5, y: -2, z: 3.25 },
@@ -254,6 +256,7 @@ describe('Note HTTP endpoints', () => {
 
       expect(body).toMatchObject(noteResult());
       expect(create).toHaveBeenCalledWith(USER_A, SCAN_ID, {
+        title: 'Cabinet hinge',
         content: 'Cabinet hinge is loose',
         color: 'YELLOW',
         position: { x: 1.5, y: -2, z: 3.25 },
@@ -262,11 +265,78 @@ describe('Note HTTP endpoints', () => {
       });
     });
 
+    it('accepts the new CYAN and GRAY colors', async () => {
+      await request(app)
+        .post(`/api/v1/scans/${SCAN_ID}/notes`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({
+          title: 'Cyan note',
+          content: 'Cyan content',
+          color: 'CYAN',
+          position: { x: 1, y: 2, z: 3 },
+          modelVersion: '1',
+        })
+        .expect(201);
+      await request(app)
+        .post(`/api/v1/scans/${SCAN_ID}/notes`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({
+          title: 'Gray note',
+          content: 'Gray content',
+          color: 'GRAY',
+          position: { x: 1, y: 2, z: 3 },
+          modelVersion: '1',
+        })
+        .expect(201);
+    });
+
+    it('rejects missing title', async () => {
+      await request(app)
+        .post(`/api/v1/scans/${SCAN_ID}/notes`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({
+          content: 'Note',
+          color: 'YELLOW',
+          position: { x: 1, y: 2, z: 3 },
+          modelVersion: '1',
+        })
+        .expect(400);
+    });
+
+    it('rejects blank title', async () => {
+      await request(app)
+        .post(`/api/v1/scans/${SCAN_ID}/notes`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({
+          title: '   ',
+          content: 'Note',
+          color: 'YELLOW',
+          position: { x: 1, y: 2, z: 3 },
+          modelVersion: '1',
+        })
+        .expect(400);
+    });
+
+    it('rejects title longer than 50 characters', async () => {
+      await request(app)
+        .post(`/api/v1/scans/${SCAN_ID}/notes`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({
+          title: 'y'.repeat(51),
+          content: 'Note',
+          color: 'YELLOW',
+          position: { x: 1, y: 2, z: 3 },
+          modelVersion: '1',
+        })
+        .expect(400);
+    });
+
     it('accepts a note without orientation', async () => {
       await request(app)
         .post(`/api/v1/scans/${SCAN_ID}/notes`)
         .set('Authorization', `Bearer ${tokenA}`)
         .send({
+          title: 'Plain note',
           content: 'Plain note',
           color: 'BLUE',
           position: { x: 0, y: 1, z: 2 },
@@ -286,6 +356,7 @@ describe('Note HTTP endpoints', () => {
         .post(`/api/v1/scans/${SCAN_ID}/notes`)
         .set('Authorization', `Bearer ${tokenA}`)
         .send({
+          title: 'Title',
           content: '   ',
           color: 'YELLOW',
           position: { x: 1, y: 2, z: 3 },
@@ -299,6 +370,7 @@ describe('Note HTTP endpoints', () => {
         .post(`/api/v1/scans/${SCAN_ID}/notes`)
         .set('Authorization', `Bearer ${tokenA}`)
         .send({
+          title: 'Title',
           color: 'YELLOW',
           position: { x: 1, y: 2, z: 3 },
           modelVersion: '1',
@@ -311,6 +383,7 @@ describe('Note HTTP endpoints', () => {
         .post(`/api/v1/scans/${SCAN_ID}/notes`)
         .set('Authorization', `Bearer ${tokenA}`)
         .send({
+          title: 'Title',
           content: 'y'.repeat(2001),
           color: 'YELLOW',
           position: { x: 1, y: 2, z: 3 },
@@ -324,6 +397,7 @@ describe('Note HTTP endpoints', () => {
         .post(`/api/v1/scans/${SCAN_ID}/notes`)
         .set('Authorization', `Bearer ${tokenA}`)
         .send({
+          title: 'Note',
           content: 'Note',
           color: 'PINK',
           position: { x: 1, y: 2, z: 3 },
@@ -337,6 +411,7 @@ describe('Note HTTP endpoints', () => {
         .post(`/api/v1/scans/${SCAN_ID}/notes`)
         .set('Authorization', `Bearer ${tokenA}`)
         .send({
+          title: 'Note',
           content: 'Note',
           color: 'YELLOW',
           position: { x: 'left', y: 2, z: 3 },
@@ -350,6 +425,7 @@ describe('Note HTTP endpoints', () => {
         .post(`/api/v1/scans/${SCAN_ID}/notes`)
         .set('Authorization', `Bearer ${tokenA}`)
         .send({
+          title: 'Note',
           content: 'Note',
           color: 'YELLOW',
           position: { x: 1, y: 2, z: 3 },
@@ -362,6 +438,7 @@ describe('Note HTTP endpoints', () => {
         .post(`/api/v1/scans/${SCAN_ID}/notes`)
         .set('Authorization', `Bearer ${tokenA}`)
         .send({
+          title: 'Note',
           content: 'Note',
           color: 'YELLOW',
           position: { x: 1, y: 2, z: 3 },
@@ -375,6 +452,7 @@ describe('Note HTTP endpoints', () => {
       await request(app)
         .post(`/api/v1/scans/${SCAN_ID}/notes`)
         .send({
+          title: 'Title',
           content: 'Note',
           color: 'YELLOW',
           position: { x: 1, y: 2, z: 3 },
@@ -390,6 +468,7 @@ describe('Note HTTP endpoints', () => {
         .post(`/api/v1/scans/${SCAN_ID}/notes`)
         .set('Authorization', `Bearer ${tokenB}`)
         .send({
+          title: 'Title',
           content: 'Note',
           color: 'YELLOW',
           position: { x: 1, y: 2, z: 3 },
@@ -408,6 +487,7 @@ describe('Note HTTP endpoints', () => {
         .post(`/api/v1/scans/${SCAN_ID}/notes`)
         .set('Authorization', `Bearer ${tokenA}`)
         .send({
+          title: 'Title',
           content: 'Stale note',
           color: 'YELLOW',
           position: { x: 1, y: 2, z: 3 },
@@ -426,6 +506,7 @@ describe('Note HTTP endpoints', () => {
         .post(`/api/v1/scans/${SCAN_ID}/notes`)
         .set('Authorization', `Bearer ${tokenA}`)
         .send({
+          title: 'Title',
           content: 'Note',
           color: 'YELLOW',
           position: { x: 1, y: 2, z: 3 },
@@ -553,16 +634,18 @@ describe('Note HTTP endpoints', () => {
   });
 
   describe('PATCH /api/v1/notes/:noteId', () => {
-    it('updates content and color as the Owner', async () => {
+    it('updates title, content and color as the Owner', async () => {
       const response = await request(app)
         .patch(`/api/v1/notes/${NOTE_ID}`)
         .set('Authorization', `Bearer ${tokenA}`)
-        .send({ content: 'Updated content', color: 'RED' })
+        .send({ title: 'Updated title', content: 'Updated content', color: 'RED' })
         .expect(200);
       const body = NoteResponseSchema.parse(response.body as unknown);
 
+      expect(body.title).toBe('Updated title');
       expect(body.content).toBe('Updated content');
       expect(update).toHaveBeenCalledWith(USER_A, NOTE_ID, {
+        title: 'Updated title',
         content: 'Updated content',
         color: 'RED',
       });

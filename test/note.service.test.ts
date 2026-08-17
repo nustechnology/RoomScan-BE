@@ -25,6 +25,7 @@ function createRecord(overrides: Partial<NoteRecord> = {}): NoteRecord {
       id: OWNER_ID,
       email: 'owner@example.com',
     },
+    title: 'Cabinet hinge',
     content: 'Cabinet hinge is loose',
     color: 'YELLOW',
     position: { x: 1.5, y: -2, z: 3.25 },
@@ -82,6 +83,7 @@ describe('NoteService', () => {
     const { mocks, service } = createHarness();
 
     const result = await service.create(OWNER_ID, SCAN_ID, {
+      title: 'Cabinet hinge',
       content: 'Cabinet hinge is loose',
       color: 'YELLOW',
       position: { x: 1.5, y: -2, z: 3.25 },
@@ -91,12 +93,14 @@ describe('NoteService', () => {
 
     expect(mocks.findScanContext).toHaveBeenCalledWith(SCAN_ID);
     expect(mocks.create).toHaveBeenCalledWith(SCAN_ID, OWNER_ID, {
+      title: 'Cabinet hinge',
       content: 'Cabinet hinge is loose',
       color: 'YELLOW',
       position: { x: 1.5, y: -2, z: 3.25 },
       orientation: null,
       modelVersion: '1',
     });
+    expect(result.title).toBe('Cabinet hinge');
     expect(result.content).toBe('Cabinet hinge is loose');
     expect(result.permissions.role).toBe('OWNER');
   });
@@ -106,6 +110,7 @@ describe('NoteService', () => {
 
     await expect(
       service.create(VIEWER_ID, SCAN_ID, {
+        title: 'Not allowed',
         content: 'Not allowed',
         color: 'YELLOW',
         position: { x: 1, y: 2, z: 3 },
@@ -121,6 +126,7 @@ describe('NoteService', () => {
 
     await expect(
       service.create(OWNER_ID, SCAN_ID, {
+        title: 'Not allowed',
         content: 'Not allowed',
         color: 'YELLOW',
         position: { x: 1, y: 2, z: 3 },
@@ -136,6 +142,7 @@ describe('NoteService', () => {
 
     await expect(
       service.create(OWNER_ID, SCAN_ID, {
+        title: 'Stale note',
         content: 'Stale note',
         color: 'YELLOW',
         position: { x: 1, y: 2, z: 3 },
