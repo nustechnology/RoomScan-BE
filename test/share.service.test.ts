@@ -329,7 +329,7 @@ describe('ShareService.createInvitation', () => {
 });
 
 describe('ShareService.previewInvitation', () => {
-  it('returns the safe project summary and the recipient email', async () => {
+  it('omits the recipient email and safe project summary for an anonymous preview', async () => {
     const { service, mocks } = createService();
 
     const result = await service.previewInvitation(TOKEN);
@@ -345,12 +345,20 @@ describe('ShareService.previewInvitation', () => {
       },
       scan: null,
       status: 'PENDING',
-      recipientEmail: RECIPIENT_EMAIL,
       sentAt: NOW.toISOString(),
       expiresAt: new Date(NOW.getTime() + TTL * 1000).toISOString(),
     });
+    expect((result as { recipientEmail?: string }).recipientEmail).toBeUndefined();
     expect(result.hasAccess).toBeUndefined();
     expect(mocks.findByTokenHash).toHaveBeenCalledWith(expect.stringMatching(/^[0-9a-f]{64}$/));
+  });
+
+  it('includes the recipient email only for an authorized preview', async () => {
+    const { service } = createService();
+
+    const result = await service.previewInvitation(TOKEN, RECIPIENT_ID);
+
+    expect((result as { recipientEmail?: string }).recipientEmail).toBe(RECIPIENT_EMAIL);
   });
 
   it.each([
@@ -729,7 +737,7 @@ describe('ShareService.resendInvitation', () => {
     });
 
     await expect(service.resendInvitation(OWNER_ID, INVITATION_ID)).rejects.toBeInstanceOf(
-      ProjectNotFoundError,
+      ScanNotFoundError,
     );
   });
 });

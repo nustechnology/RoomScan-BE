@@ -16,8 +16,9 @@ import {
   ScanShareRevokeParamsSchema,
   ScanSharesListResponseSchema,
   ScanViewerRevokeResponseSchema,
+  ProjectShareLinkIdParamSchema,
+  ScanShareLinkIdParamSchema,
   ShareLinkCreateResponseSchema,
-  ShareLinkIdParamSchema,
   ShareLinkListResponseSchema,
   ShareLinkRevokeResponseSchema,
   SharesListResponseSchema,
@@ -518,7 +519,7 @@ shareOpenApiRegistry.registerPath({
   summary: 'Revoke a project share link',
   security: [{ [bearerAuth.name]: [] }],
   request: {
-    params: ShareLinkIdParamSchema,
+    params: ProjectShareLinkIdParamSchema,
   },
   responses: {
     200: {
@@ -589,7 +590,7 @@ shareOpenApiRegistry.registerPath({
   summary: 'Revoke a scan share link',
   security: [{ [bearerAuth.name]: [] }],
   request: {
-    params: ShareLinkIdParamSchema,
+    params: ScanShareLinkIdParamSchema,
   },
   responses: {
     200: {

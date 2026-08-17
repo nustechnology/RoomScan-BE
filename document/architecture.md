@@ -293,21 +293,36 @@ the Scan, Note, and Scan Asset modules include active `ScanAccess` rows in their
 permission lookups (via `ScanPermissionService`, which resolves the role for a
 scan from project ownership, project Viewer access, or scan Viewer access).
 
-Acceptance is open: the first signed-in user to redeem a pending link makes it
-`ACCEPTED` (recording `acceptedAt` and `acceptedByUserId`) and receives an
-active Viewer access row in one database transaction — `ProjectAccess` for
-project scope or `ScanAccess` for scan scope. The `@@unique` constraint on
-`(projectId, userId)` or `(scanId, userId)` guarantees at most one access row per
-resource per user, so accepting can never create a duplicate, and the repository
-guards the status write with a `status = PENDING` predicate so a concurrent
-double-accept resolves to `409 INVITATION_ALREADY_ACCEPTED`. A user with an
-active access row cannot accept or decline again (`409 ACCESS_ALREADY_EXISTS`),
-an accepted or declined invitation is terminal, and the resource Owner cannot
-accept or decline (`409 CANNOT_ACCEPT_OWN_INVITATION`). Revoked (`409
-INVITATION_REVOKED`), expired (`409 INVITATION_EXPIRED`), accepted (`409
-INVITATION_ALREADY_ACCEPTED`), and declined (`409 INVITATION_DECLINED`)
-invitations cannot be accepted, declined, resend, or revoked; revoking an
-already revoked link is idempotent.
+Acceptance is open for invitations: the first signed-in user to redeem a pending
+invitation makes it `ACCEPTED` (recording `acceptedAt` and `acceptedByUserId`)
+and receives an active Viewer access row in one database transaction —
+`ProjectAccess` for project scope or `ScanAccess` for scan scope. The `@@unique`
+constraint on `(projectId, userId)` or `(scanId, userId)` guarantees at most one
+access row per resource per user, so accepting can never create a duplicate, and
+the repository guards the status write with a `status = PENDING` predicate so a
+concurrent double-accept resolves to `409 INVITATION_ALREADY_ACCEPTED`. A user
+with an active access row cannot accept or decline again
+(`409 ACCESS_ALREADY_EXISTS`), an accepted or declined invitation is terminal,
+and the resource Owner cannot accept or decline
+(`409 CANNOT_ACCEPT_OWN_INVITATION`).
+
+Reusable share links behave differently: acceptance never transitions the link —
+a `ShareLink` row retains its status (`ACTIVE`, `EXPIRED`, or `REVOKED`) and
+remains redeemable by any other signed-in user until it expires or the Owner
+revokes it; accepting only creates the access row (via `acceptedAt`) and never a
+second access. A revoked or expired share link cannot be accepted
+(`409 SHARE_LINK_REVOKED` or `409 SHARE_LINK_EXPIRED`), has no decline
+operation, and newly created access via a revoked or expired link is rejected —
+`grantProjectAccess`/`grantScanAccess` refuse to re-grant once the user has a
+previously revoked access record, and re-granting an active user is blocked by
+`409 ACCESS_ALREADY_EXISTS`.
+
+Revoked (`409 INVITATION_REVOKED`), expired (`409 INVITATION_EXPIRED`), accepted
+(`409 INVITATION_ALREADY_ACCEPTED`), and declined (`409 INVITATION_DECLINED`)
+invitations cannot be accepted, declined, resend, or revoked, and a revoked or
+expired invitation token can no longer be redeemed (it is not reusable);
+revoking an already revoked invitation remains idempotent and returns its
+existing revocation timestamp.
 
 Preview (`GET /invitations/:token`) requires no authentication and resolves
 either an invitation or a generic share link, returning a discriminated response

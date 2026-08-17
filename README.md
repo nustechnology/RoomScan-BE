@@ -324,8 +324,11 @@ with a computed `status` (`ACTIVE`, `REVOKED`, `SCAN_DELETED`, or
 `GET /api/v1/shared-scans/:scanId` opens an active shared scan read-only
 (revoked/deleted/never-shared scans are hidden behind `404`), and
 `DELETE /api/v1/shared-scans/:scanId` removes the scan from the user's own list
-without affecting the Owner, the scan, or other Viewers. The list supports the
-same `search`/`page`/`limit`/`sort` pagination as owned scans.
+without affecting the Owner, the scan, or other Viewers. The list accepts
+`search` (case-insensitive match on the scan name), `page`, `limit`, and `sort`.
+`page` defaults to 1, `limit` defaults to 5 (maximum 100), and `sort` defaults to
+`updatedAt:desc`; permitted sort values are `updatedAt`, `createdAt`, or `name`,
+each with a `:asc` or `:desc` direction.
 
 For nonce-bound sign-in, the client generates a raw nonce, sends its lowercase
 hexadecimal SHA-256 digest to Apple, and sends the raw nonce in the request

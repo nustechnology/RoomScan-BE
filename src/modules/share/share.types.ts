@@ -27,6 +27,14 @@ export interface ShareScanSummary {
   ownerId: string;
 }
 
+export interface ShareScanPreview {
+  id: string;
+  projectId: string;
+  name: string;
+  description: string | null;
+  thumbnail: string | null;
+}
+
 export interface InvitationRecord {
   id: string;
   projectId: string | null;
@@ -74,9 +82,9 @@ export interface InvitationPreviewResult {
   type: 'invitation';
   scope: ShareScope;
   project: Omit<ShareProjectSummary, 'owner'> | null;
-  scan: ShareScanSummary | null;
+  scan: ShareScanPreview | null;
   status: InvitationViewStatus;
-  recipientEmail: string;
+  recipientEmail?: string;
   sentAt: string;
   expiresAt: string;
   hasAccess?: boolean;
@@ -86,7 +94,7 @@ export interface ShareLinkPreviewResult {
   type: 'share-link';
   scope: ShareScope;
   project: Omit<ShareProjectSummary, 'owner'> | null;
-  scan: ShareScanSummary | null;
+  scan: ShareScanPreview | null;
   status: ShareLinkViewStatus;
   expiresAt: string;
   hasAccess?: boolean;
@@ -195,7 +203,7 @@ export interface ShareLinkCreateResult {
 
 export interface ShareLinkListResult {
   shareLinkId: string;
-  status: 'ACTIVE';
+  status: ShareLinkViewStatus;
   expiresAt: string;
   createdAt: string;
 }

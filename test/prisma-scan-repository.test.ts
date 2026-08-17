@@ -366,9 +366,47 @@ describe('PrismaScanRepository', () => {
     const result = await repository.findAccessRole(SCAN_ID, VIEWER_ID);
 
     expect(result).toBe('VIEWER');
+    expect(scan.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: SCAN_ID,
+        deletedAt: null,
+        OR: [
+          {
+            project: {
+              deletedAt: null,
+              OR: [
+                { ownerId: VIEWER_ID },
+                {
+                  accesses: {
+                    some: { userId: VIEWER_ID, role: 'VIEWER', revokedAt: null },
+                  },
+                },
+              ],
+            },
+          },
+          {
+            project: { deletedAt: null },
+            accesses: {
+              some: { userId: VIEWER_ID, role: 'VIEWER', revokedAt: null },
+            },
+          },
+        ],
+      },
+      select: { project: { select: { ownerId: true } } },
+    });
   });
 
   it('findAccessRole returns null when the scan is inaccessible', async () => {
+    const { client, scan } = createClient();
+    scan.findFirst.mockResolvedValueOnce(null);
+    const repository = new PrismaScanRepository(client);
+
+    const result = await repository.findAccessRole(SCAN_ID, VIEWER_ID);
+
+    expect(result).toBeNull();
+  });
+
+  it('findAccessRole returns null when the direct scan access was revoked', async () => {
     const { client, scan } = createClient();
     scan.findFirst.mockResolvedValueOnce(null);
     const repository = new PrismaScanRepository(client);

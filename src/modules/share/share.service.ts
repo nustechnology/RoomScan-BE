@@ -39,6 +39,7 @@ import type {
   ShareLinkWithEntity,
   ShareProjectSummary,
   ShareRepository,
+  ShareScanPreview,
   ShareScope,
   SharesListResult,
   ShareScanSummary,
@@ -73,6 +74,19 @@ function toPreviewProject(project: ShareProjectSummary | null) {
     name: project.name,
     description: project.description,
     thumbnail: project.thumbnail,
+  };
+}
+
+function toPreviewScan(scan: ShareScanSummary | null): ShareScanPreview | null {
+  if (scan === null) {
+    return null;
+  }
+  return {
+    id: scan.id,
+    projectId: scan.projectId,
+    name: scan.name,
+    description: scan.description,
+    thumbnail: scan.thumbnail,
   };
 }
 
@@ -374,14 +388,14 @@ export class ShareService {
         type: 'invitation',
         scope: this.#scopeOf(invitation.invitation),
         project: toPreviewProject(invitation.project),
-        scan: invitation.scan,
+        scan: toPreviewScan(invitation.scan),
         status: this.#viewStatus(invitation.invitation),
-        recipientEmail: invitation.invitation.recipientEmail,
         sentAt: invitation.invitation.sentAt.toISOString(),
         expiresAt: invitation.invitation.expiresAt.toISOString(),
       };
 
       if (userId !== undefined) {
+        result.recipientEmail = invitation.invitation.recipientEmail;
         const { scope, project, scan } = this.#entityOf(invitation);
         const entityId = scope === 'project' ? project?.id : scan?.id;
         result.hasAccess =
@@ -400,7 +414,7 @@ export class ShareService {
         type: 'share-link',
         scope: this.#scopeOf(shareLink.shareLink),
         project: toPreviewProject(shareLink.project),
-        scan: shareLink.scan,
+        scan: toPreviewScan(shareLink.scan),
         status: this.#shareLinkStatus(shareLink.shareLink),
         expiresAt: shareLink.shareLink.expiresAt.toISOString(),
       };
@@ -704,7 +718,7 @@ export class ShareService {
       }
       const info = await this.#repository.findScanInfo(updated.scanId);
       if (info === null) {
-        throw new ProjectNotFoundError();
+        throw new ScanNotFoundError();
       }
       await this.#sendInvitationEmail({
         scope: 'scan',

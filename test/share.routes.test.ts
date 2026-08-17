@@ -268,7 +268,6 @@ describe('Share HTTP endpoints', () => {
       },
       scan: null,
       status: 'PENDING',
-      recipientEmail: RECIPIENT_EMAIL,
       sentAt: NOW.toISOString(),
       expiresAt,
     });
@@ -567,7 +566,6 @@ describe('Share HTTP endpoints', () => {
         },
         scan: null,
         status: 'PENDING',
-        recipientEmail: RECIPIENT_EMAIL,
         sentAt: NOW.toISOString(),
         expiresAt,
       });
@@ -1090,13 +1088,20 @@ describe('Share HTTP endpoints', () => {
 
   describe('POST /api/v1/scans/:scanId/share-links', () => {
     it('creates a generic scan share link for the owner', async () => {
+      createShareLink.mockResolvedValue({
+        shareLinkId: SHARE_LINK_ID,
+        shareLinkUrl: `https://invite.roomscan.dev/invitations/${TOKEN}`,
+        scope: 'scan',
+        expiresAt,
+      });
+
       const response = await request(app)
         .post(`/api/v1/scans/${SCAN_ID}/share-links`)
         .set('Authorization', `Bearer ${ownerToken}`)
         .expect(201);
 
       const body = ShareLinkCreateResponseSchema.parse(response.body as unknown);
-      expect(body.scope).toBe('project');
+      expect(body.scope).toBe('scan');
       expect(createShareLink).toHaveBeenCalledWith(USER_OWNER, { scanId: SCAN_ID });
     });
 

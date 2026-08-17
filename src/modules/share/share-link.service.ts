@@ -117,7 +117,10 @@ export class ShareLinkService {
 
     return links.map((link) => ({
       shareLinkId: link.id,
-      status: 'ACTIVE' as const,
+      status:
+        link.expiresAt.getTime() <= this.#clock().getTime()
+          ? ('EXPIRED' as const)
+          : ('ACTIVE' as const),
       expiresAt: link.expiresAt.toISOString(),
       createdAt: link.createdAt.toISOString(),
     }));
@@ -150,6 +153,14 @@ export class ShareLinkService {
     const updated = await this.#repository.revokeShareLink(shareLinkId, now);
 
     if (updated === null) {
+      const reread = await this.#repository.findShareLinkById(shareLinkId);
+      if (reread !== null && reread.revokedAt !== null) {
+        return {
+          shareLinkId: reread.id,
+          status: 'REVOKED',
+          revokedAt: reread.revokedAt.toISOString(),
+        };
+      }
       throw new ShareLinkNotFoundError();
     }
 

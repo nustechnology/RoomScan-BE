@@ -2,7 +2,10 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { Prisma, type PrismaClient } from '../src/generated/prisma/client.js';
 import { PrismaShareRepository } from '../src/infrastructure/database/prisma-share-repository.js';
-import { InvitationAlreadySentError } from '../src/modules/share/share.errors.js';
+import {
+  InvitationAlreadySentError,
+  AccessAlreadyExistsError,
+} from '../src/modules/share/share.errors.js';
 
 const PROJECT_ID = 'a1b2c3d4-e5f6-4890-abcd-ef1234567890';
 const SCAN_ID = 'f1e2d3c4-a5b6-7890-abcd-ef1234567890';
@@ -18,6 +21,7 @@ function createInvitationRow(overrides: Record<string, unknown> = {}) {
   return {
     id: INVITATION_ID,
     projectId: PROJECT_ID,
+    scanId: null,
     createdById: OWNER_ID,
     recipientEmail: RECIPIENT_EMAIL,
     tokenHash: TOKEN_HASH,
@@ -72,7 +76,7 @@ function createClient() {
   };
   const shareLink = {
     create: vi.fn().mockResolvedValue({
-      id: 'c0ffee00-0000-4000-8000-0000000000aa',
+      id: SHARE_LINK_ID,
       projectId: PROJECT_ID,
       scanId: null,
       createdById: OWNER_ID,
@@ -84,7 +88,7 @@ function createClient() {
     }),
     findFirst: vi.fn().mockResolvedValue(null),
     findUnique: vi.fn().mockResolvedValue({
-      id: 'c0ffee00-0000-4000-8000-0000000000aa',
+      id: SHARE_LINK_ID,
       projectId: PROJECT_ID,
       scanId: null,
       createdById: OWNER_ID,
@@ -674,7 +678,13 @@ describe('PrismaShareRepository', () => {
   it('acceptScanInvitation grants ScanAccess in one transaction', async () => {
     const { client, invitation, scanAccess, transaction } = createClient();
     invitation.findUnique.mockResolvedValue(
-      createInvitationRow({ status: 'ACCEPTED', acceptedAt: NOW, acceptedByUserId: VIEWER_ID }),
+      createInvitationRow({
+        projectId: null,
+        scanId: SCAN_ID,
+        status: 'ACCEPTED',
+        acceptedAt: NOW,
+        acceptedByUserId: VIEWER_ID,
+      }),
     );
 
     const result = await new PrismaShareRepository(client).acceptScanInvitation(
@@ -685,6 +695,8 @@ describe('PrismaShareRepository', () => {
     );
 
     expect(result?.status).toBe('ACCEPTED');
+    expect(result?.scanId).toBe(SCAN_ID);
+    expect(result?.projectId).toBeNull();
     expect(transaction).toHaveBeenCalledOnce();
     expect(invitation.updateMany).toHaveBeenCalledWith({
       where: {
@@ -934,6 +946,7 @@ describe('PrismaShareRepository', () => {
 
   it('grantProjectAccess upserts a share-link-granted ProjectAccess', async () => {
     const { client, projectAccess } = createClient();
+    projectAccess.findFirst.mockResolvedValue(null);
 
     const result = await new PrismaShareRepository(client).grantProjectAccess(
       PROJECT_ID,
@@ -957,14 +970,32 @@ describe('PrismaShareRepository', () => {
         role: 'VIEWER',
         shareLinkId: SHARE_LINK_ID,
         acceptedAt: NOW,
-        revokedAt: null,
       },
       select: { id: true },
     });
   });
 
+  it('grantProjectAccess rejects when a previously revoked access exists', async () => {
+    const { client, projectAccess } = createClient();
+
+    await expect(
+      new PrismaShareRepository(client).grantProjectAccess(
+        PROJECT_ID,
+        VIEWER_ID,
+        SHARE_LINK_ID,
+        NOW,
+      ),
+    ).rejects.toBeInstanceOf(AccessAlreadyExistsError);
+    expect(projectAccess.findFirst).toHaveBeenCalledWith({
+      where: { projectId: PROJECT_ID, userId: VIEWER_ID, revokedAt: { not: null } },
+      select: { id: true },
+    });
+    expect(projectAccess.upsert).not.toHaveBeenCalled();
+  });
+
   it('grantScanAccess upserts a share-link-granted ScanAccess', async () => {
     const { client, scanAccess } = createClient();
+    scanAccess.findFirst.mockResolvedValue(null);
 
     const result = await new PrismaShareRepository(client).grantScanAccess(
       SCAN_ID,
@@ -988,9 +1019,21 @@ describe('PrismaShareRepository', () => {
         role: 'VIEWER',
         shareLinkId: SHARE_LINK_ID,
         acceptedAt: NOW,
-        revokedAt: null,
       },
       select: { id: true },
     });
+  });
+
+  it('grantScanAccess rejects when a previously revoked access exists', async () => {
+    const { client, scanAccess } = createClient();
+
+    await expect(
+      new PrismaShareRepository(client).grantScanAccess(SCAN_ID, VIEWER_ID, SHARE_LINK_ID, NOW),
+    ).rejects.toBeInstanceOf(AccessAlreadyExistsError);
+    expect(scanAccess.findFirst).toHaveBeenCalledWith({
+      where: { scanId: SCAN_ID, userId: VIEWER_ID, revokedAt: { not: null } },
+      select: { id: true },
+    });
+    expect(scanAccess.upsert).not.toHaveBeenCalled();
   });
 });

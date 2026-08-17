@@ -46,8 +46,9 @@ import {
   ScanShareRevokeParamsSchema,
   ScanSharesListResponseSchema,
   ScanViewerRevokeResponseSchema,
+  ProjectShareLinkIdParamSchema,
+  ScanShareLinkIdParamSchema,
   ShareLinkCreateResponseSchema,
-  ShareLinkIdParamSchema,
   ShareLinkListResponseSchema,
   ShareLinkRevokeResponseSchema,
   SharesListResponseSchema,
@@ -56,8 +57,9 @@ import {
   type InvitationCreateBody,
   type InvitationIdParam,
   type InvitationTokenParam,
+  type ProjectShareLinkIdParam,
   type ScanShareRevokeParams,
-  type ShareLinkIdParam,
+  type ScanShareLinkIdParam,
   type ShareRevokeParams,
 } from './share.schemas.js';
 import type { ShareService } from './share.service.js';
@@ -495,11 +497,11 @@ export function createShareRouter({
   router.delete(
     '/projects/:projectId/share-links/:shareLinkId',
     requireAuth,
-    validateRequest({ params: ShareLinkIdParamSchema }),
+    validateRequest({ params: ProjectShareLinkIdParamSchema }),
     async (request, response, next) => {
       try {
         const userId = getUserId(request);
-        const { params } = response.locals.validated as { params: ShareLinkIdParam };
+        const { params } = response.locals.validated as { params: ProjectShareLinkIdParam };
         const result = await shareLinkService.revokeShareLink(userId, params.shareLinkId);
         const responseBody = ShareLinkRevokeResponseSchema.parse(result);
 
@@ -513,11 +515,11 @@ export function createShareRouter({
   router.delete(
     '/scans/:scanId/share-links/:shareLinkId',
     requireAuth,
-    validateRequest({ params: ShareLinkIdParamSchema }),
+    validateRequest({ params: ScanShareLinkIdParamSchema }),
     async (request, response, next) => {
       try {
         const userId = getUserId(request);
-        const { params } = response.locals.validated as { params: ShareLinkIdParam };
+        const { params } = response.locals.validated as { params: ScanShareLinkIdParam };
         const result = await shareLinkService.revokeShareLink(userId, params.shareLinkId);
         const responseBody = ShareLinkRevokeResponseSchema.parse(result);
 

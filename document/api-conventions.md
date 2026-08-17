@@ -720,8 +720,10 @@ the email.
 Preview `200` resolves either an invitation or a generic share link and returns
 a `type` (`invitation` or `share-link`) and `scope` (`project` or `scan`) plus
 the matching entity (`project` or `scan`); the other entity is `null`. An
-invitation adds `recipientEmail`, `sentAt`, and its lifecycle `status`; a share
-link has no recipient and reports `ACTIVE`, `EXPIRED`, or `REVOKED`.
+invitation adds `sentAt` and its lifecycle `status`; a share link has no
+recipient and reports `ACTIVE`, `EXPIRED`, or `REVOKED`. The invitation
+`recipientEmail` is submitted only when the caller is authorized (a valid Bearer
+token is supplied); anonymous previews omit it.
 `hasAccess` is present only when a valid Bearer token is supplied and reports
 whether that user already has active access. A project-scope invitation preview:
 

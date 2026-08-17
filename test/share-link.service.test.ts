@@ -216,6 +216,18 @@ describe('ShareLinkService.listShareLinks', () => {
     expect(mocks.listShareLinksByResource).toHaveBeenCalledWith({ scanId: SCAN_ID });
   });
 
+  it('reports an expired unrevoked link as EXPIRED', async () => {
+    const { service } = createService({
+      listShareLinksByResource: vi
+        .fn()
+        .mockResolvedValue([shareLinkRecord({ expiresAt: new Date(NOW.getTime() - 1000) })]),
+    });
+
+    const result = await service.listShareLinks(OWNER_ID, { projectId: PROJECT_ID });
+
+    expect(result[0]?.status).toBe('EXPIRED');
+  });
+
   it('rejects a non-owner', async () => {
     const { service } = createService({
       findProjectOwner: vi.fn().mockResolvedValue(OTHER_ID),
@@ -258,6 +270,32 @@ describe('ShareLinkService.revokeShareLink', () => {
 
     expect(result.revokedAt).toBe(NOW.toISOString());
     expect(mocks.revokeShareLink).not.toHaveBeenCalled();
+  });
+
+  it('returns REVOKED when a concurrent revoke wins the update', async () => {
+    const { service, mocks } = createService();
+    mocks.findShareLinkById
+      .mockResolvedValueOnce(shareLinkRecord())
+      .mockResolvedValueOnce(shareLinkRecord({ revokedAt: NOW }));
+    mocks.revokeShareLink.mockResolvedValue(null);
+
+    const result = await service.revokeShareLink(OWNER_ID, SHARE_LINK_ID);
+
+    expect(result).toEqual({
+      shareLinkId: SHARE_LINK_ID,
+      status: 'REVOKED',
+      revokedAt: NOW.toISOString(),
+    });
+  });
+
+  it('throws when the re-read confirms the link is gone', async () => {
+    const { service, mocks } = createService();
+    mocks.findShareLinkById.mockResolvedValueOnce(shareLinkRecord()).mockResolvedValueOnce(null);
+    mocks.revokeShareLink.mockResolvedValue(null);
+
+    await expect(service.revokeShareLink(OWNER_ID, SHARE_LINK_ID)).rejects.toBeInstanceOf(
+      ShareLinkNotFoundError,
+    );
   });
 
   it('rejects an unknown share link', async () => {

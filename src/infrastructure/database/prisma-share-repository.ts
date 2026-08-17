@@ -4,7 +4,10 @@ import {
   InvitationStatus,
   ProjectRole as PrismaProjectRole,
 } from '../../generated/prisma/enums.js';
-import { InvitationAlreadySentError } from '../../modules/share/share.errors.js';
+import {
+  InvitationAlreadySentError,
+  AccessAlreadyExistsError,
+} from '../../modules/share/share.errors.js';
 import type {
   InvitationCreateData,
   InvitationRecord,
@@ -784,6 +787,15 @@ export class PrismaShareRepository implements ShareRepository {
     shareLinkId: string,
     acceptedAt: Date,
   ): Promise<{ id: string }> {
+    const existingRevoked = await this.#client.projectAccess.findFirst({
+      where: { projectId, userId, revokedAt: { not: null } },
+      select: { id: true },
+    });
+
+    if (existingRevoked !== null) {
+      throw new AccessAlreadyExistsError();
+    }
+
     const access = await this.#client.projectAccess.upsert({
       where: { projectId_userId: { projectId, userId } },
       create: {
@@ -798,7 +810,6 @@ export class PrismaShareRepository implements ShareRepository {
         role: PrismaProjectRole.VIEWER,
         shareLinkId,
         acceptedAt,
-        revokedAt: null,
       },
       select: { id: true },
     });
@@ -811,6 +822,15 @@ export class PrismaShareRepository implements ShareRepository {
     shareLinkId: string,
     acceptedAt: Date,
   ): Promise<{ id: string }> {
+    const existingRevoked = await this.#client.scanAccess.findFirst({
+      where: { scanId, userId, revokedAt: { not: null } },
+      select: { id: true },
+    });
+
+    if (existingRevoked !== null) {
+      throw new AccessAlreadyExistsError();
+    }
+
     const access = await this.#client.scanAccess.upsert({
       where: { scanId_userId: { scanId, userId } },
       create: {
@@ -825,7 +845,6 @@ export class PrismaShareRepository implements ShareRepository {
         role: PrismaProjectRole.VIEWER,
         shareLinkId,
         acceptedAt,
-        revokedAt: null,
       },
       select: { id: true },
     });
