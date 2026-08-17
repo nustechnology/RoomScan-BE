@@ -34,6 +34,7 @@ import { createShareRouter } from './modules/share/share.routes.js';
 import type { ShareService } from './modules/share/share.service.js';
 import { createSharedProjectsRouter } from './modules/shared-projects/shared-projects.routes.js';
 import type { SharedProjectsService } from './modules/shared-projects/shared-projects.service.js';
+import { createWellKnownRouter } from './modules/well-known/well-known.routes.js';
 import { createOpenApiDocument } from './openapi/document.js';
 
 export interface AppDependencies {
@@ -220,6 +221,8 @@ export function createApp({
       ...(clock === undefined ? {} : { clock }),
     }),
   );
+
+  app.use(createWellKnownRouter());
 
   app.use(notFoundHandler);
   app.use(errorHandler);
