@@ -376,6 +376,40 @@ export class PrismaShareRepository implements ShareRepository {
     return row === null ? null : toInvitationRecord(row);
   }
 
+  async findTokenSourceKindByTokenHash(
+    tokenHash: string,
+  ): Promise<'invitation' | 'share-link' | null> {
+    const invitation = await this.#client.invitation.findFirst({
+      where: {
+        tokenHash,
+        OR: [
+          { projectId: { not: null }, project: { deletedAt: { not: null } } },
+          { scanId: { not: null }, scan: { deletedAt: { not: null } } },
+        ],
+      },
+      select: { id: true },
+    });
+    if (invitation !== null) {
+      return 'invitation';
+    }
+
+    const shareLink = await this.#client.shareLink.findFirst({
+      where: {
+        tokenHash,
+        OR: [
+          { projectId: { not: null }, project: { deletedAt: { not: null } } },
+          { scanId: { not: null }, scan: { deletedAt: { not: null } } },
+        ],
+      },
+      select: { id: true },
+    });
+    if (shareLink !== null) {
+      return 'share-link';
+    }
+
+    return null;
+  }
+
   async acceptInvitation(
     invitationId: string,
     projectId: string,

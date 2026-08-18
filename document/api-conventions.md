@@ -765,8 +765,13 @@ For a scan-scope link, `scan` includes `id`, `projectId`, `name`, `description`,
 `noteCount` (number of active notes on the scan). `project` is `null` for a
 scan-scope link.
 
-`status` is `PENDING`, `EXPIRED`, `ACCEPTED`, `DECLINED`, or `REVOKED` for
-invitations and `ACTIVE`, `EXPIRED`, or `REVOKED` for share links.
+`status` is `PENDING`, `EXPIRED`, `ACCEPTED`, or `DECLINED` for invitation
+previews and `ACTIVE` or `EXPIRED` for share-link previews. When the source was
+revoked or deleted before the Viewer previews, accepts, or declines, preview,
+accept, and decline instead return `404 SHARE_NO_LONGER_AVAILABLE` with the
+message "This project/scan is no longer available." An unknown token or one that
+resolves to no record returns `404 INVITATION_NOT_FOUND` (or
+`SHARE_LINK_NOT_FOUND` for share links).
 
 Per-recipient invitations are restricted to the invited recipient: when the
 current user's email does not match the invited email (case-insensitive,
@@ -900,7 +905,9 @@ INVITATION_ALREADY_SENT`. Re-inviting an email whose earlier invitation is
 - Resend requires a pending, unexpired invitation; it rotates the token and
   re-sends the email. Resend works for both project and scan invitations and
   uses the matching email template.
-- Expired and revoked invitations cannot be accepted or declined.
+- Expired and revoked invitations cannot be accepted or declined. Previewing,
+  accepting, or declining a revoked invitation or share link, or one whose
+  project or scan was deleted, returns `404 SHARE_NO_LONGER_AVAILABLE`.
 - A generic share link has no recipient and no `ACCEPTED`/`DECLINED` lifecycle;
   acceptance creates access without changing the link, so it remains usable by
   other users until it expires or the Owner revokes it. Revoking a link stops
@@ -958,6 +965,9 @@ Error behavior:
   project or scan was deleted.
 - `404 SHARE_LINK_NOT_FOUND`: unknown share-link token or id, or its resource
   was deleted.
+- `404 SHARE_NO_LONGER_AVAILABLE`: the shared project or scan was revoked or
+  deleted before the current user previewed, accepted, or declined it; the link
+  is unusable.
 - `404 ACCESS_NOT_FOUND`: no access record exists for the user being unshared.
 - `409 INVITATION_ALREADY_SENT`: a pending invitation already targets this email.
 - `409 INVITATION_ALREADY_ACCEPTED`: the invitation was already accepted.
@@ -968,7 +978,6 @@ Error behavior:
 - `409 CANNOT_ACCEPT_OWN_INVITATION`: the resource Owner acts on their own link.
 - `409 PROJECT_NOT_SHAREABLE`: the project has no uploaded scan model yet.
 - `409 SCAN_NOT_SHAREABLE`: the scan has no uploaded model yet.
-- `409 SHARE_LINK_REVOKED`: the share link was revoked.
 - `409 SHARE_LINK_EXPIRED`: the share link is past its expiry.
 - `429 RATE_LIMIT_EXCEEDED`: API quota exceeded.
 - `500 INTERNAL_SERVER_ERROR`: unexpected failure without Prisma, SQL, token, or

@@ -18,7 +18,7 @@ import {
   ProjectNotShareableError,
   ScanNotShareableError,
   ShareLinkExpiredError,
-  ShareLinkRevokedError,
+  ShareNoLongerAvailableError,
   ViewerAccessNotFoundError,
 } from '../src/modules/share/share.errors.js';
 import { ShareService } from '../src/modules/share/share.service.js';
@@ -89,6 +89,9 @@ function createService(overrides: Partial<ShareRepository> = {}) {
     findByTokenHash: vi
       .fn<ShareRepository['findByTokenHash']>()
       .mockResolvedValue(invitationWithProject()),
+    findTokenSourceKindByTokenHash: vi
+      .fn<ShareRepository['findTokenSourceKindByTokenHash']>()
+      .mockResolvedValue(null),
     findInvitationById: vi
       .fn<ShareRepository['findInvitationById']>()
       .mockResolvedValue(invitationRecord()),
@@ -372,7 +375,6 @@ describe('ShareService.previewInvitation', () => {
     ['EXPIRED', invitationWithProject({ expiresAt: new Date(NOW.getTime() - 1000) })],
     ['ACCEPTED', invitationWithProject({ status: 'ACCEPTED', acceptedAt: NOW })],
     ['DECLINED', invitationWithProject({ status: 'DECLINED', declinedAt: NOW })],
-    ['REVOKED', invitationWithProject({ status: 'REVOKED', revokedAt: NOW })],
   ])('reports a %s status', async (status, invitation) => {
     const { service } = createService({
       findByTokenHash: vi.fn().mockResolvedValue(invitation),
@@ -381,6 +383,42 @@ describe('ShareService.previewInvitation', () => {
     const result = await service.previewInvitation(TOKEN, RECIPIENT_USER);
 
     expect(result.status).toBe(status);
+  });
+
+  it('throws ShareNoLongerAvailableError when previewing a revoked invitation', async () => {
+    const { service } = createService({
+      findByTokenHash: vi
+        .fn()
+        .mockResolvedValue(invitationWithProject({ status: 'REVOKED', revokedAt: NOW })),
+    });
+
+    await expect(service.previewInvitation(TOKEN, RECIPIENT_USER)).rejects.toBeInstanceOf(
+      ShareNoLongerAvailableError,
+    );
+  });
+
+  it('throws ShareNoLongerAvailableError when previewing an invitation whose source was deleted', async () => {
+    const { service } = createService({
+      findByTokenHash: vi.fn().mockResolvedValue(null),
+      findShareLinkByTokenHash: vi.fn().mockResolvedValue(null),
+      findTokenSourceKindByTokenHash: vi.fn().mockResolvedValue('invitation'),
+    });
+
+    await expect(service.previewInvitation(TOKEN, RECIPIENT_USER)).rejects.toBeInstanceOf(
+      ShareNoLongerAvailableError,
+    );
+  });
+
+  it('throws ShareNoLongerAvailableError when previewing a share link whose source was deleted', async () => {
+    const { service } = createService({
+      findByTokenHash: vi.fn().mockResolvedValue(null),
+      findShareLinkByTokenHash: vi.fn().mockResolvedValue(null),
+      findTokenSourceKindByTokenHash: vi.fn().mockResolvedValue('share-link'),
+    });
+
+    await expect(service.previewInvitation(TOKEN, RECIPIENT_USER)).rejects.toBeInstanceOf(
+      ShareNoLongerAvailableError,
+    );
   });
 
   it('rejects an unknown token with InvitationNotFoundError', async () => {
@@ -487,11 +525,6 @@ describe('ShareService.acceptInvitation', () => {
 
   it.each([
     [
-      'revoked',
-      invitationWithProject({ status: 'REVOKED', revokedAt: NOW }),
-      InvitationRevokedError,
-    ],
-    [
       'already accepted',
       invitationWithProject({ status: 'ACCEPTED', acceptedAt: NOW }),
       InvitationAlreadyAcceptedError,
@@ -513,6 +546,32 @@ describe('ShareService.acceptInvitation', () => {
 
     await expect(service.acceptInvitation(RECIPIENT_USER, TOKEN)).rejects.toBeInstanceOf(
       errorClass,
+    );
+    expect(mocks.acceptInvitation).not.toHaveBeenCalled();
+  });
+
+  it('rejects a revoked invitation with ShareNoLongerAvailableError', async () => {
+    const { service, mocks } = createService({
+      findByTokenHash: vi
+        .fn()
+        .mockResolvedValue(invitationWithProject({ status: 'REVOKED', revokedAt: NOW })),
+    });
+
+    await expect(service.acceptInvitation(RECIPIENT_USER, TOKEN)).rejects.toBeInstanceOf(
+      ShareNoLongerAvailableError,
+    );
+    expect(mocks.acceptInvitation).not.toHaveBeenCalled();
+  });
+
+  it('rejects accepting an invitation whose source was deleted', async () => {
+    const { service, mocks } = createService({
+      findByTokenHash: vi.fn().mockResolvedValue(null),
+      findShareLinkByTokenHash: vi.fn().mockResolvedValue(null),
+      findTokenSourceKindByTokenHash: vi.fn().mockResolvedValue('invitation'),
+    });
+
+    await expect(service.acceptInvitation(RECIPIENT_USER, TOKEN)).rejects.toBeInstanceOf(
+      ShareNoLongerAvailableError,
     );
     expect(mocks.acceptInvitation).not.toHaveBeenCalled();
   });
@@ -589,6 +648,31 @@ describe('ShareService.declineInvitation', () => {
 
     await expect(service.declineInvitation(RECIPIENT_USER, TOKEN)).rejects.toBeInstanceOf(
       AccessAlreadyExistsError,
+    );
+    expect(mocks.declineInvitation).not.toHaveBeenCalled();
+  });
+
+  it('rejects declining a revoked invitation with ShareNoLongerAvailableError', async () => {
+    const { service, mocks } = createService({
+      findByTokenHash: vi
+        .fn()
+        .mockResolvedValue(invitationWithProject({ status: 'REVOKED', revokedAt: NOW })),
+    });
+
+    await expect(service.declineInvitation(RECIPIENT_USER, TOKEN)).rejects.toBeInstanceOf(
+      ShareNoLongerAvailableError,
+    );
+    expect(mocks.declineInvitation).not.toHaveBeenCalled();
+  });
+
+  it('rejects declining an invitation whose source was deleted', async () => {
+    const { service, mocks } = createService({
+      findByTokenHash: vi.fn().mockResolvedValue(null),
+      findTokenSourceKindByTokenHash: vi.fn().mockResolvedValue('invitation'),
+    });
+
+    await expect(service.declineInvitation(RECIPIENT_USER, TOKEN)).rejects.toBeInstanceOf(
+      ShareNoLongerAvailableError,
     );
     expect(mocks.declineInvitation).not.toHaveBeenCalled();
   });
@@ -1085,7 +1169,7 @@ describe('ShareService.previewInvitation scan and share-link scopes', () => {
     expect((result as { hasAccess?: boolean }).hasAccess).toBe(true);
   });
 
-  it('rejects a revoked share link', async () => {
+  it('throws ShareNoLongerAvailableError for a revoked share link', async () => {
     const { service } = createService({
       findByTokenHash: vi.fn().mockResolvedValue(null),
       findShareLinkByTokenHash: vi.fn().mockResolvedValue({
@@ -1094,9 +1178,9 @@ describe('ShareService.previewInvitation scan and share-link scopes', () => {
       }),
     });
 
-    const result = await service.previewInvitation(TOKEN, RECIPIENT_USER);
-
-    expect(result).toEqual(expect.objectContaining({ type: 'share-link', status: 'REVOKED' }));
+    await expect(service.previewInvitation(TOKEN, RECIPIENT_USER)).rejects.toBeInstanceOf(
+      ShareNoLongerAvailableError,
+    );
   });
 });
 
@@ -1193,7 +1277,7 @@ describe('ShareService.acceptInvitation scan and share-link scopes', () => {
     });
 
     await expect(service.acceptInvitation(RECIPIENT_USER, TOKEN)).rejects.toBeInstanceOf(
-      ShareLinkRevokedError,
+      ShareNoLongerAvailableError,
     );
     expect(mocks.grantProjectAccess).not.toHaveBeenCalled();
   });

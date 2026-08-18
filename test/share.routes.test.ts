@@ -24,13 +24,12 @@ import {
   InvitationExpiredError,
   InvitationNotFoundError,
   InvitationNotForUserError,
-  InvitationRevokedError,
   NotOwnerError,
   ProjectNotShareableError,
   ScanNotShareableError,
   ShareLinkExpiredError,
   ShareLinkNotFoundError,
-  ShareLinkRevokedError,
+  ShareNoLongerAvailableError,
   ViewerAccessNotFoundError,
 } from '../src/modules/share/share.errors.js';
 import {
@@ -636,6 +635,19 @@ describe('Share HTTP endpoints', () => {
       );
     });
 
+    it('returns 404 SHARE_NO_LONGER_AVAILABLE for a revoked or deleted source', async () => {
+      previewInvitation.mockRejectedValue(new ShareNoLongerAvailableError());
+
+      const response = await request(app)
+        .get(`/api/v1/invitations/${TOKEN}`)
+        .set('Authorization', `Bearer ${recipientToken}`)
+        .expect(404);
+
+      const body = ErrorResponseSchema.parse(response.body as unknown);
+      expect(body.error.code).toBe('SHARE_NO_LONGER_AVAILABLE');
+      expect(body.error.message).toBe('This project/scan is no longer available.');
+    });
+
     it('returns 403 with a no-permission code when the email does not match the invite', async () => {
       previewInvitation.mockRejectedValue(new InvitationNotForUserError());
 
@@ -700,7 +712,7 @@ describe('Share HTTP endpoints', () => {
     it.each([
       ['unknown token', new InvitationNotFoundError(), 404, 'INVITATION_NOT_FOUND'],
       ['expired invitation', new InvitationExpiredError(), 409, 'INVITATION_EXPIRED'],
-      ['revoked invitation', new InvitationRevokedError(), 409, 'INVITATION_REVOKED'],
+      ['revoked invitation', new ShareNoLongerAvailableError(), 404, 'SHARE_NO_LONGER_AVAILABLE'],
       ['already declined invitation', new InvitationDeclinedError(), 409, 'INVITATION_DECLINED'],
       [
         'already accepted invitation',
@@ -715,7 +727,7 @@ describe('Share HTTP endpoints', () => {
         409,
         'CANNOT_ACCEPT_OWN_INVITATION',
       ],
-      ['revoked share link', new ShareLinkRevokedError(), 409, 'SHARE_LINK_REVOKED'],
+      ['revoked share link', new ShareNoLongerAvailableError(), 404, 'SHARE_NO_LONGER_AVAILABLE'],
       ['expired share link', new ShareLinkExpiredError(), 409, 'SHARE_LINK_EXPIRED'],
     ])('rejects an %s with %i %s', async (_label, error, status, code) => {
       acceptInvitation.mockRejectedValue(error);
@@ -891,7 +903,7 @@ describe('Share HTTP endpoints', () => {
 
   describe('error envelope', () => {
     it('returns a request ID with share errors', async () => {
-      acceptInvitation.mockRejectedValue(new InvitationRevokedError());
+      acceptInvitation.mockRejectedValue(new InvitationExpiredError());
 
       const response = await request(app)
         .post(`/api/v1/invitations/${TOKEN}/accept`)

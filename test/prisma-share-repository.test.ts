@@ -344,6 +344,51 @@ describe('PrismaShareRepository', () => {
     await expect(new PrismaShareRepository(client).findByTokenHash(TOKEN_HASH)).resolves.toBeNull();
   });
 
+  it('findTokenSourceKindByTokenHash reports an invitation whose source is deleted', async () => {
+    const { client, invitation } = createClient();
+    invitation.findFirst.mockResolvedValue({ id: INVITATION_ID });
+
+    const result = await new PrismaShareRepository(client).findTokenSourceKindByTokenHash(
+      TOKEN_HASH,
+    );
+
+    expect(result).toBe('invitation');
+    expect(invitation.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          tokenHash: TOKEN_HASH,
+          OR: [
+            { projectId: { not: null }, project: { deletedAt: { not: null } } },
+            { scanId: { not: null }, scan: { deletedAt: { not: null } } },
+          ],
+        },
+      }),
+    );
+  });
+
+  it('findTokenSourceKindByTokenHash reports a share link whose source is deleted', async () => {
+    const { client, invitation, shareLink } = createClient();
+    invitation.findFirst.mockResolvedValue(null);
+    shareLink.findFirst.mockResolvedValue({ id: SHARE_LINK_ID });
+
+    const result = await new PrismaShareRepository(client).findTokenSourceKindByTokenHash(
+      TOKEN_HASH,
+    );
+
+    expect(result).toBe('share-link');
+  });
+
+  it('findTokenSourceKindByTokenHash returns null when no token exists', async () => {
+    const { client, invitation } = createClient();
+    invitation.findFirst.mockResolvedValue(null);
+
+    const result = await new PrismaShareRepository(client).findTokenSourceKindByTokenHash(
+      TOKEN_HASH,
+    );
+
+    expect(result).toBeNull();
+  });
+
   it('findInvitationById returns the stored invitation', async () => {
     const { client, invitation } = createClient();
 

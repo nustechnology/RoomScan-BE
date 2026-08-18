@@ -91,7 +91,7 @@ const InvitationPreviewLiteralSchema = z.object({
   scope: ShareScopeSchema,
   project: ProjectPreviewSchema.nullable(),
   scan: ScanPreviewSchema.nullable(),
-  status: z.enum(['PENDING', 'EXPIRED', 'ACCEPTED', 'DECLINED', 'REVOKED']),
+  status: z.enum(['PENDING', 'EXPIRED', 'ACCEPTED', 'DECLINED']),
   recipientEmail: z.email().optional(),
   sentAt: z.iso.datetime(),
   expiresAt: z.iso.datetime(),
@@ -103,7 +103,7 @@ const ShareLinkPreviewLiteralSchema = z.object({
   scope: ShareScopeSchema,
   project: ProjectPreviewSchema.nullable(),
   scan: ScanPreviewSchema.nullable(),
-  status: z.enum(['ACTIVE', 'EXPIRED', 'REVOKED']),
+  status: z.enum(['ACTIVE', 'EXPIRED']),
   expiresAt: z.iso.datetime(),
   hasAccess: z.boolean().optional(),
 });

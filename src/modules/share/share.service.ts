@@ -20,7 +20,7 @@ import {
   ScanNotShareableError,
   ShareLinkExpiredError,
   ShareLinkNotFoundError,
-  ShareLinkRevokedError,
+  ShareNoLongerAvailableError,
   ViewerAccessNotFoundError,
 } from './share.errors.js';
 import type {
@@ -405,10 +405,15 @@ export class ShareService {
     rawToken: string,
     currentUser: PreviewContextUser,
   ): Promise<TokenPreviewResult> {
-    const invitation = await this.#repository.findByTokenHash(hashInvitationToken(rawToken));
+    const tokenHash = hashInvitationToken(rawToken);
+    const invitation = await this.#repository.findByTokenHash(tokenHash);
 
     if (invitation !== null) {
       this.#assertRecipientMatch(invitation.invitation.recipientEmail, currentUser);
+
+      if (invitation.invitation.status === 'REVOKED') {
+        throw new ShareNoLongerAvailableError();
+      }
 
       const result: InvitationPreviewResult = {
         type: 'invitation',
@@ -433,6 +438,10 @@ export class ShareService {
     );
 
     if (shareLink !== null) {
+      if (shareLink.shareLink.revokedAt !== null) {
+        throw new ShareNoLongerAvailableError();
+      }
+
       const result: ShareLinkPreviewResult = {
         type: 'share-link',
         scope: this.#scopeOf(shareLink.shareLink),
@@ -448,6 +457,10 @@ export class ShareService {
         entityId !== undefined && (await this.#hasActiveAccess(scope, entityId, currentUser.id));
 
       return result;
+    }
+
+    if ((await this.#repository.findTokenSourceKindByTokenHash(tokenHash)) !== null) {
+      throw new ShareNoLongerAvailableError();
     }
 
     throw new InvitationNotFoundError();
@@ -467,18 +480,21 @@ export class ShareService {
     currentUser: PreviewContextUser,
     rawToken: string,
   ): Promise<TokenAcceptResult> {
-    const invitation = await this.#repository.findByTokenHash(hashInvitationToken(rawToken));
+    const tokenHash = hashInvitationToken(rawToken);
+    const invitation = await this.#repository.findByTokenHash(tokenHash);
 
     if (invitation !== null) {
       return await this.#acceptEmailInvitation(invitation, currentUser);
     }
 
-    const shareLink = await this.#repository.findShareLinkByTokenHash(
-      hashInvitationToken(rawToken),
-    );
+    const shareLink = await this.#repository.findShareLinkByTokenHash(tokenHash);
 
     if (shareLink !== null) {
       return await this.#acceptShareLink(shareLink, currentUser.id);
+    }
+
+    if ((await this.#repository.findTokenSourceKindByTokenHash(tokenHash)) !== null) {
+      throw new ShareNoLongerAvailableError();
     }
 
     throw new InvitationNotFoundError();
@@ -493,7 +509,7 @@ export class ShareService {
     const userId = currentUser.id;
 
     if (invitation.status === 'REVOKED') {
-      throw new InvitationRevokedError();
+      throw new ShareNoLongerAvailableError();
     }
     if (invitation.status === 'ACCEPTED') {
       throw new InvitationAlreadyAcceptedError();
@@ -582,7 +598,7 @@ export class ShareService {
     const { scope, project, scan, ownerId } = this.#entityOf(context);
 
     if (shareLink.revokedAt !== null) {
-      throw new ShareLinkRevokedError();
+      throw new ShareNoLongerAvailableError();
     }
     if (shareLink.expiresAt.getTime() <= this.#clock().getTime()) {
       throw new ShareLinkExpiredError();
@@ -604,9 +620,13 @@ export class ShareService {
     currentUser: PreviewContextUser,
     rawToken: string,
   ): Promise<InvitationDeclineResult> {
-    const invitation = await this.#repository.findByTokenHash(hashInvitationToken(rawToken));
+    const tokenHash = hashInvitationToken(rawToken);
+    const invitation = await this.#repository.findByTokenHash(tokenHash);
 
     if (invitation === null) {
+      if ((await this.#repository.findTokenSourceKindByTokenHash(tokenHash)) !== null) {
+        throw new ShareNoLongerAvailableError();
+      }
       throw new InvitationNotFoundError();
     }
 
@@ -616,7 +636,7 @@ export class ShareService {
     const { scope, project, scan } = this.#entityOf(invitation);
 
     if (record.status === 'REVOKED') {
-      throw new InvitationRevokedError();
+      throw new ShareNoLongerAvailableError();
     }
     if (record.status === 'ACCEPTED') {
       throw new InvitationAlreadyAcceptedError();

@@ -277,6 +277,7 @@ export interface ShareRepository {
   hasUploadedScanModel(scanId: string): Promise<boolean>;
   createInvitation(data: InvitationCreateData): Promise<InvitationRecord>;
   findByTokenHash(tokenHash: string): Promise<InvitationWithEntity | null>;
+  findTokenSourceKindByTokenHash(tokenHash: string): Promise<'invitation' | 'share-link' | null>;
   findInvitationById(id: string): Promise<InvitationRecord | null>;
   acceptInvitation(
     invitationId: string,

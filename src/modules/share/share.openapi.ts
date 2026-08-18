@@ -138,7 +138,7 @@ const errorResponses = {
   },
   404: {
     description:
-      'The project, scan, invitation, share link, or viewer access is missing, deleted, or inaccessible',
+      'The project, scan, invitation, share link, or viewer access is missing, deleted, or inaccessible, or the shared project/scan was revoked or deleted before the current user acted (SHARE_NO_LONGER_AVAILABLE)',
     headers: rateLimitHeaders,
     content: {
       'application/json': {
@@ -148,7 +148,7 @@ const errorResponses = {
   },
   409: {
     description:
-      'The invitation, share link, or access state is final: already sent to this email, already accepted, expired, revoked, declined, already has access, or the resource is not shareable',
+      'The invitation, share link, or access state is final: already sent to this email, already accepted, expired, declined, already has access, or the resource is not shareable',
     headers: rateLimitHeaders,
     content: {
       'application/json': {

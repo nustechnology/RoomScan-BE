@@ -82,17 +82,17 @@ export class ScanNotShareableError extends Error {
   }
 }
 
+export class ShareNoLongerAvailableError extends Error {
+  constructor() {
+    super('This project/scan is no longer available.');
+    this.name = 'ShareNoLongerAvailableError';
+  }
+}
+
 export class ShareLinkNotFoundError extends Error {
   constructor() {
     super('Share link was not found');
     this.name = 'ShareLinkNotFoundError';
-  }
-}
-
-export class ShareLinkRevokedError extends Error {
-  constructor() {
-    super('Share link has been revoked');
-    this.name = 'ShareLinkRevokedError';
   }
 }
 

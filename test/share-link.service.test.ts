@@ -67,6 +67,7 @@ function createService(overrides: Partial<ShareRepository> = {}) {
       .fn<ShareRepository['createShareLink']>()
       .mockResolvedValue(shareLinkRecord()),
     findShareLinkByTokenHash: vi.fn<ShareRepository['findShareLinkByTokenHash']>(),
+    findTokenSourceKindByTokenHash: vi.fn<ShareRepository['findTokenSourceKindByTokenHash']>(),
     listShareLinksByResource: vi
       .fn<ShareRepository['listShareLinksByResource']>()
       .mockResolvedValue([shareLinkRecord()]),

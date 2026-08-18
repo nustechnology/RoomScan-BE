@@ -26,7 +26,7 @@ import {
   ScanNotShareableError,
   ShareLinkExpiredError,
   ShareLinkNotFoundError,
-  ShareLinkRevokedError,
+  ShareNoLongerAvailableError,
   ViewerAccessNotFoundError,
 } from './share.errors.js';
 import type { ShareLinkService } from './share-link.service.js';
@@ -88,6 +88,13 @@ function mapError(error: unknown): AppError | undefined {
       statusCode: 404,
       code: 'INVITATION_NOT_FOUND',
       message: 'Invitation was not found',
+    });
+  }
+  if (error instanceof ShareNoLongerAvailableError) {
+    return new AppError({
+      statusCode: 404,
+      code: 'SHARE_NO_LONGER_AVAILABLE',
+      message: 'This project/scan is no longer available.',
     });
   }
   if (error instanceof ShareLinkNotFoundError) {
@@ -179,13 +186,6 @@ function mapError(error: unknown): AppError | undefined {
       statusCode: 409,
       code: 'SCAN_NOT_SHAREABLE',
       message: 'Scan is not ready to be shared',
-    });
-  }
-  if (error instanceof ShareLinkRevokedError) {
-    return new AppError({
-      statusCode: 409,
-      code: 'SHARE_LINK_REVOKED',
-      message: 'Share link has been revoked',
     });
   }
   if (error instanceof ShareLinkExpiredError) {
