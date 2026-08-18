@@ -4,6 +4,7 @@ import type { PrismaClient } from '../../generated/prisma/client.js';
 import { LOCAL_TEST_USER_ID, LOCAL_TEST_VIEWER_ID } from '../../config/constants.js';
 import { generateInvitationToken, hashInvitationToken } from '../../modules/share/share.service.js';
 import {
+  hasProjectSyncState,
   resetProjectSyncState,
   writeAccessUpsert,
   writeProjectBootstrap,
@@ -419,7 +420,11 @@ export async function seedLocalTestProject(client: SeedClient): Promise<{ invita
           revokedAt: shared.accessRevokedAt,
         },
       });
-      if (shared.projectDeletedAt === null && shared.accessRevokedAt === null) {
+      if (
+        shared.projectDeletedAt === null &&
+        shared.accessRevokedAt === null &&
+        !(await hasProjectSyncState(transaction, [shared.id]))
+      ) {
         await resetProjectSyncState(transaction, [shared.id]);
         await writeAccessUpsert(transaction, access.id);
         await writeAccessUpsert(transaction, access.id, { targetUserId: LOCAL_TEST_USER_ID });
@@ -448,23 +453,23 @@ export async function seedLocalTestProject(client: SeedClient): Promise<{ invita
         revokedAt: null,
       },
     });
-    await resetProjectSyncState(
-      transaction,
-      LOCAL_TEST_PROJECTS.map((project) => project.id),
-    );
-    await writeAccessUpsert(transaction, ownerProjectViewerAccess.id);
-    await writeAccessUpsert(transaction, ownerProjectViewerAccess.id, {
-      targetUserId: LOCAL_TEST_VIEWER_ID,
-    });
-    for (const project of LOCAL_TEST_PROJECTS) {
-      await writeProjectBootstrap(transaction, project.id, LOCAL_TEST_USER_ID, new Date());
+    const ownerProjectIds = LOCAL_TEST_PROJECTS.map((project) => project.id);
+    if (!(await hasProjectSyncState(transaction, ownerProjectIds))) {
+      await resetProjectSyncState(transaction, ownerProjectIds);
+      await writeAccessUpsert(transaction, ownerProjectViewerAccess.id);
+      await writeAccessUpsert(transaction, ownerProjectViewerAccess.id, {
+        targetUserId: LOCAL_TEST_VIEWER_ID,
+      });
+      for (const project of LOCAL_TEST_PROJECTS) {
+        await writeProjectBootstrap(transaction, project.id, LOCAL_TEST_USER_ID, new Date());
+      }
+      await writeProjectBootstrap(
+        transaction,
+        LOCAL_TEST_PROJECT_ID,
+        LOCAL_TEST_VIEWER_ID,
+        new Date(),
+      );
     }
-    await writeProjectBootstrap(
-      transaction,
-      LOCAL_TEST_PROJECT_ID,
-      LOCAL_TEST_VIEWER_ID,
-      new Date(),
-    );
 
     const rawToken = generateInvitationToken();
     await transaction.invitation.upsert({

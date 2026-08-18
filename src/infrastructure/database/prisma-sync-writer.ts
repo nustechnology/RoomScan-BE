@@ -449,6 +449,17 @@ export async function refreshScanRollup(
   return scan.projectId;
 }
 
+export async function hasProjectSyncState(
+  transaction: PrismaTransactionClient,
+  projectIds: string[],
+): Promise<boolean> {
+  if (!supportsSync(transaction) || projectIds.length === 0) return false;
+  const count = await transaction.syncChange.count({
+    where: { projectId: { in: projectIds } },
+  });
+  return count > 0;
+}
+
 export async function resetProjectSyncState(
   transaction: PrismaTransactionClient,
   projectIds: string[],
