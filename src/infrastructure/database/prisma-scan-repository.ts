@@ -99,21 +99,35 @@ function viewableScanWhere(id: string, userId: string) {
   return {
     id,
     deletedAt: null,
-    project: {
-      deletedAt: null,
-      OR: [
-        { ownerId: userId },
-        {
-          accesses: {
-            some: {
-              userId,
-              role: PrismaProjectRole.VIEWER,
-              revokedAt: null,
+    OR: [
+      {
+        project: {
+          deletedAt: null,
+          OR: [
+            { ownerId: userId },
+            {
+              accesses: {
+                some: {
+                  userId,
+                  role: PrismaProjectRole.VIEWER,
+                  revokedAt: null,
+                },
+              },
             },
+          ],
+        },
+      },
+      {
+        project: { deletedAt: null },
+        accesses: {
+          some: {
+            userId,
+            role: PrismaProjectRole.VIEWER,
+            revokedAt: null,
           },
         },
-      ],
-    },
+      },
+    ],
   };
 }
 
@@ -241,6 +255,19 @@ export class PrismaScanRepository implements ScanRepository {
     });
 
     return row === null ? null : row.projectId;
+  }
+
+  async findAccessRole(id: string, userId: string): Promise<ScanRole | null> {
+    const row = await this.#client.scan.findFirst({
+      where: viewableScanWhere(id, userId),
+      select: { project: { select: { ownerId: true } } },
+    });
+
+    if (row === null) {
+      return null;
+    }
+
+    return row.project.ownerId === userId ? 'OWNER' : 'VIEWER';
   }
 
   async findByIdForUser(
