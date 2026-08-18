@@ -739,7 +739,12 @@ whether that user already has active access. A project-scope invitation preview:
     "id": "a1b2c3d4-e5f6-4890-abcd-ef1234567890",
     "name": "District 2 Apartment",
     "description": null,
-    "thumbnail": null
+    "thumbnail": null,
+    "owner": {
+      "id": "eb5d278f-c857-45c7-887d-7be65288cb75",
+      "email": "owner@example.com"
+    },
+    "scanCount": 4
   },
   "scan": null,
   "status": "PENDING",
@@ -749,6 +754,12 @@ whether that user already has active access. A project-scope invitation preview:
   "hasAccess": false
 }
 ```
+
+For a project-scope link, `project` includes the Owner info (`owner.id`, nullable
+`owner.email`), `scanCount` (number of active, non-deleted scans), and `thumbnail`
+set to the thumbnail of the project's most recently created scan (nullable). The
+`owner` and `scanCount` fields are always present for a project-scope link and are
+absent for a scan-scope link, where `project` is `null`.
 
 `status` is `PENDING`, `EXPIRED`, `ACCEPTED`, `DECLINED`, or `REVOKED` for
 invitations and `ACTIVE`, `EXPIRED`, or `REVOKED` for share links.

@@ -301,6 +301,12 @@ describe('PrismaShareRepository', () => {
         name: 'District 2 Apartment',
         description: null,
         owner: { id: OWNER_ID, email: 'owner@example.com' },
+        scans: [
+          {
+            thumbnail: 'http://storage.local/thumb/scan1.jpg',
+          },
+        ],
+        _count: { scans: 2 },
       },
       scan: null,
     });
@@ -313,8 +319,9 @@ describe('PrismaShareRepository', () => {
       id: PROJECT_ID,
       name: 'District 2 Apartment',
       description: null,
-      thumbnail: null,
+      thumbnail: 'http://storage.local/thumb/scan1.jpg',
       owner: { id: OWNER_ID, email: 'owner@example.com' },
+      scanCount: 2,
     });
     expect(result?.scan).toBeNull();
     expect(invitation.findFirst).toHaveBeenCalledWith(
@@ -849,6 +856,8 @@ describe('PrismaShareRepository', () => {
         name: 'District 2 Apartment',
         description: null,
         owner: { id: OWNER_ID, email: 'owner@example.com' },
+        scans: [],
+        _count: { scans: 0 },
       },
       scan: null,
     });

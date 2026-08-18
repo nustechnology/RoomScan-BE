@@ -37,6 +37,7 @@ import type {
   ShareLinkPreviewResult,
   ShareLinkRecord,
   ShareLinkWithEntity,
+  ShareProjectPreview,
   ShareProjectSummary,
   ShareRepository,
   ShareScanPreview,
@@ -65,7 +66,7 @@ export function hashInvitationToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
 }
 
-function toPreviewProject(project: ShareProjectSummary | null) {
+function toPreviewProject(project: ShareProjectSummary | null): ShareProjectPreview | null {
   if (project === null) {
     return null;
   }
@@ -74,6 +75,8 @@ function toPreviewProject(project: ShareProjectSummary | null) {
     name: project.name,
     description: project.description,
     thumbnail: project.thumbnail,
+    owner: project.owner,
+    scanCount: project.scanCount,
   };
 }
 

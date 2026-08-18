@@ -53,9 +53,18 @@ const ProjectPreviewSchema = z.object({
   name: z.string(),
   description: z.string().nullable(),
   thumbnail: z.url().nullable(),
+  owner: z.object({
+    id: z.uuid(),
+    email: z.email().nullable(),
+  }),
+  scanCount: z.number().int().nonnegative(),
 });
 
-const ProjectDetailSchema = ProjectPreviewSchema.extend({
+const ProjectDetailSchema = z.object({
+  id: z.uuid(),
+  name: z.string(),
+  description: z.string().nullable(),
+  thumbnail: z.url().nullable(),
   owner: z.object({
     id: z.uuid(),
     email: z.email().nullable(),

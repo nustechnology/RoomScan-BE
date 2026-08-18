@@ -539,6 +539,8 @@ describe('RoomScan HTTP application', () => {
         name: 'District 2 Apartment',
         description: null,
         thumbnail: null,
+        owner: { id: 'eb5d278f-c857-45c7-887d-7be65288cb75', email: 'owner@example.com' },
+        scanCount: 1,
       },
       scan: null,
       status: 'PENDING',
