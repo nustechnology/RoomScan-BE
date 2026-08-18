@@ -4,7 +4,7 @@ import type {
 } from '../../common/idempotency/idempotency.types.js';
 
 export type NoteRole = 'OWNER' | 'VIEWER';
-export type NoteColor = 'YELLOW' | 'RED' | 'BLUE' | 'GREEN' | 'ORANGE' | 'PURPLE';
+export type NoteColor = 'YELLOW' | 'RED' | 'BLUE' | 'GREEN' | 'ORANGE' | 'PURPLE' | 'CYAN' | 'GRAY';
 export type NoteSort = 'createdAt:desc' | 'createdAt:asc' | 'updatedAt:desc' | 'updatedAt:asc';
 
 export interface Vector3 {
@@ -23,6 +23,7 @@ export interface NoteRecord {
   scanId: string;
   createdById: string;
   creator: NoteCreator;
+  title: string;
   content: string;
   color: NoteColor;
   position: Vector3;
@@ -44,6 +45,7 @@ export interface NotePermissions {
 export interface NoteResult {
   id: string;
   scanId: string;
+  title: string;
   content: string;
   color: NoteColor;
   position: Vector3;
@@ -57,6 +59,7 @@ export interface NoteResult {
 }
 
 export interface NoteCreateInput {
+  title: string;
   content: string;
   color: NoteColor;
   position: Vector3;
@@ -65,6 +68,7 @@ export interface NoteCreateInput {
 }
 
 export interface NoteUpdateInput {
+  title?: string;
   content?: string;
   color?: NoteColor;
 }

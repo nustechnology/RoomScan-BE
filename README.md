@@ -92,49 +92,61 @@ the local PostgreSQL and MinIO data volumes.
 
 ## HTTP endpoints
 
-| Method   | Path                                                   | Purpose                                                    |
-| -------- | ------------------------------------------------------ | ---------------------------------------------------------- |
-| `GET`    | `/api/v1/health`                                       | Liveness; does not query PostgreSQL                        |
-| `GET`    | `/api/v1/ready`                                        | Readiness; verifies PostgreSQL with `SELECT 1`             |
-| `POST`   | `/api/v1/auth/apple`                                   | Authenticate with an Apple identity token                  |
-| `POST`   | `/api/v1/auth/refresh`                                 | Rotate a RoomScan refresh token                            |
-| `POST`   | `/api/v1/projects`                                     | Create a project (Bearer token required)                   |
-| `GET`    | `/api/v1/projects`                                     | List the authenticated user’s projects                     |
-| `GET`    | `/api/v1/projects/:projectId`                          | Get a project as Owner or active Viewer                    |
-| `PATCH`  | `/api/v1/projects/:projectId`                          | Update an owned project                                    |
-| `DELETE` | `/api/v1/projects/:projectId`                          | Soft-delete an owned project                               |
-| `POST`   | `/api/v1/projects/:projectId/scans`                    | Create scan metadata (Owner only)                          |
-| `GET`    | `/api/v1/projects/:projectId/scans`                    | List scans; Owner or active Viewer                         |
-| `GET`    | `/api/v1/scans/:scanId`                                | Get scan detail; Owner or active Viewer                    |
-| `PATCH`  | `/api/v1/scans/:scanId`                                | Update scan name/description (Owner only)                  |
-| `DELETE` | `/api/v1/scans/:scanId`                                | Soft-delete a scan (Owner only)                            |
-| `POST`   | `/api/v1/scans/:scanId/assets/upload-sessions`         | Create an upload session (Owner only)                      |
-| `POST`   | `/api/v1/upload-sessions/:uploadSessionId/complete`    | Mark an upload completed (Owner only)                      |
-| `GET`    | `/api/v1/scans/:scanId/assets`                         | List scan asset metadata; Owner or active Viewer           |
-| `GET`    | `/api/v1/scans/:scanId/assets/:assetType/download-url` | Download URL; Owner or active Viewer                       |
-| `POST`   | `/api/v1/upload-sessions/:uploadSessionId/fail`        | Report an upload failure (Owner only)                      |
-| `POST`   | `/api/v1/scans/:scanId/notes`                          | Create a note on a scan (Owner only)                       |
-| `GET`    | `/api/v1/scans/:scanId/notes`                          | List notes; Owner or active Viewer                         |
-| `GET`    | `/api/v1/notes/:noteId`                                | Get note detail; Owner or active Viewer                    |
-| `PATCH`  | `/api/v1/notes/:noteId`                                | Update note content or color (Owner only)                  |
-| `PATCH`  | `/api/v1/notes/:noteId/position`                       | Move a note to a new 3D position (Owner only)              |
-| `DELETE` | `/api/v1/notes/:noteId`                                | Delete a note (Owner only)                                 |
-| `POST`   | `/api/v1/projects/:projectId/invitations`              | Create an invitation for an email (Owner only)             |
-| `POST`   | `/api/v1/invitations/:invitationId/resend`             | Resend a pending invitation email (Owner only)             |
-| `GET`    | `/api/v1/invitations/:token`                           | Preview an invitation (anonymous or optional Bearer)       |
-| `POST`   | `/api/v1/invitations/:token/accept`                    | Accept an invitation and gain Viewer access                |
-| `POST`   | `/api/v1/invitations/:token/decline`                   | Decline an invitation                                      |
-| `DELETE` | `/api/v1/invitations/:invitationId`                    | Revoke a pending invitation (Owner only)                   |
-| `GET`    | `/api/v1/projects/:projectId/shares`                   | List pending invitations and accepted Viewers (Owner only) |
-| `DELETE` | `/api/v1/projects/:projectId/shares/:userId`           | Revoke Viewer access (Owner only)                          |
-| `GET`    | `/api/v1/shared-projects`                              | List projects shared with the current user                 |
-| `GET`    | `/api/v1/shared-projects/:projectId`                   | Get a shared project read-only                             |
-| `DELETE` | `/api/v1/shared-projects/:projectId`                   | Remove a project from the user's Shared With Me list       |
-| `GET`    | `/api/v1/sync/changes`                                 | Pull visible snapshot/incremental resource changes         |
-| `GET`    | `/api/v1/sync/status`                                  | Get sync readiness for accessible projects                 |
-| `GET`    | `/api-doc`                                             | Interactive Swagger UI                                     |
-| `GET`    | `/api-doc.json`                                        | Generated OpenAPI 3.1 document                             |
-| `GET`    | `/.well-known/apple-app-site-association`              | Apple universal-link discovery file (host root, no auth)   |
+| Method   | Path                                                   | Purpose                                                            |
+| -------- | ------------------------------------------------------ | ------------------------------------------------------------------ |
+| `GET`    | `/api/v1/health`                                       | Liveness; does not query PostgreSQL                                |
+| `GET`    | `/api/v1/ready`                                        | Readiness; verifies PostgreSQL with `SELECT 1`                     |
+| `POST`   | `/api/v1/auth/apple`                                   | Authenticate with an Apple identity token                          |
+| `POST`   | `/api/v1/auth/refresh`                                 | Rotate a RoomScan refresh token                                    |
+| `POST`   | `/api/v1/projects`                                     | Create a project (Bearer token required)                           |
+| `GET`    | `/api/v1/projects`                                     | List the authenticated user’s projects                             |
+| `GET`    | `/api/v1/projects/:projectId`                          | Get a project as Owner or active Viewer                            |
+| `PATCH`  | `/api/v1/projects/:projectId`                          | Update an owned project                                            |
+| `DELETE` | `/api/v1/projects/:projectId`                          | Soft-delete an owned project                                       |
+| `POST`   | `/api/v1/projects/:projectId/scans`                    | Create scan metadata (Owner only)                                  |
+| `GET`    | `/api/v1/projects/:projectId/scans`                    | List scans; Owner or active Viewer                                 |
+| `GET`    | `/api/v1/scans/:scanId`                                | Get scan detail; Owner or active Viewer                            |
+| `PATCH`  | `/api/v1/scans/:scanId`                                | Update scan name/description (Owner only)                          |
+| `DELETE` | `/api/v1/scans/:scanId`                                | Soft-delete a scan (Owner only)                                    |
+| `POST`   | `/api/v1/scans/:scanId/assets/upload-sessions`         | Create an upload session (Owner only)                              |
+| `POST`   | `/api/v1/upload-sessions/:uploadSessionId/complete`    | Mark an upload completed (Owner only)                              |
+| `GET`    | `/api/v1/scans/:scanId/assets`                         | List scan asset metadata; Owner or active Viewer                   |
+| `GET`    | `/api/v1/scans/:scanId/assets/:assetType/download-url` | Download URL; Owner or active Viewer                               |
+| `POST`   | `/api/v1/upload-sessions/:uploadSessionId/fail`        | Report an upload failure (Owner only)                              |
+| `POST`   | `/api/v1/scans/:scanId/notes`                          | Create a note on a scan (Owner only)                               |
+| `GET`    | `/api/v1/scans/:scanId/notes`                          | List notes; Owner or active Viewer                                 |
+| `GET`    | `/api/v1/notes/:noteId`                                | Get note detail; Owner or active Viewer                            |
+| `PATCH`  | `/api/v1/notes/:noteId`                                | Update note content or color (Owner only)                          |
+| `PATCH`  | `/api/v1/notes/:noteId/position`                       | Move a note to a new 3D position (Owner only)                      |
+| `DELETE` | `/api/v1/notes/:noteId`                                | Delete a note (Owner only)                                         |
+| `POST`   | `/api/v1/projects/:projectId/invitations`              | Create a project invitation for an email (Owner only)              |
+| `POST`   | `/api/v1/scans/:scanId/invitations`                    | Create a scan invitation for an email (Owner only)                 |
+| `POST`   | `/api/v1/invitations/:invitationId/resend`             | Resend a pending invitation email (Owner only)                     |
+| `GET`    | `/api/v1/invitations/:token`                           | Preview an invitation or share link (anonymous or optional Bearer) |
+| `POST`   | `/api/v1/invitations/:token/accept`                    | Accept and gain Viewer access                                      |
+| `POST`   | `/api/v1/invitations/:token/decline`                   | Decline an invitation                                              |
+| `DELETE` | `/api/v1/invitations/:invitationId`                    | Revoke a pending invitation (Owner only)                           |
+| `GET`    | `/api/v1/projects/:projectId/shares`                   | List project pending invitations and accepted Viewers (Owner only) |
+| `DELETE` | `/api/v1/projects/:projectId/shares/:userId`           | Revoke project Viewer access (Owner only)                          |
+| `GET`    | `/api/v1/scans/:scanId/shares`                         | List scan pending invitations and accepted Viewers (Owner only)    |
+| `DELETE` | `/api/v1/scans/:scanId/shares/:userId`                 | Revoke scan Viewer access (Owner only)                             |
+| `POST`   | `/api/v1/projects/:projectId/share-links`              | Create a reusable project share link (Owner only)                  |
+| `GET`    | `/api/v1/projects/:projectId/share-links`              | List active project share links (Owner only)                       |
+| `DELETE` | `/api/v1/projects/:projectId/share-links/:shareLinkId` | Revoke a project share link (Owner only)                           |
+| `POST`   | `/api/v1/scans/:scanId/share-links`                    | Create a reusable scan share link (Owner only)                     |
+| `GET`    | `/api/v1/scans/:scanId/share-links`                    | List active scan share links (Owner only)                          |
+| `DELETE` | `/api/v1/scans/:scanId/share-links/:shareLinkId`       | Revoke a scan share link (Owner only)                              |
+| `GET`    | `/api/v1/shared-projects`                              | List projects shared with the current user                         |
+| `GET`    | `/api/v1/shared-projects/:projectId`                   | Get a shared project read-only                                     |
+| `DELETE` | `/api/v1/shared-projects/:projectId`                   | Remove a project from the user's Shared With Me list               |
+| `GET`    | `/api/v1/shared-scans`                                 | List scans shared with the current user                            |
+| `GET`    | `/api/v1/shared-scans/:scanId`                         | Get a shared scan read-only                                        |
+| `DELETE` | `/api/v1/shared-scans/:scanId`                         | Remove a scan from the user's Shared With Me list                  |
+| `GET`    | `/api/v1/sync/changes`                                 | Pull visible snapshot/incremental resource changes                 |
+| `GET`    | `/api/v1/sync/status`                                  | Get sync readiness for accessible projects                         |
+| `GET`    | `/api-doc`                                             | Interactive Swagger UI                                             |
+| `GET`    | `/api-doc.json`                                        | Generated OpenAPI 3.1 document                                     |
+| `GET`    | `/.well-known/apple-app-site-association`              | Apple universal-link discovery file (host root, no auth)           |
 
 Errors use a stable envelope:
 
@@ -287,22 +299,33 @@ match the scan's current model version (`409` otherwise). Note content is never
 written to logs. Note deletion is soft and emits a tombstone; deleting a scan
 or project soft-deletes descendant notes/assets and emits their tombstones.
 
-Projects are shared through expiring invitation links addressed to a recipient
-email. The Owner creates an invitation (`POST /api/v1/projects/:projectId/invitations`,
-with `recipientEmail` and optional `expiresInSeconds`) only after the project
-has at least one scan with an uploaded model; the API returns an `invitationUrl`
-whose raw token is random and never stored (only its SHA-256 hash is) and is
-redacted from request access logs, and sends an invitation email only after the
-first successful idempotent commit (receipt replay does not resend it). One pending invitation is allowed per
-`(project, email)` (`409` otherwise), and an expired link does not block
-re-inviting the recipient. Recipients can preview the link without
-signing in, then accept to gain Viewer access or decline; a pending link can be
-re-sent (`POST /api/v1/invitations/:invitationId/resend`), which rotates the
-token and extends the expiry. The Owner can list pending links and active
-Viewers (`GET /api/v1/projects/:projectId/shares`), revoke a pending link, and
-revoke a Viewer's access (`DELETE /api/v1/projects/:projectId/shares/:userId`).
-Revoked Viewers lose project, scan, note, and asset-download access immediately.
-Share management is Owner-only (`403 NOT_OWNER` for others).
+Projects and scans are shared through expiring, token-based links. There are
+two kinds: per-recipient invitations addressed to an email, and generic share
+links with no recipient that anyone can accept until they expire or are revoked.
+The Owner creates an invitation (`POST /api/v1/projects/:projectId/invitations`
+or `POST /api/v1/scans/:scanId/invitations`, with `recipientEmail` and optional
+`expiresInSeconds`) only after the project has at least one scan with an
+uploaded model (for a scan, that scan must have an uploaded model); the API
+returns an `invitationUrl` whose raw token is random and never stored (only its
+SHA-256 hash is) and is redacted from request access logs, and sends an
+invitation email to the recipient only after the first successful idempotent
+commit (receipt replay does not resend it). One pending invitation is allowed per
+`(project, email)` and per `(scan, email)` (`409` otherwise), and an expired
+link does not block re-inviting the recipient. Recipients can preview the link
+without signing in, then accept to gain Viewer access or decline; a pending link
+can be re-sent (`POST /api/v1/invitations/:invitationId/resend`), which rotates
+the token and extends the expiry. The Owner can list pending links and active
+Viewers (`GET /api/v1/projects/:projectId/shares` or
+`GET /api/v1/scans/:scanId/shares`), revoke a pending link, and revoke a
+Viewer's access (`DELETE /api/v1/projects/:projectId/shares/:userId` or
+`DELETE /api/v1/scans/:scanId/shares/:userId`). A generic share link is created
+without an email (`POST /api/v1/projects/:projectId/share-links` or
+`POST /api/v1/scans/:scanId/share-links`), copied by the client, and reused by
+any signed-in user; the Owner can list active links and revoke them
+(`DELETE /api/v1/projects/:projectId/share-links/:shareLinkId`). Project links
+grant access to the whole project; scan links grant read access to only that
+scan, its notes, and its assets. Revoked Viewers lose access immediately. Share
+management is Owner-only (`403 NOT_OWNER` for others).
 
 Apple universal links for the invitation flow resolve through
 `GET /.well-known/apple-app-site-association`, served at the host root without
@@ -320,6 +343,19 @@ hidden behind `404`), and
 `DELETE /api/v1/shared-projects/:projectId` removes the project from the user's
 own list without affecting the Owner, the project, or other Viewers. The list
 supports the same `search`/`page`/`limit`/`sort` pagination as owned projects.
+
+The scan-granularity surface mirrors this: `GET /api/v1/shared-scans` lists every
+scan the current user accepted a scan-level invitation or share link for, each
+with a computed `status` (`ACTIVE`, `REVOKED`, `SCAN_DELETED`, or
+`TEMPORARILY_UNAVAILABLE`) and read-only permissions. Owned scans never appear.
+`GET /api/v1/shared-scans/:scanId` opens an active shared scan read-only
+(revoked/deleted/never-shared scans are hidden behind `404`), and
+`DELETE /api/v1/shared-scans/:scanId` removes the scan from the user's own list
+without affecting the Owner, the scan, or other Viewers. The list accepts
+`search` (case-insensitive match on the scan name), `page`, `limit`, and `sort`.
+`page` defaults to 1, `limit` defaults to 5 (maximum 100), and `sort` defaults to
+`updatedAt:desc`; permitted sort values are `updatedAt`, `createdAt`, or `name`,
+each with a `:asc` or `:desc` direction.
 
 For nonce-bound sign-in, the client generates a raw nonce, sends its lowercase
 hexadecimal SHA-256 digest to Apple, and sends the raw nonce in the request

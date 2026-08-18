@@ -1,4 +1,4 @@
-export type InvitationEmailScope = 'project';
+export type InvitationEmailScope = 'project' | 'scan';
 
 export interface InvitationEmailInput {
   scope: InvitationEmailScope;
@@ -55,12 +55,37 @@ function projectContent(input: InvitationEmailInput) {
   };
 }
 
+function scanContent(input: InvitationEmailInput) {
+  const owner = escapeHtml(input.ownerDisplay);
+  const scan = escapeHtml(input.entityName);
+  const invitationUrl = escapeHtml(input.invitationUrl);
+
+  return {
+    subject: `${input.ownerDisplay} shared a 3D Scan with you: ${input.entityName}`,
+    headline: "You're invited to view a 3D Scan!",
+    body: `${owner} has invited you to view the 3D scan &quot;${scan}&quot; on RoomScan. You will have view access to this scan and its attached notes.`,
+    textBody: `${input.ownerDisplay} has invited you to view the 3D scan "${input.entityName}" on RoomScan. You will have view access to this scan and its attached notes.`,
+    htmlMetadata: [
+      ['Scan', scan],
+      ['Owner', owner],
+      ['Access', 'View only'],
+    ],
+    textMetadata: [
+      ['Scan', input.entityName],
+      ['Owner', input.ownerDisplay],
+      ['Access', 'View only'],
+    ],
+    ctaLabel: 'View Scan Invitation',
+    invitationUrl,
+  };
+}
+
 export function buildInvitationEmail(input: InvitationEmailInput): InvitationEmailContent {
-  if (input.scope !== 'project') {
+  if (input.scope !== 'project' && input.scope !== 'scan') {
     throw new Error(`Unsupported invitation email scope: ${String(input.scope)}`);
   }
 
-  const content = projectContent(input);
+  const content = input.scope === 'scan' ? scanContent(input) : projectContent(input);
   const days = inviteDays(input.expiresInSeconds);
   const footer = `This link will expire in ${days} day${days === 1 ? '' : 's'}. If you don't have the RoomScan app installed, you will be redirected to download it.`;
   const metadataRows = content.htmlMetadata

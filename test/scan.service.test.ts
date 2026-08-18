@@ -45,6 +45,7 @@ function createRepository() {
       .fn<ScanRepository['listByProject']>()
       .mockResolvedValue({ items: [createRecord()], total: 1 }),
     findProjectId: vi.fn<ScanRepository['findProjectId']>().mockResolvedValue(PROJECT_ID),
+    findAccessRole: vi.fn<ScanRepository['findAccessRole']>().mockResolvedValue('OWNER'),
     findByIdForUser: vi
       .fn<ScanRepository['findByIdForUser']>()
       .mockResolvedValue({ record: createRecord(), role: 'OWNER' }),

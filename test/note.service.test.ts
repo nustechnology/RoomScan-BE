@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from 'vitest';
 import type { ProjectRepository } from '../src/modules/project/project.types.js';
 import { ProjectPermissionService } from '../src/modules/project/project.permissions.js';
 import { ScanNotFoundError } from '../src/modules/scan/scan.errors.js';
+import type { ScanRepository } from '../src/modules/scan/scan.types.js';
+import { ScanPermissionService } from '../src/modules/scan/scan.permissions.js';
 import { ModelVersionMismatchError, NoteNotFoundError } from '../src/modules/note/note.errors.js';
 import { NoteService } from '../src/modules/note/note.service.js';
 import type { NoteRecord, NoteRepository } from '../src/modules/note/note.types.js';
@@ -23,6 +25,7 @@ function createRecord(overrides: Partial<NoteRecord> = {}): NoteRecord {
       id: OWNER_ID,
       email: 'owner@example.com',
     },
+    title: 'Cabinet hinge',
     content: 'Cabinet hinge is loose',
     color: 'YELLOW',
     position: { x: 1.5, y: -2, z: 3.25 },
@@ -62,9 +65,17 @@ function createHarness() {
   const permissions = new ProjectPermissionService({
     findAccessRole,
   } as unknown as ProjectRepository);
-  const service = new NoteService({ repository, permissions });
+  const scanFindAccessRole = vi
+    .fn<ScanRepository['findAccessRole']>()
+    .mockImplementation(async (_scanId, userId) =>
+      Promise.resolve(userId === OWNER_ID ? 'OWNER' : userId === VIEWER_ID ? 'VIEWER' : null),
+    );
+  const scanPermissions = new ScanPermissionService({
+    findAccessRole: scanFindAccessRole,
+  } as unknown as ScanRepository);
+  const service = new NoteService({ repository, permissions, scanPermissions });
 
-  return { mocks, repository, permissions, service, findAccessRole };
+  return { mocks, repository, permissions, service, findAccessRole, scanFindAccessRole };
 }
 
 describe('NoteService', () => {
@@ -72,6 +83,7 @@ describe('NoteService', () => {
     const { mocks, service } = createHarness();
 
     const result = await service.create(OWNER_ID, SCAN_ID, {
+      title: 'Cabinet hinge',
       content: 'Cabinet hinge is loose',
       color: 'YELLOW',
       position: { x: 1.5, y: -2, z: 3.25 },
@@ -81,12 +93,14 @@ describe('NoteService', () => {
 
     expect(mocks.findScanContext).toHaveBeenCalledWith(SCAN_ID);
     expect(mocks.create).toHaveBeenCalledWith(SCAN_ID, OWNER_ID, {
+      title: 'Cabinet hinge',
       content: 'Cabinet hinge is loose',
       color: 'YELLOW',
       position: { x: 1.5, y: -2, z: 3.25 },
       orientation: null,
       modelVersion: '1',
     });
+    expect(result.title).toBe('Cabinet hinge');
     expect(result.content).toBe('Cabinet hinge is loose');
     expect(result.permissions.role).toBe('OWNER');
   });
@@ -96,6 +110,7 @@ describe('NoteService', () => {
 
     await expect(
       service.create(VIEWER_ID, SCAN_ID, {
+        title: 'Not allowed',
         content: 'Not allowed',
         color: 'YELLOW',
         position: { x: 1, y: 2, z: 3 },
@@ -111,6 +126,7 @@ describe('NoteService', () => {
 
     await expect(
       service.create(OWNER_ID, SCAN_ID, {
+        title: 'Not allowed',
         content: 'Not allowed',
         color: 'YELLOW',
         position: { x: 1, y: 2, z: 3 },
@@ -126,6 +142,7 @@ describe('NoteService', () => {
 
     await expect(
       service.create(OWNER_ID, SCAN_ID, {
+        title: 'Stale note',
         content: 'Stale note',
         color: 'YELLOW',
         position: { x: 1, y: 2, z: 3 },
@@ -168,9 +185,9 @@ describe('NoteService', () => {
     expect(result.items[0]?.permissions.canDelete).toBe(false);
   });
 
-  it('rejects list when the Viewer has no project access', async () => {
-    const { findAccessRole, service } = createHarness();
-    findAccessRole.mockResolvedValueOnce(null);
+  it('rejects list when the Viewer has no scan access', async () => {
+    const { scanFindAccessRole, service } = createHarness();
+    scanFindAccessRole.mockResolvedValueOnce(null);
 
     await expect(
       service.list(VIEWER_ID, SCAN_ID, {

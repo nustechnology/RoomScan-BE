@@ -150,6 +150,7 @@ export interface ScanRepository {
     total: number;
   }>;
   findProjectId(id: string): Promise<string | null>;
+  findAccessRole(id: string, userId: string): Promise<ScanRole | null>;
   findByIdForUser(
     id: string,
     userId: string,

@@ -1,1763 +1,2218 @@
 {
-	"info": {
-		"_postman_id": "aff34309-3dd8-4bb2-ab68-c177c4ffa8f6",
-		"name": "RoomScan - Staging",
-		"description": "Postman collection covering the full RoomScan API surface at https://roomscan-be.onrender.com (all `/api/v1` routes plus the Swagger docs endpoints).\n\n## Setup\n1. Create an environment (or edit the collection variables) and fill in:\n   - `baseUrl` (default already set)\n   - `accessToken` + `refreshToken` from a working RoomScan session, or run **Auth > Apple Sign In** to mint a pair\n   - `projectId` (or run **Projects > Create Project** to populate it)\n2. For Apple Sign In on staging you need a real Apple identity token; for local development with `LOCAL_TEST_AUTH_ENABLED=true` use the sentinel `roomscan-local-test-user` as the `appleIdentityToken`.\n3. For model uploads, set these variables before running the upload requests:\n   - `contentType` (e.g. `model/usdz`)\n   - `sizeBytes` (exact file byte size: `stat -c%s model.usdz`)\n   - `checksum` (e.g. `sha256sum model.usdz | awk '{print $1}'`)\n   - `modelVersion`\n4. The thumbnail is optional. To upload one in the same call, set `thumbnailSizeBytes` (exact byte size) and `thumbnailContentType` (`image/jpeg` or `image/png`); otherwise delete the `thumbnail` block from the create-scan body.\n5. In **Upload Flow**, select your files in the Body tabs of the two PUT requests (`PUT model file to presigned URL` and `PUT thumbnail to presigned URL`).\n6. For the Sharing & Invitations flow, `recipientEmail` defaults to `recipient@example.com`; the **Create Invitation** request saves `invitationId` and the raw `invitationToken` automatically.\n7. The **RoomScan - Local** environment pre-fills `projectId`, `scanId`, `noteId`, and `invitationId` from the seeded data, but not `invitationToken`: the seed rotates it on every `yarn seed:local` run and stores only its SHA-256 hash. Copy the token from the seed's printed `Demo invitation link` (the part after `/invitations/`) or run **Create Invitation** to populate it.\n\nCollection-level **Bearer Token** auth ({{accessToken}}) is applied to every request except the presigned PUTs and the anonymous invitation preview, which deliberately override to No Auth. A collection pre-request script adds `Idempotency-Key: {{idempotencyKey}}` to the five retry-safe creates and `If-Match: \"{{revision}}\"` to revision-guarded mutations; response ETags refresh `revision`. Change `idempotencyKey` before intentionally creating a different payload in the same scope.\n\n## Gotchas\n- Each presigned PUT must use a **binary/file body** (not form-data) and the byte size must match the matching `sizeBytes` variable exactly.\n- `scanFile` size must be between 10 MB and 100 MB; thumbnails are capped at 10 MB.\n- `thumbnail` and `scanFile` are independent: one create call may include both, only the model, or only the thumbnail.\n- Each minted session is completed separately (`Complete model upload session` and `Complete thumbnail upload session`).\n- Presigned upload URLs expire after the configured TTL, so run the upload flow steps in sequence.\n- Retrying a selected create with the same key and payload replays its original status/body; changing the payload under the same key returns `409 IDEMPOTENCY_KEY_CONFLICT`.\n- Project/Scan/Note writes require the latest strong ETag. A stale revision returns `409 REVISION_CONFLICT`; run the relevant GET first to refresh `revision`.\n- The Sync folder saves and advances the opaque `syncCursor`; clear it to restart an initial snapshot.\n- `/auth/refresh` rotates tokens (old one is revoked) and is rate-limited (10 req / 15 min). Run it, then use the returned pair.\n- A project is shareable only after it has at least one non-deleted scan with an uploaded model (`assetStatus = UPLOADED`); otherwise creating an invitation returns `409 PROJECT_NOT_SHAREABLE`.\n- One pending invitation is allowed per `(project, recipientEmail)`; a duplicate returns `409 INVITATION_ALREADY_SENT`. An expired link does not block re-inviting the recipient.\n- `POST /invitations/:invitationId/resend` rotates the token — the previous link stops working and `invitationToken` is refreshed.\n- The project Owner cannot accept or decline their own invitation (`409 CANNOT_ACCEPT_OWN_INVITATION`) and cannot accept twice; use a second user's token (override the request auth) to exercise the accept/decline flow.\n- `DELETE` endpoints that return `204` have no response body.\n- `projectId` must be owned by your token's user, otherwise the API returns `403 NOT_OWNER` (share management) or `404 PROJECT_NOT_FOUND`.",
-		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-		"_exporter_id": "12630530"
-	},
-	"event": [
-		{
-			"listen": "prerequest",
-			"script": {
-				"type": "text/javascript",
-				"exec": [
-					"const method = pm.request.method;",
-					"const path = pm.request.url.getPath().replace(/^\\//, '');",
-					"const idempotentCreate = method === 'POST' && [/^projects$/, /^projects\\/[^/]+\\/scans$/, /^scans\\/[^/]+\\/notes$/, /^scans\\/[^/]+\\/assets\\/upload-sessions$/, /^projects\\/[^/]+\\/invitations$/].some((pattern) => pattern.test(path));",
-					"if (idempotentCreate) pm.request.headers.upsert({ key: 'Idempotency-Key', value: pm.variables.get('idempotencyKey') || 'postman-sit39-1' });",
-					"const revisionMutation = (method === 'PATCH' || method === 'DELETE') && [/^projects\\/[^/]+$/, /^scans\\/[^/]+$/, /^notes\\/[^/]+$/, /^notes\\/[^/]+\\/position$/].some((pattern) => pattern.test(path));",
-					"if (revisionMutation) pm.request.headers.upsert({ key: 'If-Match', value: '\"' + (pm.variables.get('revision') || '1') + '\"' });"
-				]
-			}
-		},
-		{
-			"listen": "test",
-			"script": {
-				"type": "text/javascript",
-				"exec": [
-					"const etag = pm.response.headers.get('ETag');",
-					"if (etag) pm.environment.set('revision', etag.replace(/\"/g, ''));"
-				]
-			}
-		}
-	],
-	"item": [
-		{
-			"name": "System",
-			"item": [
-				{
-					"name": "Liveness",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/health",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"health"
-							]
-						},
-						"description": "Liveness probe. Returns `200` without touching the database."
-					},
-					"response": []
-				},
-				{
-					"name": "Readiness",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/ready",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"ready"
-							]
-						},
-						"description": "Readiness probe. Returns `200` with `database: up` when PostgreSQL is reachable, otherwise `503 SERVICE_UNAVAILABLE`."
-					},
-					"response": []
-				},
-				{
-					"name": "OpenAPI Document",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{host}}/api-doc.json",
-							"host": [
-								"{{host}}"
-							],
-							"path": [
-								"api-doc.json"
-							]
-						},
-						"description": "Raw OpenAPI 3.1 document generated from the runtime Zod schemas."
-					},
-					"response": []
-				},
-				{
-					"name": "Swagger UI",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{host}}/api-doc",
-							"host": [
-								"{{host}}"
-							],
-							"path": [
-								"api-doc"
-							]
-						},
-						"description": "Interactive Swagger UI served at `/api-doc`."
-					},
-					"response": []
-				}
-			]
-		},
-		{
-			"name": "Auth",
-			"item": [
-				{
-					"name": "Apple Sign In",
-					"event": [
-						{
-							"listen": "test",
-							"script": {
-								"type": "text/javascript",
-								"exec": [
-									"const json = pm.response.json();",
-									"pm.test(\"Sign in returns a token pair\", function () {",
-									"  pm.response.to.have.status(200);",
-									"  pm.expect(json.accessToken).to.be.a('string').and.not.empty;",
-									"  pm.expect(json.refreshToken).to.be.a('string').and.not.empty;",
-									"});",
-									"pm.environment.set(\"accessToken\", json.accessToken);",
-									"pm.environment.set(\"refreshToken\", json.refreshToken);"
-								]
-							}
-						}
-					],
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"identityToken\": \"{{appleIdentityToken}}\"\n}",
-							"options": {
-								"raw": {
-									"language": "json"
-								}
-							}
-						},
-						"url": {
-							"raw": "{{baseUrl}}/auth/apple",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"auth",
-								"apple"
-							]
-						},
-						"description": "Authenticates with an Apple identity token and stores the new access/refresh pair in the environment. On staging set `appleIdentityToken` to a real token; for local development with `LOCAL_TEST_AUTH_ENABLED=true` use the sentinel `roomscan-local-test-user`. Rate-limited: 20 requests / 15 minutes per IP. Optional raw `nonce` may be added when the token carries a nonce claim."
-					},
-					"response": []
-				},
-				{
-					"name": "Refresh Token",
-					"event": [
-						{
-							"listen": "test",
-							"script": {
-								"type": "text/javascript",
-								"exec": [
-									"const json = pm.response.json();",
-									"pm.test(\"Refresh returns a new token pair\", function () {",
-									"  pm.response.to.have.status(200);",
-									"  pm.expect(json.accessToken).to.be.a('string').and.not.empty;",
-									"  pm.expect(json.refreshToken).to.be.a('string').and.not.empty;",
-									"});",
-									"pm.environment.set(\"accessToken\", json.accessToken);",
-									"pm.environment.set(\"refreshToken\", json.refreshToken);"
-								]
-							}
-						}
-					],
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}",
-							"options": {
-								"raw": {
-									"language": "json"
-								}
-							}
-						},
-						"url": {
-							"raw": "{{baseUrl}}/auth/refresh",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"auth",
-								"refresh"
-							]
-						},
-						"description": "Rotates the refresh token and stores the new access/refresh pair in the environment. Each refresh revokes the previous refresh token, so always read the returned pair.\n\nRate-limited: 10 requests / 15 minutes per IP."
-					},
-					"response": []
-				}
-			]
-		},
-		{
-			"name": "Projects",
-			"item": [
-				{
-					"name": "Create Project",
-					"event": [
-						{
-							"listen": "test",
-							"script": {
-								"type": "text/javascript",
-								"exec": [
-									"const json = pm.response.json();",
-									"pm.test(\"Project created\", function () {",
-									"  pm.response.to.have.status(201);",
-									"  pm.expect(json.id).to.be.a('string').and.not.empty;",
-									"});",
-									"pm.environment.set(\"projectId\", json.id);"
-								]
-							}
-						}
-					],
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"name\": \"Postman Test Project {{$timestamp}}\",\n  \"description\": \"Created from the RoomScan Postman collection\"\n}",
-							"options": {
-								"raw": {
-									"language": "json"
-								}
-							}
-						},
-						"url": {
-							"raw": "{{baseUrl}}/projects",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"projects"
-							]
-						},
-						"description": "Creates a project owned by the current user (Owner only). The response `id` is saved to the `projectId` environment variable. `name` is required (1-50 chars); `description` is optional (max 500) and may be `null` to clear it."
-					},
-					"response": []
-				},
-				{
-					"name": "List Projects",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/projects?page=1&limit=5&sort=updatedAt:desc",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"projects"
-							],
-							"query": [
-								{
-									"key": "page",
-									"value": "1"
-								},
-								{
-									"key": "limit",
-									"value": "5"
-								},
-								{
-									"key": "sort",
-									"value": "updatedAt:desc"
-								}
-							]
-						},
-						"description": "Lists projects owned by the current user. Optional query params: `search` (case-insensitive name search), `page`, `limit` (max 100), `sort` (updatedAt:desc|asc, createdAt:desc|asc, name:asc|desc)."
-					},
-					"response": []
-				},
-				{
-					"name": "Get Project Detail",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/projects/{{projectId}}",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"projects",
-								"{{projectId}}"
-							]
-						},
-						"description": "Returns full project detail (owner, scans, permissions) as the Owner or an active Viewer. `404 PROJECT_NOT_FOUND` when the project is missing, deleted, or inaccessible."
-					},
-					"response": []
-				},
-				{
-					"name": "Update Project",
-					"request": {
-						"method": "PATCH",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"name\": \"Renamed Postman Project\",\n  \"description\": \"Updated via the Postman collection\"\n}",
-							"options": {
-								"raw": {
-									"language": "json"
-								}
-							}
-						},
-						"url": {
-							"raw": "{{baseUrl}}/projects/{{projectId}}",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"projects",
-								"{{projectId}}"
-							]
-						},
-						"description": "Partially updates a project (Owner only). At least one of `name` or `description` is required; `\"description\": null` clears the stored description. Returns the updated project with `200`."
-					},
-					"response": []
-				},
-				{
-					"name": "Delete Project",
-					"request": {
-						"method": "DELETE",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/projects/{{projectId}}",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"projects",
-								"{{projectId}}"
-							]
-						},
-						"description": "Soft-deletes a project and revokes active Viewer access in one transaction (Owner only). Returns idempotent `204` (no body). Note: this request returns `204`, so no response-body test runs."
-					},
-					"response": []
-				}
-			]
-		},
-		{
-			"name": "Scans",
-			"item": [
-				{
-					"name": "Create Scan (metadata only)",
-					"event": [
-						{
-							"listen": "test",
-							"script": {
-								"type": "text/javascript",
-								"exec": [
-									"const json = pm.response.json();",
-									"pm.test(\"Scan created\", function () {",
-									"  pm.response.to.have.status(201);",
-									"  pm.expect(json.id).to.be.a('string').and.not.empty;",
-									"});",
-									"pm.environment.set(\"scanId\", json.id);"
-								]
-							}
-						}
-					],
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"name\": \"Postman Scan {{$timestamp}}\",\n  \"description\": \"Metadata-only scan created from Postman\"\n}",
-							"options": {
-								"raw": {
-									"language": "json"
-								}
-							}
-						},
-						"url": {
-							"raw": "{{baseUrl}}/projects/{{projectId}}/scans",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"projects",
-								"{{projectId}}",
-								"scans"
-							]
-						},
-						"description": "Creates scan metadata without an upload descriptor (Owner only; `201`). The response `id` is saved to the `scanId` environment variable. To mint upload URLs in the same call, use **Upload Flow > Create Scan (with upload descriptor)** instead."
-					},
-					"response": []
-				},
-				{
-					"name": "List Scans",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/projects/{{projectId}}/scans?page=1&limit=20&sort=createdAt:desc",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"projects",
-								"{{projectId}}",
-								"scans"
-							],
-							"query": [
-								{
-									"key": "page",
-									"value": "1"
-								},
-								{
-									"key": "limit",
-									"value": "20"
-								},
-								{
-									"key": "sort",
-									"value": "createdAt:desc"
-								}
-							]
-						},
-						"description": "Paginated scan list for the project. Owner or active Viewer. `limit` max 100; `sort` accepts createdAt:desc|asc, updatedAt:desc|asc, name:asc|desc."
-					},
-					"response": []
-				},
-				{
-					"name": "Get Scan Detail",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/scans/{{scanId}}",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"scans",
-								"{{scanId}}"
-							]
-						},
-						"description": "Scan detail by scan id. Owner or active Viewer. Requires `scanId` (populated by the create-scan step)."
-					},
-					"response": []
-				},
-				{
-					"name": "Update Scan",
-					"request": {
-						"method": "PATCH",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"name\": \"Renamed Scan\",\n  \"description\": null\n}",
-							"options": {
-								"raw": {
-									"language": "json"
-								}
-							}
-						},
-						"url": {
-							"raw": "{{baseUrl}}/scans/{{scanId}}",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"scans",
-								"{{scanId}}"
-							]
-						},
-						"description": "Partially updates a scan's `name` and/or `description` (Owner only). At least one field is required; `\"description\": null` clears it. Returns the updated scan with `200`."
-					},
-					"response": []
-				},
-				{
-					"name": "Delete Scan",
-					"request": {
-						"method": "DELETE",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/scans/{{scanId}}",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"scans",
-								"{{scanId}}"
-							]
-						},
-						"description": "Soft-deletes a scan (Owner only). Returns idempotent `204` (no body)."
-					},
-					"response": []
-				}
-			]
-		},
-		{
-			"name": "Upload Flow",
-			"item": [
-				{
-					"name": "Create Scan (with upload descriptor)",
-					"event": [
-						{
-							"listen": "prerequest",
-							"script": {
-								"type": "text/javascript",
-								"exec": [
-									"const body = {",
-									"  name: \"Postman Scan \" + new Date().getTime(),",
-									"  scanFile: {",
-									"    contentType: pm.variables.get(\"contentType\") || \"model/usdz\",",
-									"    sizeBytes: Number(pm.variables.get(\"sizeBytes\")),",
-									"    checksum: pm.variables.get(\"checksum\"),",
-									"    modelVersion: pm.variables.get(\"modelVersion\") || \"1\"",
-									"  }",
-									"};",
-									"const thumbSize = pm.variables.get(\"thumbnailSizeBytes\");",
-									"if (thumbSize !== undefined && String(thumbSize).trim() !== \"\") {",
-									"  body.thumbnail = {",
-									"    contentType: pm.variables.get(\"thumbnailContentType\") || \"image/png\",",
-									"    sizeBytes: Number(thumbSize)",
-									"  };",
-									"}",
-									"pm.request.body.mode = \"raw\";",
-									"pm.request.body.raw = JSON.stringify(body, null, 2);",
-									"pm.request.body.options = { raw: { language: \"json\" } };"
-								]
-							}
-						},
-						{
-							"listen": "test",
-							"script": {
-								"type": "text/javascript",
-								"exec": [
-									"const json = pm.response.json();",
-									"pm.test(\"Scan created with model upload session\", function () {",
-									"  pm.response.to.have.status(201);",
-									"  pm.expect(json.id).to.be.a('string').and.not.empty;",
-									"  pm.expect(json.uploads).to.be.an('object');",
-									"  pm.expect(json.uploads.scanFile).to.be.an('object');",
-									"  pm.expect(json.uploads.scanFile.uploadUrl).to.be.a('string').and.not.empty;",
-									"  pm.expect(json.uploads.scanFile.uploadSessionId).to.be.a('string').and.not.empty;",
-									"});",
-									"pm.environment.set(\"scanId\", json.id);",
-									"pm.environment.set(\"uploadUrl\", json.uploads.scanFile.uploadUrl);",
-									"pm.environment.set(\"uploadSessionId\", json.uploads.scanFile.uploadSessionId);",
-									"pm.environment.set(\"assetId\", json.uploads.scanFile.assetId);",
-									"if (json.uploads && json.uploads.thumbnail) {",
-									"  pm.environment.set(\"thumbnailUploadUrl\", json.uploads.thumbnail.uploadUrl);",
-									"  pm.environment.set(\"thumbnailUploadSessionId\", json.uploads.thumbnail.uploadSessionId);",
-									"  pm.environment.set(\"thumbnailAssetId\", json.uploads.thumbnail.assetId);",
-									"}"
-								]
-							}
-						}
-					],
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"name\": \"Postman Scan {{$timestamp}}\",\n  \"scanFile\": {\n    \"contentType\": \"{{contentType}}\",\n    \"sizeBytes\": {{sizeBytes}},\n    \"checksum\": \"{{checksum}}\",\n    \"modelVersion\": \"{{modelVersion}}\"\n  },\n  \"thumbnail\": {\n    \"contentType\": \"{{thumbnailContentType}}\",\n    \"sizeBytes\": {{thumbnailSizeBytes}}\n  }\n}",
-							"options": {
-								"raw": {
-									"language": "json"
-								}
-							}
-						},
-						"url": {
-							"raw": "{{baseUrl}}/projects/{{projectId}}/scans",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"projects",
-								"{{projectId}}",
-								"scans"
-							]
-						},
-						"description": "Creates a scan (Owner only) and mints an upload session for each supplied descriptor. A **pre-request script builds the JSON body at run time**: the `thumbnail` object is only included when `thumbnailSizeBytes` is set, so the request always sends valid JSON. The response populates `scanId`, `uploadUrl`, `uploadSessionId`, and `assetId` for the model, plus `thumbnailUploadUrl`, `thumbnailUploadSessionId`, and `thumbnailAssetId` when a `thumbnail` descriptor was included.\n\nBefore running, set `contentType`, `sizeBytes` (exact byte size), `checksum`, and `modelVersion` for the model. For an optional thumbnail, set `thumbnailSizeBytes` and `thumbnailContentType`; leave `thumbnailSizeBytes` empty to skip the thumbnail entirely.\n\nSupported model content types: `model/gltf-binary`, `model/gltf+json`, `application/octet-stream`, `model/usd`, `model/usdz`. `sizeBytes` must be between 10 MB and 100 MB. Thumbnail content types are `image/jpeg` and `image/png`; its `sizeBytes` is required and capped at 10 MB."
-					},
-					"response": []
-				},
-				{
-					"name": "PUT model file to presigned URL",
-					"request": {
-						"auth": {
-							"type": "noauth"
-						},
-						"method": "PUT",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "{{contentType}}"
-							}
-						],
-						"body": {
-							"mode": "file",
-							"file": {
-								"src": null
-							}
-						},
-						"url": {
-							"raw": "{{uploadUrl}}",
-							"host": [
-								"{{uploadUrl}}"
-							]
-						},
-						"description": "Uploads the model file directly to the presigned PUT URL. Auth is deliberately set to **No Auth** (an extra Authorization header would break the S3 signature).\n\n- In the Body tab, select your model file (Postman prompts for the file because `src` is unset).\n- Use a file/binary body, NOT form-data.\n- The `Content-Type` header must match the descriptor's `contentType` exactly.\n- The file byte size must equal `sizeBytes` exactly.\n- Run this promptly: the presigned URL expires after the configured TTL."
-					},
-					"response": []
-				},
-				{
-					"name": "Complete model upload session",
-					"event": [
-						{
-							"listen": "test",
-							"script": {
-								"type": "text/javascript",
-								"exec": [
-									"const json = pm.response.json();",
-									"pm.test(\"Upload session completed\", function () {",
-									"  pm.response.to.have.status(200);",
-									"  pm.expect(json.status).to.eql(\"UPLOADED\");",
-									"});"
-								]
-							}
-						}
-					],
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"sizeBytes\": {{sizeBytes}},\n  \"checksum\": \"{{checksum}}\"\n}",
-							"options": {
-								"raw": {
-									"language": "json"
-								}
-							}
-						},
-						"url": {
-							"raw": "{{baseUrl}}/upload-sessions/{{uploadSessionId}}/complete",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"upload-sessions",
-								"{{uploadSessionId}}",
-								"complete"
-							]
-						},
-						"description": "Marks the model upload session complete (Owner only). The server verifies the uploaded object's size and content type against the session; a mismatch returns 409 ASSET_UPLOAD_FAILED. On success the model scan gets assetStatus UPLOADED and syncStatus SYNCED."
-					},
-					"response": []
-				},
-				{
-					"name": "PUT thumbnail to presigned URL",
-					"request": {
-						"auth": {
-							"type": "noauth"
-						},
-						"method": "PUT",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "{{thumbnailContentType}}"
-							}
-						],
-						"body": {
-							"mode": "file",
-							"file": {
-								"src": null
-							}
-						},
-						"url": {
-							"raw": "{{thumbnailUploadUrl}}",
-							"host": [
-								"{{thumbnailUploadUrl}}"
-							]
-						},
-						"description": "Uploads the thumbnail file to its own presigned PUT URL (returned alongside the model URL when the create-scan body included a `thumbnail` descriptor). Auth is deliberately set to **No Auth**.\n\n- Select your thumbnail file in the Body tab.\n- Use a file/binary body, NOT form-data.\n- `Content-Type` must match the thumbnail descriptor exactly (`image/jpeg` or `image/png`).\n- The byte size must equal `thumbnailSizeBytes` exactly.\n- Run promptly: the presigned URL expires after the configured TTL."
-					},
-					"response": []
-				},
-				{
-					"name": "Complete thumbnail upload session",
-					"event": [
-						{
-							"listen": "test",
-							"script": {
-								"type": "text/javascript",
-								"exec": [
-									"const json = pm.response.json();",
-									"pm.test(\"Thumbnail upload session completed\", function () {",
-									"  pm.response.to.have.status(200);",
-									"  pm.expect(json.status).to.eql(\"UPLOADED\");",
-									"});"
-								]
-							}
-						}
-					],
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"sizeBytes\": {{thumbnailSizeBytes}}\n}",
-							"options": {
-								"raw": {
-									"language": "json"
-								}
-							}
-						},
-						"url": {
-							"raw": "{{baseUrl}}/upload-sessions/{{thumbnailUploadSessionId}}/complete",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"upload-sessions",
-								"{{thumbnailUploadSessionId}}",
-								"complete"
-							]
-						},
-						"description": "Marks the thumbnail upload session complete (Owner only). The server verifies the uploaded object's size and content type against the session, then persists the thumbnail display URL onto the scan so project and scan responses expose it. `checksum` is optional for thumbnails."
-					},
-					"response": []
-				}
-			]
-		},
-		{
-			"name": "Scan Assets",
-			"item": [
-				{
-					"name": "Create Upload Session (MODEL)",
-					"event": [
-						{
-							"listen": "test",
-							"script": {
-								"type": "text/javascript",
-								"exec": [
-									"const json = pm.response.json();",
-									"pm.test(\"Model upload session created\", function () {",
-									"  pm.expect(pm.response.code).to.be.oneOf([200, 201]);",
-									"  pm.expect(json.uploadSessionId).to.be.a('string').and.not.empty;",
-									"  pm.expect(json.uploadUrl).to.be.a('string').and.not.empty;",
-									"});",
-									"pm.environment.set(\"uploadSessionId\", json.uploadSessionId);",
-									"pm.environment.set(\"uploadUrl\", json.uploadUrl);",
-									"pm.environment.set(\"assetId\", json.assetId);"
-								]
-							}
-						}
-					],
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"assetType\": \"MODEL\",\n  \"contentType\": \"{{contentType}}\",\n  \"sizeBytes\": {{sizeBytes}},\n  \"checksum\": \"{{checksum}}\",\n  \"modelVersion\": \"{{modelVersion}}\"\n}",
-							"options": {
-								"raw": {
-									"language": "json"
-								}
-							}
-						},
-						"url": {
-							"raw": "{{baseUrl}}/scans/{{scanId}}/assets/upload-sessions",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"scans",
-								"{{scanId}}",
-								"assets",
-								"upload-sessions"
-							]
-						},
-						"description": "Mints a model upload session for an existing scan (Owner only). Idempotency-Key is injected by the collection; replay returns the original response, and an UPLOADED MODEL returns 409 MODEL_ALREADY_COMPLETED. Stores uploadSessionId, uploadUrl, and assetId."
-					},
-					"response": []
-				},
-				{
-					"name": "Create Upload Session (THUMBNAIL)",
-					"event": [
-						{
-							"listen": "test",
-							"script": {
-								"type": "text/javascript",
-								"exec": [
-									"const json = pm.response.json();",
-									"pm.test(\"Thumbnail upload session created\", function () {",
-									"  pm.expect(pm.response.code).to.be.oneOf([200, 201]);",
-									"  pm.expect(json.uploadSessionId).to.be.a('string').and.not.empty;",
-									"  pm.expect(json.uploadUrl).to.be.a('string').and.not.empty;",
-									"});",
-									"pm.environment.set(\"thumbnailUploadSessionId\", json.uploadSessionId);",
-									"pm.environment.set(\"thumbnailUploadUrl\", json.uploadUrl);",
-									"pm.environment.set(\"thumbnailAssetId\", json.assetId);"
-								]
-							}
-						}
-					],
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"assetType\": \"THUMBNAIL\",\n  \"contentType\": \"{{thumbnailContentType}}\",\n  \"sizeBytes\": {{thumbnailSizeBytes}}\n}",
-							"options": {
-								"raw": {
-									"language": "json"
-								}
-							}
-						},
-						"url": {
-							"raw": "{{baseUrl}}/scans/{{scanId}}/assets/upload-sessions",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"scans",
-								"{{scanId}}",
-								"assets",
-								"upload-sessions"
-							]
-						},
-						"description": "Mints a thumbnail upload session for an existing scan (Owner only; `201`, or idempotent `200`). Stores `thumbnailUploadSessionId`, `thumbnailUploadUrl`, and `thumbnailAssetId`. `checksum` and `modelVersion` are optional for thumbnails."
-					},
-					"response": []
-				},
-				{
-					"name": "Complete Upload Session",
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"sizeBytes\": {{sizeBytes}},\n  \"checksum\": \"{{checksum}}\"\n}",
-							"options": {
-								"raw": {
-									"language": "json"
-								}
-							}
-						},
-						"url": {
-							"raw": "{{baseUrl}}/upload-sessions/{{uploadSessionId}}/complete",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"upload-sessions",
-								"{{uploadSessionId}}",
-								"complete"
-							]
-						},
-						"description": "Marks the upload session stored in `uploadSessionId` complete (Owner only). Both `sizeBytes` and `checksum` are optional but the server verifies the uploaded object against the session. Use the dedicated **Upload Flow > Complete ...** requests when the session was minted by a create-scan descriptor."
-					},
-					"response": []
-				},
-				{
-					"name": "Fail Upload Session",
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"reason\": \"Simulated client-side upload failure\"\n}",
-							"options": {
-								"raw": {
-									"language": "json"
-								}
-							}
-						},
-						"url": {
-							"raw": "{{baseUrl}}/upload-sessions/{{uploadSessionId}}/fail",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"upload-sessions",
-								"{{uploadSessionId}}",
-								"fail"
-							]
-						},
-						"description": "Reports an upload failure for the session stored in `uploadSessionId` (Owner only). The asset is marked `FAILED` and the parent scan gets `assetStatus FAILED`. `reason` is optional (max 500 chars)."
-					},
-					"response": []
-				},
-				{
-					"name": "List Assets",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/scans/{{scanId}}/assets",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"scans",
-								"{{scanId}}",
-								"assets"
-							]
-						},
-						"description": "Lists asset metadata for a scan. Owner or active Viewer."
-					},
-					"response": []
-				},
-				{
-					"name": "Get Model Download URL",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/scans/{{scanId}}/assets/MODEL/download-url",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"scans",
-								"{{scanId}}",
-								"assets",
-								"MODEL",
-								"download-url"
-							]
-						},
-						"description": "Mints a presigned download URL for the uploaded model. Returns 409 ASSET_NOT_READY until the asset is UPLOADED."
-					},
-					"response": []
-				},
-				{
-					"name": "Get Thumbnail Download URL",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/scans/{{scanId}}/assets/THUMBNAIL/download-url",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"scans",
-								"{{scanId}}",
-								"assets",
-								"THUMBNAIL",
-								"download-url"
-							]
-						},
-						"description": "Mints a presigned download URL for the uploaded thumbnail. Returns 409 ASSET_NOT_READY until the asset is UPLOADED."
-					},
-					"response": []
-				}
-			]
-		},
-		{
-			"name": "Notes",
-			"item": [
-				{
-					"name": "Create Note",
-					"event": [
-						{
-							"listen": "test",
-							"script": {
-								"type": "text/javascript",
-								"exec": [
-									"const json = pm.response.json();",
-									"pm.test(\"Note created\", function () {",
-									"  pm.response.to.have.status(201);",
-									"  pm.expect(json.id).to.be.a('string').and.not.empty;",
-									"});",
-									"pm.environment.set(\"noteId\", json.id);"
-								]
-							}
-						}
-					],
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"content\": \"Postman note {{$timestamp}}\",\n  \"color\": \"YELLOW\",\n  \"position\": { \"x\": 1.5, \"y\": -2, \"z\": 3.25 },\n  \"orientation\": { \"x\": 0, \"y\": 0, \"z\": 1 },\n  \"modelVersion\": \"1\"\n}",
-							"options": {
-								"raw": {
-									"language": "json"
-								}
-							}
-						},
-						"url": {
-							"raw": "{{baseUrl}}/scans/{{scanId}}/notes",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"scans",
-								"{{scanId}}",
-								"notes"
-							]
-						},
-						"description": "Creates a note on a scan (Owner only; `201`). The response `id` is saved to the `noteId` environment variable. `color` is one of YELLOW, RED, BLUE, GREEN, ORANGE, PURPLE; `modelVersion` must equal the parent scan's model version (a mismatch returns `409 MODEL_VERSION_MISMATCH`)."
-					},
-					"response": []
-				},
-				{
-					"name": "List Notes",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/scans/{{scanId}}/notes?page=1&limit=20&sort=updatedAt:desc",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"scans",
-								"{{scanId}}",
-								"notes"
-							],
-							"query": [
-								{
-									"key": "page",
-									"value": "1"
-								},
-								{
-									"key": "limit",
-									"value": "20"
-								},
-								{
-									"key": "sort",
-									"value": "updatedAt:desc"
-								}
-							]
-						},
-						"description": "Paginated note list for a scan. Owner or active Viewer. `sort` accepts createdAt:desc|asc, updatedAt:desc|asc."
-					},
-					"response": []
-				},
-				{
-					"name": "Get Note Detail",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/notes/{{noteId}}",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"notes",
-								"{{noteId}}"
-							]
-						},
-						"description": "Note detail by note id. Owner or active Viewer of the parent project."
-					},
-					"response": []
-				},
-				{
-					"name": "Update Note",
-					"request": {
-						"method": "PATCH",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"content\": \"Updated note content\",\n  \"color\": \"BLUE\"\n}",
-							"options": {
-								"raw": {
-									"language": "json"
-								}
-							}
-						},
-						"url": {
-							"raw": "{{baseUrl}}/notes/{{noteId}}",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"notes",
-								"{{noteId}}"
-							]
-						},
-						"description": "Partially updates a note's `content` and/or `color` (Owner only). At least one field is required."
-					},
-					"response": []
-				},
-				{
-					"name": "Move Note",
-					"request": {
-						"method": "PATCH",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"position\": { \"x\": 0, \"y\": 1, \"z\": 2 },\n  \"orientation\": { \"x\": 0, \"y\": 0, \"z\": 1 },\n  \"modelVersion\": \"1\"\n}",
-							"options": {
-								"raw": {
-									"language": "json"
-								}
-							}
-						},
-						"url": {
-							"raw": "{{baseUrl}}/notes/{{noteId}}/position",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"notes",
-								"{{noteId}}",
-								"position"
-							]
-						},
-						"description": "Moves a note to a new 3D `position` (Owner only). `orientation` is optional; `modelVersion` must match the parent scan's current version, otherwise `409 MODEL_VERSION_MISMATCH`."
-					},
-					"response": []
-				},
-				{
-					"name": "Delete Note",
-					"request": {
-						"method": "DELETE",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/notes/{{noteId}}",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"notes",
-								"{{noteId}}"
-							]
-						},
-						"description": "Soft-deletes a note and emits a sync tombstone (Owner only). Returns `204` (no body)."
-					},
-					"response": []
-				}
-			]
-		},
-		{
-			"name": "Sharing & Invitations",
-			"item": [
-				{
-					"name": "Create Invitation",
-					"event": [
-						{
-							"listen": "test",
-							"script": {
-								"type": "text/javascript",
-								"exec": [
-									"const json = pm.response.json();",
-									"pm.test(\"Invitation created\", function () {",
-									"  pm.response.to.have.status(201);",
-									"  pm.expect(json.invitationId).to.be.a('string').and.not.empty;",
-									"  pm.expect(json.invitationUrl).to.be.a('string').and.not.empty;",
-									"  pm.expect(json.status).to.eql(\"PENDING\");",
-									"});",
-									"pm.environment.set(\"invitationId\", json.invitationId);",
-									"pm.environment.set(\"recipientEmail\", json.recipientEmail);",
-									"const token = (json.invitationUrl || \"\").split(\"/invitations/\")[1] || \"\";",
-									"pm.environment.set(\"invitationToken\", token);"
-								]
-							}
-						}
-					],
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"recipientEmail\": \"{{recipientEmail}}\",\n  \"expiresInSeconds\": 604800\n}",
-							"options": {
-								"raw": {
-									"language": "json"
-								}
-							}
-						},
-						"url": {
-							"raw": "{{baseUrl}}/projects/{{projectId}}/invitations",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"projects",
-								"{{projectId}}",
-								"invitations"
-							]
-						},
-						"description": "Creates a per-recipient invitation link (Owner only; `201`) and emails it to the recipient. Saves `invitationId`, `recipientEmail`, and the raw `invitationToken` extracted from `invitationUrl`. `expiresInSeconds` is optional (60-2,592,000; defaults to the configured TTL).\n\nThe project must have at least one scan with an uploaded model (`409 PROJECT_NOT_SHAREABLE` otherwise). A second pending invitation for the same email returns `409 INVITATION_ALREADY_SENT`; an expired link does not block re-inviting."
-					},
-					"response": []
-				},
-				{
-					"name": "Resend Invitation",
-					"event": [
-						{
-							"listen": "test",
-							"script": {
-								"type": "text/javascript",
-								"exec": [
-									"const json = pm.response.json();",
-									"pm.test(\"Invitation resent\", function () {",
-									"  pm.response.to.have.status(200);",
-									"  pm.expect(json.invitationUrl).to.be.a('string').and.not.empty;",
-									"});",
-									"const token = (json.invitationUrl || \"\").split(\"/invitations/\")[1] || \"\";",
-									"pm.environment.set(\"invitationToken\", token);"
-								]
-							}
-						}
-					],
-					"request": {
-						"method": "POST",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/invitations/{{invitationId}}/resend",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"invitations",
-								"{{invitationId}}",
-								"resend"
-							]
-						},
-						"description": "Resends a pending, unexpired invitation (Owner only; `200`). Rotates the token (the previous link stops working), extends `expiresAt` to `now + TTL`, updates `sentAt`, and re-sends the email. The new `invitationToken` is saved. Expired, accepted, declined, and revoked invitations cannot be resent."
-					},
-					"response": []
-				},
-				{
-					"name": "Preview Invitation",
-					"request": {
-						"auth": {
-							"type": "noauth"
-						},
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/invitations/{{invitationToken}}",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"invitations",
-								"{{invitationToken}}"
-							]
-						},
-						"description": "Previews an invitation anonymously (this request deliberately overrides auth to No Auth). Returns the safe project summary, `status` (PENDING/EXPIRED/ACCEPTED/DECLINED/REVOKED), `recipientEmail`, `sentAt`, and `expiresAt`. A valid Bearer token can be added to also receive `hasAccess`."
-					},
-					"response": []
-				},
-				{
-					"name": "Accept Invitation",
-					"request": {
-						"method": "POST",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/invitations/{{invitationToken}}/accept",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"invitations",
-								"{{invitationToken}}",
-								"accept"
-							]
-						},
-						"description": "Accepts the invitation with the current user's token and gains Viewer access (`200`). The project Owner cannot accept their own invitation (`409 CANNOT_ACCEPT_OWN_INVITATION`), and a user who already has active access gets `409 ACCESS_ALREADY_EXISTS` — override this request's auth with the invitee's token to exercise the flow. The first acceptance wins (`409 INVITATION_ALREADY_ACCEPTED` afterwards)."
-					},
-					"response": []
-				},
-				{
-					"name": "Decline Invitation",
-					"request": {
-						"method": "POST",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/invitations/{{invitationToken}}/decline",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"invitations",
-								"{{invitationToken}}",
-								"decline"
-							]
-						},
-						"description": "Declines the invitation for the current user (`200`, status becomes DECLINED). Same ownership rules as accept: the Owner cannot decline their own link (`409 CANNOT_ACCEPT_OWN_INVITATION`)."
-					},
-					"response": []
-				},
-				{
-					"name": "Revoke Invitation",
-					"request": {
-						"method": "DELETE",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/invitations/{{invitationId}}",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"invitations",
-								"{{invitationId}}"
-							]
-						},
-						"description": "Revokes a pending invitation (Owner only; `200`, status becomes REVOKED). Revocation is idempotent for already-revoked links; expired, accepted, and declined invitations cannot be revoked."
-					},
-					"response": []
-				},
-				{
-					"name": "List Shares",
-					"event": [
-						{
-							"listen": "test",
-							"script": {
-								"type": "text/javascript",
-								"exec": [
-									"const json = pm.response.json();",
-									"pm.test(\"Shares listed\", function () {",
-									"  pm.response.to.have.status(200);",
-									"  pm.expect(json.pendingInvitations).to.be.an('array');",
-									"  pm.expect(json.viewers).to.be.an('array');",
-									"});",
-									"if (Array.isArray(json.viewers) && json.viewers.length > 0) {",
-									"  pm.environment.set(\"viewerUserId\", json.viewers[0].userId);",
-									"}"
-								]
-							}
-						}
-					],
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/projects/{{projectId}}/shares",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"projects",
-								"{{projectId}}",
-								"shares"
-							]
-						},
-						"description": "Lists pending invitations (labelled EXPIRED once past `expiresAt`) and active Viewers for the owner. The first active Viewer's `userId` is saved to the `viewerUserId` environment variable for **Revoke Viewer**."
-					},
-					"response": []
-				},
-				{
-					"name": "Revoke Viewer",
-					"request": {
-						"method": "DELETE",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/projects/{{projectId}}/shares/{{viewerUserId}}",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"projects",
-								"{{projectId}}",
-								"shares",
-								"{{viewerUserId}}"
-							]
-						},
-						"description": "Revokes a Viewer's project access (Owner only; `200`). The revoked Viewer immediately loses project, scan, note, and asset-download access. `404 ACCESS_NOT_FOUND` when no access record exists."
-					},
-					"response": []
-				}
-			]
-		},
-		{
-			"name": "Shared With Me",
-			"item": [
-				{
-					"name": "List Shared Projects",
-					"event": [
-						{
-							"listen": "test",
-							"script": {
-								"type": "text/javascript",
-								"exec": [
-									"const json = pm.response.json();",
-									"pm.test(\"Shared projects listed\", function () {",
-									"  pm.response.to.have.status(200);",
-									"  pm.expect(json.items).to.be.an('array');",
-									"});",
-									"const items = json.items || [];",
-									"const active = items.find((i) => i.status === \"ACTIVE\");",
-									"const target = active || items[0];",
-									"if (target && target.id) {",
-									"  pm.environment.set(\"sharedProjectId\", target.id);",
-									"}"
-								]
-							}
-						}
-					],
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/shared-projects?page=1&limit=5&sort=updatedAt:desc",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"shared-projects"
-							],
-							"query": [
-								{
-									"key": "page",
-									"value": "1"
-								},
-								{
-									"key": "limit",
-									"value": "5"
-								},
-								{
-									"key": "sort",
-									"value": "updatedAt:desc"
-								}
-							]
-						},
-						"description": "Lists projects shared with the current user. Optional query params: `search` (case-insensitive name search), `page`, `limit` (max 100), `sort` (updatedAt:desc|asc, createdAt:desc|asc, name:asc|desc). Each item carries `status` (ACTIVE/REVOKED/PROJECT_DELETED/TEMPORARILY_UNAVAILABLE) and read-only `permissions`. Saves the first item's id as `sharedProjectId` for the detail and remove requests."
-					},
-					"response": []
-				},
-				{
-					"name": "Get Shared Project Detail",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/shared-projects/{{sharedProjectId}}",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"shared-projects",
-								"{{sharedProjectId}}"
-							]
-						},
-						"description": "Returns a shared project read-only as an active Viewer. Only `ACTIVE` projects open (`200`); revoked, deleted, or never-shared projects are hidden behind `404 PROJECT_NOT_FOUND`."
-					},
-					"response": []
-				},
-				{
-					"name": "Remove from Shared With Me",
-					"request": {
-						"method": "DELETE",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/shared-projects/{{sharedProjectId}}",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"shared-projects",
-								"{{sharedProjectId}}"
-							]
-						},
-						"description": "Removes a project from the current user's Shared With Me list (Viewer only; `200`). Revokes only the current user's own access; the project, the Owner, and other Viewers are unaffected. `403 NOT_SHARED_PROJECT` for the Owner; `409 NOT_IN_SHARED_WITH_ME` when the project is not in the list."
-					},
-					"response": []
-				}
-			]
-		},
-		{
-			"name": "Sync",
-			"item": [
-				{
-					"name": "Initial Changes",
-					"event": [
-						{
-							"listen": "test",
-							"script": {
-								"type": "text/javascript",
-								"exec": [
-									"const json = pm.response.json();",
-									"pm.test('Sync snapshot returned', () => { pm.response.to.have.status(200); pm.expect(json.changes).to.be.an('array'); });",
-									"if (json.nextCursor) pm.environment.set('syncCursor', json.nextCursor);"
-								]
-							}
-						}
-					],
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/sync/changes?limit=100",
-							"host": ["{{baseUrl}}"],
-							"path": ["sync", "changes"],
-							"query": [{ "key": "limit", "value": "100" }]
-						},
-						"description": "Starts a watermark-stable visible snapshot and saves nextCursor as syncCursor. Remove cursor to restart; use an RFC3339 since query instead for timestamp bootstrap."
-					},
-					"response": []
-				},
-				{
-					"name": "Incremental Changes",
-					"event": [
-						{
-							"listen": "test",
-							"script": {
-								"type": "text/javascript",
-								"exec": [
-									"const json = pm.response.json();",
-									"pm.test('Incremental changes returned', () => pm.response.to.have.status(200));",
-									"if (json.nextCursor) pm.environment.set('syncCursor', json.nextCursor);"
-								]
-							}
-						}
-					],
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/sync/changes?cursor={{syncCursor}}&limit=100",
-							"host": ["{{baseUrl}}"],
-							"path": ["sync", "changes"],
-							"query": [
-								{ "key": "cursor", "value": "{{syncCursor}}" },
-								{ "key": "limit", "value": "100" }
-							]
-						},
-						"description": "Continues from the opaque user-bound cursor and acknowledges covered conflict refresh events."
-					},
-					"response": []
-				},
-				{
-					"name": "Project Sync Status",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/sync/status?projectId={{projectId}}",
-							"host": ["{{baseUrl}}"],
-							"path": ["sync", "status"],
-							"query": [{ "key": "projectId", "value": "{{projectId}}" }]
-						},
-						"description": "Returns one accessible project status. Remove projectId to list every owned or actively shared project."
-					},
-					"response": []
-				}
-			]
-		}
-	],
-	"auth": {
-		"type": "bearer",
-		"bearer": [
-			{
-				"key": "token",
-				"value": "{{accessToken}}",
-				"type": "string"
-			}
-		]
-	},
-	"variable": [
-		{
-			"key": "baseUrl",
-			"value": "https://roomscan-be.onrender.com/api/v1"
-		},
-		{
-			"key": "host",
-			"value": "https://roomscan-be.onrender.com"
-		},
-		{
-			"key": "accessToken",
-			"value": ""
-		},
-		{
-			"key": "refreshToken",
-			"value": ""
-		},
-		{
-			"key": "appleIdentityToken",
-			"value": ""
-		},
-		{
-			"key": "projectId",
-			"value": ""
-		},
-		{
-			"key": "scanId",
-			"value": ""
-		},
-		{
-			"key": "noteId",
-			"value": ""
-		},
-		{
-			"key": "recipientEmail",
-			"value": "recipient@example.com"
-		},
-		{
-			"key": "invitationId",
-			"value": ""
-		},
-		{
-			"key": "invitationToken",
-			"value": ""
-		},
-		{
-			"key": "viewerUserId",
-			"value": ""
-		},
-		{
-			"key": "sharedProjectId",
-			"value": ""
-		},
-		{
-			"key": "uploadUrl",
-			"value": ""
-		},
-		{
-			"key": "uploadSessionId",
-			"value": ""
-		},
-		{
-			"key": "assetId",
-			"value": ""
-		},
-		{
-			"key": "contentType",
-			"value": "model/usdz"
-		},
-		{
-			"key": "modelVersion",
-			"value": "1"
-		},
-		{
-			"key": "sizeBytes",
-			"value": ""
-		},
-		{
-			"key": "checksum",
-			"value": ""
-		},
-		{
-			"key": "thumbnailContentType",
-			"value": "image/png"
-		},
-		{
-			"key": "thumbnailSizeBytes",
-			"value": ""
-		},
-		{
-			"key": "thumbnailUploadUrl",
-			"value": ""
-		},
-		{
-			"key": "thumbnailUploadSessionId",
-			"value": ""
-		},
-		{
-			"key": "thumbnailAssetId",
-			"value": ""
-		},
-		{
-			"key": "idempotencyKey",
-			"value": "postman-sit39-1"
-		},
-		{
-			"key": "revision",
-			"value": "1"
-		},
-		{
-			"key": "syncCursor",
-			"value": ""
-		}
-	]
+  "info": {
+    "_postman_id": "aff34309-3dd8-4bb2-ab68-c177c4ffa8f6",
+    "name": "RoomScan - Staging",
+    "description": "Postman collection covering the full RoomScan API surface at https://roomscan-be.onrender.com (all `/api/v1` routes plus the Swagger docs endpoints).\n\n## Setup\n1. Create an environment (or edit the collection variables) and fill in:\n   - `baseUrl` (default already set)\n   - `accessToken` + `refreshToken` from a working RoomScan session, or run **Auth > Apple Sign In** to mint a pair\n   - `projectId` (or run **Projects > Create Project** to populate it)\n2. For Apple Sign In on staging you need a real Apple identity token; for local development with `LOCAL_TEST_AUTH_ENABLED=true` use the sentinel `roomscan-local-test-user` as the `appleIdentityToken`.\n3. For model uploads, set these variables before running the upload requests:\n   - `contentType` (e.g. `model/usdz`)\n   - `sizeBytes` (exact file byte size: `stat -c%s model.usdz`)\n   - `checksum` (e.g. `sha256sum model.usdz | awk '{print $1}'`)\n   - `modelVersion`\n4. The thumbnail is optional. To upload one in the same call, set `thumbnailSizeBytes` (exact byte size) and `thumbnailContentType` (`image/jpeg` or `image/png`); otherwise delete the `thumbnail` block from the create-scan body.\n5. In **Upload Flow**, select your files in the Body tabs of the two PUT requests (`PUT model file to presigned URL` and `PUT thumbnail to presigned URL`).\n6. For the Sharing & Invitations flow, `recipientEmail` defaults to `recipient@example.com`; the **Create Invitation** request saves `invitationId` and the raw `invitationToken` automatically. Both *Sharing & Invitations* and *Share Links* are organized into *Projects*, *Scans*, and *General* subfolders. Scan-scope sharing is covered in the *Scans* subfolders (e.g. **Create Scan Invitation**, **List Scan Shares**, **Revoke Scan Viewer**, and the scan share-link create/list/revoke requests). Reusable generic links (no email) live in *Share Links* and save `shareLinkId` and the raw `shareLinkToken`. The *General* subfolders hold the token resolve endpoints (preview/accept/decline), which operate on both invitations and share links for both scopes. The **Shared With Me** folder covers accepted projects **and** scans (list, detail, and self-remove).\n7. The **RoomScan - Local** environment pre-fills `projectId`, `scanId`, `noteId`, and `invitationId` from the seeded data, but not `invitationToken`: the seed rotates it on every `yarn seed:local` run and stores only its SHA-256 hash. Copy the token from the seed's printed `Demo invitation link` (the part after `/invitations/`) or run **Create Invitation** to populate it.\n\nCollection-level **Bearer Token** auth ({{accessToken}}) is applied to every request except the presigned PUTs and the anonymous invitation preview, which deliberately override to No Auth. A collection pre-request script adds `Idempotency-Key: {{idempotencyKey}}` to the five retry-safe creates and `If-Match: \"{{revision}}\"` to revision-guarded mutations; response ETags refresh `revision`. Change `idempotencyKey` before intentionally creating a different payload in the same scope.\n\n## Gotchas\n- Each presigned PUT must use a **binary/file body** (not form-data) and the byte size must match the matching `sizeBytes` variable exactly.\n- `scanFile` size must be between 10 MB and 100 MB; thumbnails are capped at 10 MB.\n- `thumbnail` and `scanFile` are independent: one create call may include both, only the model, or only the thumbnail.\n- Each minted session is completed separately (`Complete model upload session` and `Complete thumbnail upload session`).\n- Presigned upload URLs expire after the configured TTL, so run the upload flow steps in sequence.\n- Retrying a selected create with the same key and payload replays its original status/body; changing the payload under the same key returns `409 IDEMPOTENCY_KEY_CONFLICT`.\n- Project/Scan/Note writes require the latest strong ETag. A stale revision returns `409 REVISION_CONFLICT`; run the relevant GET first to refresh `revision`.\n- The Sync folder saves and advances the opaque `syncCursor`; clear it to restart an initial snapshot.\n- `/auth/refresh` rotates tokens (old one is revoked) and is rate-limited (10 req / 15 min). Run it, then use the returned pair.\n- A project is shareable only after it has at least one non-deleted scan with an uploaded model (`assetStatus = UPLOADED`); otherwise creating an invitation returns `409 PROJECT_NOT_SHAREABLE`.\n- One pending invitation is allowed per `(project, recipientEmail)`; a duplicate returns `409 INVITATION_ALREADY_SENT`. An expired link does not block re-inviting the recipient.\n- `POST /invitations/:invitationId/resend` rotates the token \u2014 the previous link stops working and `invitationToken` is refreshed.\n- The project Owner cannot accept or decline their own invitation (`409 CANNOT_ACCEPT_OWN_INVITATION`) and cannot accept twice; use a second user's token (override the request auth) to exercise the accept/decline flow.\n- `DELETE` endpoints that return `204` have no response body.\n- `projectId` must be owned by your token's user, otherwise the API returns `403 NOT_OWNER` (share management) or `404 PROJECT_NOT_FOUND`.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "12630530"
+  },
+  "item": [
+    {
+      "name": "System",
+      "item": [
+        {
+          "name": "Liveness",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
+            },
+            "description": "Liveness probe. Returns `200` without touching the database."
+          },
+          "response": []
+        },
+        {
+          "name": "Readiness",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/ready",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ready"
+              ]
+            },
+            "description": "Readiness probe. Returns `200` with `database: up` when PostgreSQL is reachable, otherwise `503 SERVICE_UNAVAILABLE`."
+          },
+          "response": []
+        },
+        {
+          "name": "OpenAPI Document",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{host}}/api-doc.json",
+              "host": [
+                "{{host}}"
+              ],
+              "path": [
+                "api-doc.json"
+              ]
+            },
+            "description": "Raw OpenAPI 3.1 document generated from the runtime Zod schemas."
+          },
+          "response": []
+        },
+        {
+          "name": "Swagger UI",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{host}}/api-doc",
+              "host": [
+                "{{host}}"
+              ],
+              "path": [
+                "api-doc"
+              ]
+            },
+            "description": "Interactive Swagger UI served at `/api-doc`."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Apple Sign In",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "pm.test(\"Sign in returns a token pair\", function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(json.accessToken).to.be.a('string').and.not.empty;",
+                  "  pm.expect(json.refreshToken).to.be.a('string').and.not.empty;",
+                  "});",
+                  "pm.environment.set(\"accessToken\", json.accessToken);",
+                  "pm.environment.set(\"refreshToken\", json.refreshToken);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"identityToken\": \"{{appleIdentityToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/apple",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "apple"
+              ]
+            },
+            "description": "Authenticates with an Apple identity token and stores the new access/refresh pair in the environment. On staging set `appleIdentityToken` to a real token; for local development with `LOCAL_TEST_AUTH_ENABLED=true` use the sentinel `roomscan-local-test-user`. Rate-limited: 20 requests / 15 minutes per IP. Optional raw `nonce` may be added when the token carries a nonce claim."
+          },
+          "response": []
+        },
+        {
+          "name": "Refresh Token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "pm.test(\"Refresh returns a new token pair\", function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(json.accessToken).to.be.a('string').and.not.empty;",
+                  "  pm.expect(json.refreshToken).to.be.a('string').and.not.empty;",
+                  "});",
+                  "pm.environment.set(\"accessToken\", json.accessToken);",
+                  "pm.environment.set(\"refreshToken\", json.refreshToken);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/refresh",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "refresh"
+              ]
+            },
+            "description": "Rotates the refresh token and stores the new access/refresh pair in the environment. Each refresh revokes the previous refresh token, so always read the returned pair.\n\nRate-limited: 10 requests / 15 minutes per IP."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Projects",
+      "item": [
+        {
+          "name": "Create Project",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "pm.test(\"Project created\", function () {",
+                  "  pm.response.to.have.status(201);",
+                  "  pm.expect(json.id).to.be.a('string').and.not.empty;",
+                  "});",
+                  "pm.environment.set(\"projectId\", json.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Postman Test Project {{$timestamp}}\",\n  \"description\": \"Created from the RoomScan Postman collection\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/projects",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "projects"
+              ]
+            },
+            "description": "Creates a project owned by the current user (Owner only). The response `id` is saved to the `projectId` environment variable. `name` is required (1-50 chars); `description` is optional (max 500) and may be `null` to clear it."
+          },
+          "response": []
+        },
+        {
+          "name": "List Projects",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/projects?page=1&limit=5&sort=updatedAt:desc",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "projects"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "5"
+                },
+                {
+                  "key": "sort",
+                  "value": "updatedAt:desc"
+                }
+              ]
+            },
+            "description": "Lists projects owned by the current user. Optional query params: `search` (case-insensitive name search), `page`, `limit` (max 100), `sort` (updatedAt:desc|asc, createdAt:desc|asc, name:asc|desc)."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Project Detail",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/projects/{{projectId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "projects",
+                "{{projectId}}"
+              ]
+            },
+            "description": "Returns full project detail (owner, scans, permissions) as the Owner or an active Viewer. `404 PROJECT_NOT_FOUND` when the project is missing, deleted, or inaccessible."
+          },
+          "response": []
+        },
+        {
+          "name": "Update Project",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Renamed Postman Project\",\n  \"description\": \"Updated via the Postman collection\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/projects/{{projectId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "projects",
+                "{{projectId}}"
+              ]
+            },
+            "description": "Partially updates a project (Owner only). At least one of `name` or `description` is required; `\"description\": null` clears the stored description. Returns the updated project with `200`."
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Project",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/projects/{{projectId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "projects",
+                "{{projectId}}"
+              ]
+            },
+            "description": "Soft-deletes a project and revokes active Viewer access in one transaction (Owner only). Returns idempotent `204` (no body). Note: this request returns `204`, so no response-body test runs."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Scans",
+      "item": [
+        {
+          "name": "Create Scan (metadata only)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "pm.test(\"Scan created\", function () {",
+                  "  pm.response.to.have.status(201);",
+                  "  pm.expect(json.id).to.be.a('string').and.not.empty;",
+                  "});",
+                  "pm.environment.set(\"scanId\", json.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Postman Scan {{$timestamp}}\",\n  \"description\": \"Metadata-only scan created from Postman\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/projects/{{projectId}}/scans",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "projects",
+                "{{projectId}}",
+                "scans"
+              ]
+            },
+            "description": "Creates scan metadata without an upload descriptor (Owner only; `201`). The response `id` is saved to the `scanId` environment variable. To mint upload URLs in the same call, use **Upload Flow > Create Scan (with upload descriptor)** instead."
+          },
+          "response": []
+        },
+        {
+          "name": "List Scans",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/projects/{{projectId}}/scans?page=1&limit=20&sort=createdAt:desc",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "projects",
+                "{{projectId}}",
+                "scans"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                },
+                {
+                  "key": "sort",
+                  "value": "createdAt:desc"
+                }
+              ]
+            },
+            "description": "Paginated scan list for the project. Owner or active Viewer. `limit` max 100; `sort` accepts createdAt:desc|asc, updatedAt:desc|asc, name:asc|desc."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Scan Detail",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/scans/{{scanId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "scans",
+                "{{scanId}}"
+              ]
+            },
+            "description": "Scan detail by scan id. Owner or active Viewer. Requires `scanId` (populated by the create-scan step)."
+          },
+          "response": []
+        },
+        {
+          "name": "Update Scan",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Renamed Scan\",\n  \"description\": null\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/scans/{{scanId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "scans",
+                "{{scanId}}"
+              ]
+            },
+            "description": "Partially updates a scan's `name` and/or `description` (Owner only). At least one field is required; `\"description\": null` clears it. Returns the updated scan with `200`."
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Scan",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/scans/{{scanId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "scans",
+                "{{scanId}}"
+              ]
+            },
+            "description": "Soft-deletes a scan (Owner only). Returns idempotent `204` (no body)."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Upload Flow",
+      "item": [
+        {
+          "name": "Create Scan (with upload descriptor)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = {",
+                  "  name: \"Postman Scan \" + new Date().getTime(),",
+                  "  scanFile: {",
+                  "    contentType: pm.variables.get(\"contentType\") || \"model/usdz\",",
+                  "    sizeBytes: Number(pm.variables.get(\"sizeBytes\")),",
+                  "    checksum: pm.variables.get(\"checksum\"),",
+                  "    modelVersion: pm.variables.get(\"modelVersion\") || \"1\"",
+                  "  }",
+                  "};",
+                  "const thumbSize = pm.variables.get(\"thumbnailSizeBytes\");",
+                  "if (thumbSize !== undefined && String(thumbSize).trim() !== \"\") {",
+                  "  body.thumbnail = {",
+                  "    contentType: pm.variables.get(\"thumbnailContentType\") || \"image/png\",",
+                  "    sizeBytes: Number(thumbSize)",
+                  "  };",
+                  "}",
+                  "pm.request.body.mode = \"raw\";",
+                  "pm.request.body.raw = JSON.stringify(body, null, 2);",
+                  "pm.request.body.options = { raw: { language: \"json\" } };"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "pm.test(\"Scan created with model upload session\", function () {",
+                  "  pm.response.to.have.status(201);",
+                  "  pm.expect(json.id).to.be.a('string').and.not.empty;",
+                  "  pm.expect(json.uploads).to.be.an('object');",
+                  "  pm.expect(json.uploads.scanFile).to.be.an('object');",
+                  "  pm.expect(json.uploads.scanFile.uploadUrl).to.be.a('string').and.not.empty;",
+                  "  pm.expect(json.uploads.scanFile.uploadSessionId).to.be.a('string').and.not.empty;",
+                  "});",
+                  "pm.environment.set(\"scanId\", json.id);",
+                  "pm.environment.set(\"uploadUrl\", json.uploads.scanFile.uploadUrl);",
+                  "pm.environment.set(\"uploadSessionId\", json.uploads.scanFile.uploadSessionId);",
+                  "pm.environment.set(\"assetId\", json.uploads.scanFile.assetId);",
+                  "if (json.uploads && json.uploads.thumbnail) {",
+                  "  pm.environment.set(\"thumbnailUploadUrl\", json.uploads.thumbnail.uploadUrl);",
+                  "  pm.environment.set(\"thumbnailUploadSessionId\", json.uploads.thumbnail.uploadSessionId);",
+                  "  pm.environment.set(\"thumbnailAssetId\", json.uploads.thumbnail.assetId);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Postman Scan {{$timestamp}}\",\n  \"scanFile\": {\n    \"contentType\": \"{{contentType}}\",\n    \"sizeBytes\": {{sizeBytes}},\n    \"checksum\": \"{{checksum}}\",\n    \"modelVersion\": \"{{modelVersion}}\"\n  },\n  \"thumbnail\": {\n    \"contentType\": \"{{thumbnailContentType}}\",\n    \"sizeBytes\": {{thumbnailSizeBytes}}\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/projects/{{projectId}}/scans",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "projects",
+                "{{projectId}}",
+                "scans"
+              ]
+            },
+            "description": "Creates a scan (Owner only) and mints an upload session for each supplied descriptor. A **pre-request script builds the JSON body at run time**: the `thumbnail` object is only included when `thumbnailSizeBytes` is set, so the request always sends valid JSON. The response populates `scanId`, `uploadUrl`, `uploadSessionId`, and `assetId` for the model, plus `thumbnailUploadUrl`, `thumbnailUploadSessionId`, and `thumbnailAssetId` when a `thumbnail` descriptor was included.\n\nBefore running, set `contentType`, `sizeBytes` (exact byte size), `checksum`, and `modelVersion` for the model. For an optional thumbnail, set `thumbnailSizeBytes` and `thumbnailContentType`; leave `thumbnailSizeBytes` empty to skip the thumbnail entirely.\n\nSupported model content types: `model/gltf-binary`, `model/gltf+json`, `application/octet-stream`, `model/usd`, `model/usdz`. `sizeBytes` must be between 10 MB and 100 MB. Thumbnail content types are `image/jpeg` and `image/png`; its `sizeBytes` is required and capped at 10 MB."
+          },
+          "response": []
+        },
+        {
+          "name": "PUT model file to presigned URL",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "{{contentType}}"
+              }
+            ],
+            "body": {
+              "mode": "file",
+              "file": {
+                "src": null
+              }
+            },
+            "url": {
+              "raw": "{{uploadUrl}}",
+              "host": [
+                "{{uploadUrl}}"
+              ]
+            },
+            "description": "Uploads the model file directly to the presigned PUT URL. Auth is deliberately set to **No Auth** (an extra Authorization header would break the S3 signature).\n\n- In the Body tab, select your model file (Postman prompts for the file because `src` is unset).\n- Use a file/binary body, NOT form-data.\n- The `Content-Type` header must match the descriptor's `contentType` exactly.\n- The file byte size must equal `sizeBytes` exactly.\n- Run this promptly: the presigned URL expires after the configured TTL."
+          },
+          "response": []
+        },
+        {
+          "name": "Complete model upload session",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "pm.test(\"Upload session completed\", function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(json.status).to.eql(\"UPLOADED\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sizeBytes\": {{sizeBytes}},\n  \"checksum\": \"{{checksum}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/upload-sessions/{{uploadSessionId}}/complete",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "upload-sessions",
+                "{{uploadSessionId}}",
+                "complete"
+              ]
+            },
+            "description": "Marks the model upload session complete (Owner only). The server verifies the uploaded object's size and content type against the session; a mismatch returns 409 ASSET_UPLOAD_FAILED. On success the model scan gets assetStatus UPLOADED and syncStatus SYNCED."
+          },
+          "response": []
+        },
+        {
+          "name": "PUT thumbnail to presigned URL",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "{{thumbnailContentType}}"
+              }
+            ],
+            "body": {
+              "mode": "file",
+              "file": {
+                "src": null
+              }
+            },
+            "url": {
+              "raw": "{{thumbnailUploadUrl}}",
+              "host": [
+                "{{thumbnailUploadUrl}}"
+              ]
+            },
+            "description": "Uploads the thumbnail file to its own presigned PUT URL (returned alongside the model URL when the create-scan body included a `thumbnail` descriptor). Auth is deliberately set to **No Auth**.\n\n- Select your thumbnail file in the Body tab.\n- Use a file/binary body, NOT form-data.\n- `Content-Type` must match the thumbnail descriptor exactly (`image/jpeg` or `image/png`).\n- The byte size must equal `thumbnailSizeBytes` exactly.\n- Run promptly: the presigned URL expires after the configured TTL."
+          },
+          "response": []
+        },
+        {
+          "name": "Complete thumbnail upload session",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "pm.test(\"Thumbnail upload session completed\", function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(json.status).to.eql(\"UPLOADED\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sizeBytes\": {{thumbnailSizeBytes}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/upload-sessions/{{thumbnailUploadSessionId}}/complete",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "upload-sessions",
+                "{{thumbnailUploadSessionId}}",
+                "complete"
+              ]
+            },
+            "description": "Marks the thumbnail upload session complete (Owner only). The server verifies the uploaded object's size and content type against the session, then persists the thumbnail display URL onto the scan so project and scan responses expose it. `checksum` is optional for thumbnails."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Scan Assets",
+      "item": [
+        {
+          "name": "Create Upload Session (MODEL)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "pm.test(\"Model upload session created\", function () {",
+                  "  pm.expect(pm.response.code).to.be.oneOf([200, 201]);",
+                  "  pm.expect(json.uploadSessionId).to.be.a('string').and.not.empty;",
+                  "  pm.expect(json.uploadUrl).to.be.a('string').and.not.empty;",
+                  "});",
+                  "pm.environment.set(\"uploadSessionId\", json.uploadSessionId);",
+                  "pm.environment.set(\"uploadUrl\", json.uploadUrl);",
+                  "pm.environment.set(\"assetId\", json.assetId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"assetType\": \"MODEL\",\n  \"contentType\": \"{{contentType}}\",\n  \"sizeBytes\": {{sizeBytes}},\n  \"checksum\": \"{{checksum}}\",\n  \"modelVersion\": \"{{modelVersion}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/scans/{{scanId}}/assets/upload-sessions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "scans",
+                "{{scanId}}",
+                "assets",
+                "upload-sessions"
+              ]
+            },
+            "description": "Mints a model upload session for an existing scan (Owner only; `201`, or idempotent `200` when an active session matches the optional `idempotencyKey`). Stores `uploadSessionId`, `uploadUrl`, and `assetId`. Then PUT the file to `uploadUrl` and call `Complete Upload Session`."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Upload Session (THUMBNAIL)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "pm.test(\"Thumbnail upload session created\", function () {",
+                  "  pm.expect(pm.response.code).to.be.oneOf([200, 201]);",
+                  "  pm.expect(json.uploadSessionId).to.be.a('string').and.not.empty;",
+                  "  pm.expect(json.uploadUrl).to.be.a('string').and.not.empty;",
+                  "});",
+                  "pm.environment.set(\"thumbnailUploadSessionId\", json.uploadSessionId);",
+                  "pm.environment.set(\"thumbnailUploadUrl\", json.uploadUrl);",
+                  "pm.environment.set(\"thumbnailAssetId\", json.assetId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"assetType\": \"THUMBNAIL\",\n  \"contentType\": \"{{thumbnailContentType}}\",\n  \"sizeBytes\": {{thumbnailSizeBytes}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/scans/{{scanId}}/assets/upload-sessions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "scans",
+                "{{scanId}}",
+                "assets",
+                "upload-sessions"
+              ]
+            },
+            "description": "Mints a thumbnail upload session for an existing scan (Owner only; `201`, or idempotent `200`). Stores `thumbnailUploadSessionId`, `thumbnailUploadUrl`, and `thumbnailAssetId`. `checksum` and `modelVersion` are optional for thumbnails."
+          },
+          "response": []
+        },
+        {
+          "name": "Complete Upload Session",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sizeBytes\": {{sizeBytes}},\n  \"checksum\": \"{{checksum}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/upload-sessions/{{uploadSessionId}}/complete",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "upload-sessions",
+                "{{uploadSessionId}}",
+                "complete"
+              ]
+            },
+            "description": "Marks the upload session stored in `uploadSessionId` complete (Owner only). Both `sizeBytes` and `checksum` are optional but the server verifies the uploaded object against the session. Use the dedicated **Upload Flow > Complete ...** requests when the session was minted by a create-scan descriptor."
+          },
+          "response": []
+        },
+        {
+          "name": "Fail Upload Session",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Simulated client-side upload failure\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/upload-sessions/{{uploadSessionId}}/fail",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "upload-sessions",
+                "{{uploadSessionId}}",
+                "fail"
+              ]
+            },
+            "description": "Reports an upload failure for the session stored in `uploadSessionId` (Owner only). The asset is marked `FAILED` and the parent scan gets `assetStatus FAILED`. `reason` is optional (max 500 chars)."
+          },
+          "response": []
+        },
+        {
+          "name": "List Assets",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/scans/{{scanId}}/assets",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "scans",
+                "{{scanId}}",
+                "assets"
+              ]
+            },
+            "description": "Lists asset metadata for a scan. Owner or active Viewer."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Model Download URL",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/scans/{{scanId}}/assets/MODEL/download-url",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "scans",
+                "{{scanId}}",
+                "assets",
+                "MODEL",
+                "download-url"
+              ]
+            },
+            "description": "Mints a presigned download URL for the uploaded model. Returns 409 ASSET_NOT_READY until the asset is UPLOADED."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Thumbnail Download URL",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/scans/{{scanId}}/assets/THUMBNAIL/download-url",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "scans",
+                "{{scanId}}",
+                "assets",
+                "THUMBNAIL",
+                "download-url"
+              ]
+            },
+            "description": "Mints a presigned download URL for the uploaded thumbnail. Returns 409 ASSET_NOT_READY until the asset is UPLOADED."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Notes",
+      "item": [
+        {
+          "name": "Create Note",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "pm.test(\"Note created\", function () {",
+                  "  pm.response.to.have.status(201);",
+                  "  pm.expect(json.id).to.be.a('string').and.not.empty;",
+                  "});",
+                  "pm.environment.set(\"noteId\", json.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"content\": \"Postman note {{$timestamp}}\",\n  \"color\": \"YELLOW\",\n  \"position\": { \"x\": 1.5, \"y\": -2, \"z\": 3.25 },\n  \"orientation\": { \"x\": 0, \"y\": 0, \"z\": 1 },\n  \"modelVersion\": \"1\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/scans/{{scanId}}/notes",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "scans",
+                "{{scanId}}",
+                "notes"
+              ]
+            },
+            "description": "Creates a note on a scan (Owner only; `201`). The response `id` is saved to the `noteId` environment variable. `color` is one of YELLOW, RED, BLUE, GREEN, ORANGE, PURPLE; `modelVersion` must equal the parent scan's model version (a mismatch returns `409 MODEL_VERSION_MISMATCH`)."
+          },
+          "response": []
+        },
+        {
+          "name": "List Notes",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/scans/{{scanId}}/notes?page=1&limit=20&sort=updatedAt:desc",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "scans",
+                "{{scanId}}",
+                "notes"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                },
+                {
+                  "key": "sort",
+                  "value": "updatedAt:desc"
+                }
+              ]
+            },
+            "description": "Paginated note list for a scan. Owner or active Viewer. `sort` accepts createdAt:desc|asc, updatedAt:desc|asc."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Note Detail",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/notes/{{noteId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notes",
+                "{{noteId}}"
+              ]
+            },
+            "description": "Note detail by note id. Owner or active Viewer of the parent project."
+          },
+          "response": []
+        },
+        {
+          "name": "Update Note",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"content\": \"Updated note content\",\n  \"color\": \"BLUE\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/notes/{{noteId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notes",
+                "{{noteId}}"
+              ]
+            },
+            "description": "Partially updates a note's `content` and/or `color` (Owner only). At least one field is required."
+          },
+          "response": []
+        },
+        {
+          "name": "Move Note",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"position\": { \"x\": 0, \"y\": 1, \"z\": 2 },\n  \"orientation\": { \"x\": 0, \"y\": 0, \"z\": 1 },\n  \"modelVersion\": \"1\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/notes/{{noteId}}/position",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notes",
+                "{{noteId}}",
+                "position"
+              ]
+            },
+            "description": "Moves a note to a new 3D `position` (Owner only). `orientation` is optional; `modelVersion` must match the parent scan's current version, otherwise `409 MODEL_VERSION_MISMATCH`."
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Note",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/notes/{{noteId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notes",
+                "{{noteId}}"
+              ]
+            },
+            "description": "Physically deletes a note (Owner only). Returns `204` (no body)."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Sharing & Invitations",
+      "item": [
+        {
+          "name": "Projects",
+          "item": [
+            {
+              "name": "Create Invitation",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const json = pm.response.json();",
+                      "pm.test(\"Invitation created\", function () {",
+                      "  pm.response.to.have.status(201);",
+                      "  pm.expect(json.invitationId).to.be.a('string').and.not.empty;",
+                      "  pm.expect(json.invitationUrl).to.be.a('string').and.not.empty;",
+                      "  pm.expect(json.status).to.eql(\"PENDING\");",
+                      "});",
+                      "pm.environment.set(\"invitationId\", json.invitationId);",
+                      "pm.environment.set(\"recipientEmail\", json.recipientEmail);",
+                      "const token = (json.invitationUrl || \"\").split(\"/invitations/\")[1] || \"\";",
+                      "pm.environment.set(\"invitationToken\", token);"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"recipientEmail\": \"{{recipientEmail}}\",\n  \"expiresInSeconds\": 604800\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/projects/{{projectId}}/invitations",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "projects",
+                    "{{projectId}}",
+                    "invitations"
+                  ]
+                },
+                "description": "Creates a per-recipient invitation link (Owner only; `201`) and emails it to the recipient. Saves `invitationId`, `recipientEmail`, and the raw `invitationToken` extracted from `invitationUrl`. `expiresInSeconds` is optional (60-2,592,000; defaults to the configured TTL).\n\nThe project must have at least one scan with an uploaded model (`409 PROJECT_NOT_SHAREABLE` otherwise). A second pending invitation for the same email returns `409 INVITATION_ALREADY_SENT`; an expired link does not block re-inviting."
+              },
+              "response": []
+            },
+            {
+              "name": "List Shares",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const json = pm.response.json();",
+                      "pm.test(\"Shares listed\", function () {",
+                      "  pm.response.to.have.status(200);",
+                      "  pm.expect(json.pendingInvitations).to.be.an('array');",
+                      "  pm.expect(json.viewers).to.be.an('array');",
+                      "});",
+                      "if (Array.isArray(json.viewers) && json.viewers.length > 0) {",
+                      "  pm.environment.set(\"viewerUserId\", json.viewers[0].userId);",
+                      "}"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/projects/{{projectId}}/shares",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "projects",
+                    "{{projectId}}",
+                    "shares"
+                  ]
+                },
+                "description": "Lists pending invitations (labelled EXPIRED once past `expiresAt`) and active Viewers for the owner. The first active Viewer's `userId` is saved to the `viewerUserId` environment variable for **Revoke Viewer**."
+              },
+              "response": []
+            },
+            {
+              "name": "Revoke Viewer",
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/projects/{{projectId}}/shares/{{viewerUserId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "projects",
+                    "{{projectId}}",
+                    "shares",
+                    "{{viewerUserId}}"
+                  ]
+                },
+                "description": "Revokes a Viewer's project access (Owner only; `200`). The revoked Viewer immediately loses project, scan, note, and asset-download access. `404 ACCESS_NOT_FOUND` when no access record exists."
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Scans",
+          "item": [
+            {
+              "name": "Create Scan Invitation",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const json = pm.response.json();",
+                      "pm.test(\"Scan invitation created\", function () {",
+                      "  pm.response.to.have.status(201);",
+                      "  pm.expect(json.invitationId).to.be.a('string').and.not.empty;",
+                      "  pm.expect(json.invitationUrl).to.be.a('string').and.not.empty;",
+                      "  pm.expect(json.status).to.eql(\"PENDING\");",
+                      "});",
+                      "pm.environment.set(\"scanInvitationId\", json.invitationId);",
+                      "pm.environment.set(\"invitationId\", json.invitationId);",
+                      "pm.environment.set(\"recipientEmail\", json.recipientEmail);",
+                      "const token = (json.invitationUrl || \"\").split(\"/invitations/\")[1] || \"\";",
+                      "pm.environment.set(\"invitationToken\", token);"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"recipientEmail\": \"{{recipientEmail}}\",\n  \"expiresInSeconds\": 604800\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/scans/{{scanId}}/invitations",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "scans",
+                    "{{scanId}}",
+                    "invitations"
+                  ]
+                },
+                "description": "Creates a per-recipient scan-scope invitation (Owner of the parent project only; `201`) and emails it to the recipient, granting view access to only this scan and its notes (not other scans in the project). Saves `scanInvitationId`, `invitationId`, `recipientEmail`, and the raw `invitationToken`. `expiresInSeconds` is optional (60-2,592,000; defaults to the configured TTL).\n\nThe scan must have an uploaded model (`409 SCAN_NOT_SHAREABLE` otherwise). A second pending invitation for the same email and scan returns `409 INVITATION_ALREADY_SENT`. Resend, preview, accept, decline, and revoke use the same `/invitations` endpoints with the saved ids/token."
+              },
+              "response": []
+            },
+            {
+              "name": "List Scan Shares",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const json = pm.response.json();",
+                      "pm.test(\"Scan shares listed\", function () {",
+                      "  pm.response.to.have.status(200);",
+                      "  pm.expect(json.pendingInvitations).to.be.an('array');",
+                      "  pm.expect(json.viewers).to.be.an('array');",
+                      "});",
+                      "if (Array.isArray(json.viewers) && json.viewers.length > 0) {",
+                      "  pm.environment.set(\"scanViewerUserId\", json.viewers[0].userId);",
+                      "}"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/scans/{{scanId}}/shares",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "scans",
+                    "{{scanId}}",
+                    "shares"
+                  ]
+                },
+                "description": "Lists scan-scope pending invitations (labelled EXPIRED once past `expiresAt`) and active scan Viewers for the owner. The first active scan Viewer's `userId` is saved to the `scanViewerUserId` environment variable for **Revoke Scan Viewer**."
+              },
+              "response": []
+            },
+            {
+              "name": "Revoke Scan Viewer",
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/scans/{{scanId}}/shares/{{scanViewerUserId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "scans",
+                    "{{scanId}}",
+                    "shares",
+                    "{{scanViewerUserId}}"
+                  ]
+                },
+                "description": "Revokes a scan Viewer's access (Owner only; `200`). The revoked Viewer immediately loses read access to that scan, its notes, and its assets, but never had project access. `404 ACCESS_NOT_FOUND` when no scan access record exists."
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "General",
+          "item": [
+            {
+              "name": "Resend Invitation",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const json = pm.response.json();",
+                      "pm.test(\"Invitation resent\", function () {",
+                      "  pm.response.to.have.status(200);",
+                      "  pm.expect(json.invitationUrl).to.be.a('string').and.not.empty;",
+                      "});",
+                      "const token = (json.invitationUrl || \"\").split(\"/invitations/\")[1] || \"\";",
+                      "pm.environment.set(\"invitationToken\", token);"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/invitations/{{invitationId}}/resend",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "invitations",
+                    "{{invitationId}}",
+                    "resend"
+                  ]
+                },
+                "description": "Resends a pending, unexpired invitation (Owner only; `200`). Rotates the token (the previous link stops working), extends `expiresAt` to `now + TTL`, updates `sentAt`, and re-sends the email. The new `invitationToken` is saved. Expired, accepted, declined, and revoked invitations cannot be resent."
+              },
+              "response": []
+            },
+            {
+              "name": "Preview Invitation",
+              "request": {
+                "auth": {
+                  "type": "noauth"
+                },
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/invitations/{{invitationToken}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "invitations",
+                    "{{invitationToken}}"
+                  ]
+                },
+                "description": "Previews a token anonymously (this request deliberately overrides auth to No Auth). Resolves either an invitation or a generic share link for a project or scan, returning `type` (`invitation` or `share-link`), `scope` (`project` or `scan`), the matching `project`/`scan` entity, and a `status` (PENDING/EXPIRED/ACCEPTED/DECLINED/REVOKED for invitations; ACTIVE/EXPIRED/REVOKED for share links). Invitations also return `recipientEmail`, `sentAt`, and `expiresAt`. A valid Bearer token can be added to also receive `hasAccess`. Use the **Share Links > Preview Share Link** request when working from a `shareLinkToken`."
+              },
+              "response": []
+            },
+            {
+              "name": "Accept Invitation",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/invitations/{{invitationToken}}/accept",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "invitations",
+                    "{{invitationToken}}",
+                    "accept"
+                  ]
+                },
+                "description": "Accepts the token with the current user's token and gains Viewer access (`200`). Resolves invitations (project or scan scope) and generic share links; the response is discriminated by `type` and `scope`. The resource Owner cannot accept their own link (`409 CANNOT_ACCEPT_OWN_INVITATION`), and a user who already has active access gets `409 ACCESS_ALREADY_EXISTS` \u2014 override this request's auth with the invitee's token to exercise the flow. For invitations, the first acceptance wins (`409 INVITATION_ALREADY_ACCEPTED` afterwards); a share-link acceptance does not consume the link."
+              },
+              "response": []
+            },
+            {
+              "name": "Decline Invitation",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/invitations/{{invitationToken}}/decline",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "invitations",
+                    "{{invitationToken}}",
+                    "decline"
+                  ]
+                },
+                "description": "Declines the invitation for the current user (`200`, status becomes DECLINED). Applies to per-recipient invitations only \u2014 the Owner cannot decline their own link (`409 CANNOT_ACCEPT_OWN_INVITATION`). Generic share links cannot be declined (they are not addressed to anyone)."
+              },
+              "response": []
+            },
+            {
+              "name": "Revoke Invitation",
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/invitations/{{invitationId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "invitations",
+                    "{{invitationId}}"
+                  ]
+                },
+                "description": "Revokes a pending invitation (Owner only; `200`, status becomes REVOKED). Revocation is idempotent for already-revoked links; expired, accepted, and declined invitations cannot be revoked."
+              },
+              "response": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Share Links",
+      "item": [
+        {
+          "name": "Projects",
+          "item": [
+            {
+              "name": "Create Project Share Link",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const json = pm.response.json();",
+                      "pm.test(\"Project share link created\", function () {",
+                      "  pm.response.to.have.status(201);",
+                      "  pm.expect(json.shareLinkId).to.be.a('string').and.not.empty;",
+                      "  pm.expect(json.shareLinkUrl).to.be.a('string').and.not.empty;",
+                      "  pm.expect(json.scope).to.eql(\"project\");",
+                      "});",
+                      "pm.environment.set(\"shareLinkId\", json.shareLinkId);",
+                      "const token = (json.shareLinkUrl || \"\").split(\"/invitations/\")[1] || \"\";",
+                      "pm.environment.set(\"shareLinkToken\", token);"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/projects/{{projectId}}/share-links",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "projects",
+                    "{{projectId}}",
+                    "share-links"
+                  ]
+                },
+                "description": "Creates a generic, reusable project share link (Owner only; `201`) without sending an email. Anyone with the link can accept it and gain entire-project Viewer access. Saves `shareLinkId` and the raw `shareLinkToken` extracted from `shareLinkUrl`. The token namespace is shared with invitations, so **Preview / Accept using token** works directly on the saved `shareLinkToken`.\n\nThe project must have at least one scan with an uploaded model (`409 PROJECT_NOT_SHAREABLE` otherwise). The link stays valid until it expires (TTL) or is revoked via **Revoke Project Share Link**."
+              },
+              "response": []
+            },
+            {
+              "name": "List Project Share Links",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/projects/{{projectId}}/share-links",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "projects",
+                    "{{projectId}}",
+                    "share-links"
+                  ]
+                },
+                "description": "Lists active (non-revoked) project share links for the owner. Revoked and expired links are omitted."
+              },
+              "response": []
+            },
+            {
+              "name": "Revoke Project Share Link",
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/projects/{{projectId}}/share-links/{{shareLinkId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "projects",
+                    "{{projectId}}",
+                    "share-links",
+                    "{{shareLinkId}}"
+                  ]
+                },
+                "description": "Revokes a project share link (Owner only; `200`, status becomes REVOKED). Stops further acceptances through that link; access already granted through it is not removed. Idempotent for already-revoked links."
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Scans",
+          "item": [
+            {
+              "name": "Create Scan Share Link",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const json = pm.response.json();",
+                      "pm.test(\"Scan share link created\", function () {",
+                      "  pm.response.to.have.status(201);",
+                      "  pm.expect(json.shareLinkId).to.be.a('string').and.not.empty;",
+                      "  pm.expect(json.shareLinkUrl).to.be.a('string').and.not.empty;",
+                      "  pm.expect(json.scope).to.eql(\"scan\");",
+                      "});",
+                      "pm.environment.set(\"shareLinkId\", json.shareLinkId);",
+                      "const token = (json.shareLinkUrl || \"\").split(\"/invitations/\")[1] || \"\";",
+                      "pm.environment.set(\"shareLinkToken\", token);"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/scans/{{scanId}}/share-links",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "scans",
+                    "{{scanId}}",
+                    "share-links"
+                  ]
+                },
+                "description": "Creates a generic, reusable scan share link (Owner of the parent project only; `201`) without sending an email. Anyone with the link can accept it and gain Viewer access to only this scan, its notes, and its assets. Saves `shareLinkId` and the raw `shareLinkToken`. The scan must have an uploaded model (`409 SCAN_NOT_SHAREABLE` otherwise)."
+              },
+              "response": []
+            },
+            {
+              "name": "List Scan Share Links",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/scans/{{scanId}}/share-links",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "scans",
+                    "{{scanId}}",
+                    "share-links"
+                  ]
+                },
+                "description": "Lists active (non-revoked) scan share links for the owner."
+              },
+              "response": []
+            },
+            {
+              "name": "Revoke Scan Share Link",
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/scans/{{scanId}}/share-links/{{shareLinkId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "scans",
+                    "{{scanId}}",
+                    "share-links",
+                    "{{shareLinkId}}"
+                  ]
+                },
+                "description": "Revokes a scan share link (Owner only; `200`, status becomes REVOKED). Stops further acceptances through that link; access already granted through it is not removed."
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "General",
+          "item": [
+            {
+              "name": "Preview Share Link (using token)",
+              "request": {
+                "auth": {
+                  "type": "noauth"
+                },
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/invitations/{{shareLinkToken}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "invitations",
+                    "{{shareLinkToken}}"
+                  ]
+                },
+                "description": "Previews a generic share link anonymously (No Auth) using the `shareLinkToken` saved by a create-share-link request. Returns `type: share-link`, the `scope` (`project` or `scan`), the matching `project`/`scan` entity, and `status` (ACTIVE/EXPIRED/REVOKED). A valid Bearer token can be added to also receive `hasAccess`."
+              },
+              "response": []
+            },
+            {
+              "name": "Accept Share Link (using token)",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/invitations/{{shareLinkToken}}/accept",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "invitations",
+                    "{{shareLinkToken}}",
+                    "accept"
+                  ]
+                },
+                "description": "Accepts a generic share link with the current user's token (`200`) and gains Viewer access (project or scan depending on the link's scope). Unlike invitations, acceptance does not consume the link, so it remains usable by other users. The Owner cannot accept their own link (`409 CANNOT_ACCEPT_OWN_INVITATION`); a user who already has active access gets `409 ACCESS_ALREADY_EXISTS`. Override the auth with another user's token to exercise the flow."
+              },
+              "response": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Shared With Me",
+      "item": [
+        {
+          "name": "List Shared Projects",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "pm.test(\"Shared projects listed\", function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(json.items).to.be.an('array');",
+                  "});",
+                  "const items = json.items || [];",
+                  "const active = items.find((i) => i.status === \"ACTIVE\");",
+                  "const target = active || items[0];",
+                  "if (target && target.id) {",
+                  "  pm.environment.set(\"sharedProjectId\", target.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/shared-projects?page=1&limit=5&sort=updatedAt:desc",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "shared-projects"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "5"
+                },
+                {
+                  "key": "sort",
+                  "value": "updatedAt:desc"
+                }
+              ]
+            },
+            "description": "Lists projects shared with the current user. Optional query params: `search` (case-insensitive name search), `page`, `limit` (max 100), `sort` (updatedAt:desc|asc, createdAt:desc|asc, name:asc|desc). Each item carries `status` (ACTIVE/REVOKED/PROJECT_DELETED/TEMPORARILY_UNAVAILABLE) and read-only `permissions`. Saves the first item's id as `sharedProjectId` for the detail and remove requests."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Shared Project Detail",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/shared-projects/{{sharedProjectId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "shared-projects",
+                "{{sharedProjectId}}"
+              ]
+            },
+            "description": "Returns a shared project read-only as an active Viewer. Only `ACTIVE` projects open (`200`); revoked, deleted, or never-shared projects are hidden behind `404 PROJECT_NOT_FOUND`."
+          },
+          "response": []
+        },
+        {
+          "name": "Remove from Shared With Me",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/shared-projects/{{sharedProjectId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "shared-projects",
+                "{{sharedProjectId}}"
+              ]
+            },
+            "description": "Removes a project from the current user's Shared With Me list (Viewer only; `200`). Revokes only the current user's own access; the project, the Owner, and other Viewers are unaffected. `403 NOT_SHARED_PROJECT` for the Owner; `409 NOT_IN_SHARED_WITH_ME` when the project is not in the list."
+          },
+          "response": []
+        },
+        {
+          "name": "List Shared Scans",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/shared-scans?page=1&limit=5&sort=updatedAt:desc",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "shared-scans"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "5"
+                },
+                {
+                  "key": "sort",
+                  "value": "updatedAt:desc"
+                }
+              ]
+            },
+            "description": "Lists scans shared with the current user (scan-level Viewer access). Optional query params: `search` (case-insensitive name search), `page`, `limit` (max 100), `sort` (updatedAt:desc|asc, createdAt:desc|asc, name:asc|desc). Each item carries `status` (ACTIVE/REVOKED/SCAN_DELETED/TEMPORARILY_UNAVAILABLE) and read-only `permissions`. Saves the first item's id as `sharedScanId` for the detail and remove requests."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "pm.test(\"Shared scans listed\", function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(json.items).to.be.an('array');",
+                  "});",
+                  "const items = json.items || [];",
+                  "const active = items.find((i) => i.status === \"ACTIVE\");",
+                  "const target = active || items[0];",
+                  "if (target && target.id) {",
+                  "  pm.environment.set(\"sharedScanId\", target.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Shared Scan Detail",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/shared-scans/{{sharedScanId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "shared-scans",
+                "{{sharedScanId}}"
+              ]
+            },
+            "description": "Returns a shared scan read-only as an active Viewer. Only `ACTIVE` scans open (`200`); revoked, deleted, or never-shared scans are hidden behind `404 SCAN_NOT_FOUND`."
+          },
+          "response": []
+        },
+        {
+          "name": "Remove Shared Scan from Shared With Me",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/shared-scans/{{sharedScanId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "shared-scans",
+                "{{sharedScanId}}"
+              ]
+            },
+            "description": "Removes a scan from the current user's Shared With Me list (Viewer only; `200`). Revokes only the current user's own scan access; the scan, the Owner, and other Viewers are unaffected. `403 NOT_SHARED_SCAN` for the Owner; `409 NOT_IN_SHARED_WITH_ME` when the scan is not in the list."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Sync",
+      "item": [
+        {
+          "name": "Initial Changes",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "pm.test('Sync snapshot returned', () => { pm.response.to.have.status(200); pm.expect(json.changes).to.be.an('array'); });",
+                  "if (json.nextCursor) pm.environment.set('syncCursor', json.nextCursor);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/sync/changes?limit=100",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "sync",
+                "changes"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "100"
+                }
+              ]
+            },
+            "description": "Starts a watermark-stable visible snapshot and saves nextCursor as syncCursor. Remove cursor to restart; use an RFC3339 since query instead for timestamp bootstrap."
+          },
+          "response": []
+        },
+        {
+          "name": "Incremental Changes",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "pm.test('Incremental changes returned', () => pm.response.to.have.status(200));",
+                  "if (json.nextCursor) pm.environment.set('syncCursor', json.nextCursor);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/sync/changes?cursor={{syncCursor}}&limit=100",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "sync",
+                "changes"
+              ],
+              "query": [
+                {
+                  "key": "cursor",
+                  "value": "{{syncCursor}}"
+                },
+                {
+                  "key": "limit",
+                  "value": "100"
+                }
+              ]
+            },
+            "description": "Continues from the opaque user-bound cursor and acknowledges covered conflict refresh events."
+          },
+          "response": []
+        },
+        {
+          "name": "Project Sync Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/sync/status?projectId={{projectId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "sync",
+                "status"
+              ],
+              "query": [
+                {
+                  "key": "projectId",
+                  "value": "{{projectId}}"
+                }
+              ]
+            },
+            "description": "Returns one accessible project status. Remove projectId to list every owned or actively shared project."
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{accessToken}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "https://roomscan-be.onrender.com/api/v1"
+    },
+    {
+      "key": "host",
+      "value": "https://roomscan-be.onrender.com"
+    },
+    {
+      "key": "accessToken",
+      "value": ""
+    },
+    {
+      "key": "refreshToken",
+      "value": ""
+    },
+    {
+      "key": "appleIdentityToken",
+      "value": ""
+    },
+    {
+      "key": "projectId",
+      "value": ""
+    },
+    {
+      "key": "scanId",
+      "value": ""
+    },
+    {
+      "key": "noteId",
+      "value": ""
+    },
+    {
+      "key": "recipientEmail",
+      "value": "recipient@example.com"
+    },
+    {
+      "key": "invitationId",
+      "value": ""
+    },
+    {
+      "key": "invitationToken",
+      "value": ""
+    },
+    {
+      "key": "viewerUserId",
+      "value": ""
+    },
+    {
+      "key": "scanViewerUserId",
+      "value": ""
+    },
+    {
+      "key": "scanInvitationId",
+      "value": ""
+    },
+    {
+      "key": "shareLinkId",
+      "value": ""
+    },
+    {
+      "key": "shareLinkToken",
+      "value": ""
+    },
+    {
+      "key": "sharedProjectId",
+      "value": ""
+    },
+    {
+      "key": "uploadUrl",
+      "value": ""
+    },
+    {
+      "key": "uploadSessionId",
+      "value": ""
+    },
+    {
+      "key": "assetId",
+      "value": ""
+    },
+    {
+      "key": "contentType",
+      "value": "model/usdz"
+    },
+    {
+      "key": "modelVersion",
+      "value": "1"
+    },
+    {
+      "key": "sizeBytes",
+      "value": ""
+    },
+    {
+      "key": "checksum",
+      "value": ""
+    },
+    {
+      "key": "thumbnailContentType",
+      "value": "image/png"
+    },
+    {
+      "key": "thumbnailSizeBytes",
+      "value": ""
+    },
+    {
+      "key": "thumbnailUploadUrl",
+      "value": ""
+    },
+    {
+      "key": "thumbnailUploadSessionId",
+      "value": ""
+    },
+    {
+      "key": "thumbnailAssetId",
+      "value": ""
+    }
+  ]
 }

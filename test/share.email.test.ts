@@ -52,7 +52,22 @@ describe('buildInvitationEmail', () => {
 
   it('rejects unsupported scopes', () => {
     expect(() =>
-      buildInvitationEmail({ ...baseInput, scope: 'scan' as InvitationEmailScope }),
+      buildInvitationEmail({ ...baseInput, scope: 'invalid' as InvitationEmailScope }),
     ).toThrow();
+  });
+
+  it('builds a scan-scope invitation email', () => {
+    const email = buildInvitationEmail({
+      ...baseInput,
+      scope: 'scan',
+      entityName: 'Meeting Room 3A',
+    });
+
+    expect(email.subject).toBe('owner@example.com shared a 3D Scan with you: Meeting Room 3A');
+    expect(email.html).toContain("You're invited to view a 3D Scan!");
+    expect(email.html).toContain('View Scan Invitation');
+    expect(email.html).toContain('Meeting Room 3A');
+    expect(email.text).toContain('Scan: Meeting Room 3A');
+    expect(email.html).toContain('This link will expire in 7 days');
   });
 });

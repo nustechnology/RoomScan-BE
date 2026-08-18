@@ -22,6 +22,7 @@ const noteSelect = {
       email: true,
     },
   },
+  title: true,
   content: true,
   color: true,
   position: true,
@@ -42,6 +43,7 @@ function createNoteRow(overrides: Record<string, unknown> = {}) {
       id: OWNER_ID,
       email: 'owner@example.com',
     },
+    title: 'Cabinet hinge',
     content: 'Cabinet hinge is loose',
     color: 'YELLOW',
     position: { x: 1.5, y: -2, z: 3.25 },
@@ -154,6 +156,7 @@ describe('PrismaNoteRepository', () => {
     const repository = new PrismaNoteRepository(client);
 
     const result = await repository.create(SCAN_ID, OWNER_ID, {
+      title: 'Cabinet hinge',
       content: 'Cabinet hinge is loose',
       color: 'YELLOW',
       position: { x: 1.5, y: -2, z: 3.25 },
@@ -167,6 +170,7 @@ describe('PrismaNoteRepository', () => {
     expect(createArguments.data).toMatchObject({
       scanId: SCAN_ID,
       createdById: OWNER_ID,
+      title: 'Cabinet hinge',
       content: 'Cabinet hinge is loose',
       color: 'YELLOW',
       position: { x: 1.5, y: -2, z: 3.25 },
@@ -185,6 +189,7 @@ describe('PrismaNoteRepository', () => {
     const repository = new PrismaNoteRepository(client);
 
     await repository.create(SCAN_ID, OWNER_ID, {
+      title: 'Note with orientation',
       content: 'Note with orientation',
       color: 'BLUE',
       position: { x: 0, y: 1, z: 2 },
@@ -251,21 +256,35 @@ describe('PrismaNoteRepository', () => {
         deletedAt: null,
         scan: {
           deletedAt: null,
-          project: {
-            deletedAt: null,
-            OR: [
-              { ownerId: OWNER_ID },
-              {
-                accesses: {
-                  some: {
-                    userId: OWNER_ID,
-                    role: 'VIEWER',
-                    revokedAt: null,
+          OR: [
+            {
+              project: {
+                deletedAt: null,
+                OR: [
+                  { ownerId: OWNER_ID },
+                  {
+                    accesses: {
+                      some: {
+                        userId: OWNER_ID,
+                        role: 'VIEWER',
+                        revokedAt: null,
+                      },
+                    },
                   },
+                ],
+              },
+            },
+            {
+              project: { deletedAt: null },
+              accesses: {
+                some: {
+                  userId: OWNER_ID,
+                  role: 'VIEWER',
+                  revokedAt: null,
                 },
               },
-            ],
-          },
+            },
+          ],
         },
       },
       select: {
@@ -295,19 +314,22 @@ describe('PrismaNoteRepository', () => {
     expect(result).toBeNull();
   });
 
-  it('updates content and color as the Owner and touches activity', async () => {
+  it('updates title and content as the Owner and touches activity', async () => {
     const { client, note, scan, project } = createClient();
     note.findFirst.mockResolvedValueOnce({ scanId: SCAN_ID });
-    note.update.mockResolvedValueOnce(createNoteRow({ content: 'Updated content' }));
+    note.update.mockResolvedValueOnce(
+      createNoteRow({ title: 'Updated title', content: 'Updated content' }),
+    );
     const repository = new PrismaNoteRepository(client);
 
     const result = await repository.update(NOTE_ID, OWNER_ID, {
+      title: 'Updated title',
       content: 'Updated content',
     });
 
     expect(note.update).toHaveBeenCalledWith({
       where: { id: NOTE_ID },
-      data: { content: 'Updated content' },
+      data: { title: 'Updated title', content: 'Updated content' },
       select: noteSelect,
     });
     expect(scan.update).toHaveBeenCalledOnce();

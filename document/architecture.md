@@ -8,10 +8,11 @@ API tests deterministic and prevents them from opening network ports.
 The current product-facing scope contains health checks, Apple Sign-In
 authentication with refresh-token rotation, Owner/Viewer project management,
 room-scan metadata, scan asset upload/download, text notes anchored to scan
-models, project sharing through expiring invitation links, and a Viewer-facing
-Shared With Me list. The Prisma
+models, project and scan sharing through expiring invitation links and reusable
+share links, and a Viewer-facing Shared With Me surface for both accepted
+projects and scans. The Prisma
 schema owns the `User`, `RefreshToken`, `Project`, `ProjectAccess`, `Scan`,
-`ScanAsset`, `Note`, and `Invitation` models.
+`ScanAccess`, `ShareLink`, `ScanAsset`, `Note`, and `Invitation` models.
 
 ## Request flow
 
@@ -297,56 +298,95 @@ resolve earlier conflicts in their domain transaction.
 
 ## Share module
 
-The Share module implements project sharing through expiring invitation links
-addressed to a recipient email. It depends on a `ShareRepository` (an
-`InvitationRepository`-style interface that also manages Viewer access records),
-a `Mailer`, a logger, a `clock`, the configured invitation TTL
+The Share module implements project and scan sharing through expiring, token-based
+links. It depends on a `ShareRepository` (an `InvitationRepository`-style
+interface that also manages Viewer access records and generic share links), a
+`Mailer`, a logger, a `clock`, the configured invitation TTL
 (`INVITATION_TTL_SECONDS`), and the client-facing base URL
-(`INVITATION_BASE_URL`). Share management (create, resend, list, revoke) is
-Owner-only; a non-owner receives `403 NOT_OWNER`, while a missing or deleted
-project returns `404 PROJECT_NOT_FOUND`.
+(`INVITATION_BASE_URL`). `ShareService` owns per-recipient invitations and the
+token preview/accept/decline resolution; `ShareLinkService` owns the generic,
+reusable share-link surface (create, list, revoke) and never sends email. Share
+management (create, resend, list, revoke) is Owner-only; a non-owner receives
+`403 NOT_OWNER`, while a missing or deleted project returns
+`404 PROJECT_NOT_FOUND` and a missing or deleted scan returns
+`404 SCAN_NOT_FOUND`. The Owner of a scan is always the owner of its parent
+project.
 
-An `Invitation` row is a per-recipient link record: `recipientEmail`, `tokenHash`
+An `Invitation` row is a per-recipient link record scoped to exactly one
+resource (`projectId` or `scanId`): `recipientEmail`, `tokenHash`
 (SHA-256 of the raw token; the raw token is never stored), `status` (`PENDING`,
 `ACCEPTED`, `DECLINED`, or `REVOKED`), `expiresAt`, `sentAt`, `acceptedAt`,
 `acceptedByUserId`, `declinedAt`, and `revokedAt`. The raw token is 32 random
 bytes encoded as base64url and the `invitationUrl` returned to the owner is
 `{INVITATION_BASE_URL}/invitations/{rawToken}`. Creating an invitation sends an
-AC5-style email built by `buildInvitationEmail` (project scope); a delivery
-failure is logged and never fails the request. A partial unique index on
-`(projectId, recipientEmail)` for `PENDING` rows enforces at most one pending
-link per recipient: the repository create revokes any expired pending link for
-the same `(project, recipientEmail)` and inserts the new link in one database
-transaction, so a concurrent duplicate raises the unique-constraint violation
-and is mapped to `409 INVITATION_ALREADY_SENT`. An expired link therefore does
-not block re-inviting the recipient. Resending rotates the token, extends
-`expiresAt`, updates `sentAt`, and re-sends the email.
+AC5-style email built by `buildInvitationEmail` with either the project or the
+scan template; a delivery failure is logged and never fails the request. Partial
+unique indexes on `(projectId, recipientEmail)` and `(scanId, recipientEmail)`
+for `PENDING` rows enforce at most one pending link per recipient and scope: the
+repository create revokes any expired pending link for the same
+`(project, recipientEmail)` or `(scan, recipientEmail)` and inserts the new link
+in one database transaction, so a concurrent duplicate raises the
+unique-constraint violation and is mapped to `409 INVITATION_ALREADY_SENT`. An
+expired link therefore does not block re-inviting the recipient. Resending
+rotates the token, extends `expiresAt`, updates `sentAt`, and re-sends the email
+with the matching scope template.
 
-Acceptance is open: the first signed-in user to redeem a pending link makes it
-`ACCEPTED` (recording `acceptedAt` and `acceptedByUserId`) and receives an
-active Viewer `ProjectAccess` row in one database transaction. The
-`@@unique([projectId, userId])` constraint guarantees at most one access row per
-project per user, so accepting can never create a duplicate, and the repository
-guards the status write with a `status = PENDING` predicate so a concurrent
-double-accept resolves to `409 INVITATION_ALREADY_ACCEPTED`. A user with an
-active access row cannot accept or decline again (`409 ACCESS_ALREADY_EXISTS`),
-an accepted or declined invitation is terminal, and the project Owner cannot
-accept or decline (`409 CANNOT_ACCEPT_OWN_INVITATION`). Revoked (`409
-INVITATION_REVOKED`), expired (`409 INVITATION_EXPIRED`), accepted (`409
-INVITATION_ALREADY_ACCEPTED`), and declined (`409 INVITATION_DECLINED`)
-invitations cannot be accepted, declined, resend, or revoked; revoking an
-already revoked link is idempotent.
+A `ShareLink` row is a generic, reusable link with no recipient, scoped to
+exactly one resource (`projectId` or `scanId`): `createdById`, `tokenHash`,
+`expiresAt`, and `revokedAt`. Acceptance never changes the link, so it remains
+usable by other users until it expires or the Owner revokes it. A `ScanAccess`
+row mirrors `ProjectAccess` for the scan scope: `scanId`, `userId`, `role`,
+`invitationId`/`shareLinkId`, `acceptedAt`, and `revokedAt`, with a
+`@@unique([scanId, userId])` constraint. Scan-level Viewer access grants read
+access to that scan, its notes, and its assets without project-level access;
+the Scan, Note, and Scan Asset modules include active `ScanAccess` rows in their
+permission lookups (via `ScanPermissionService`, which resolves the role for a
+scan from project ownership, project Viewer access, or scan Viewer access).
 
-Preview (`GET /invitations/:token`) requires no authentication and returns the
-link status (`PENDING`, `EXPIRED`, `ACCEPTED`, `DECLINED`, or `REVOKED`) plus a
-safe project summary and the recipient email; when a valid Bearer token is
-supplied it additionally reports `hasAccess`. A project is only shareable once
-it has at least one non-deleted scan with an uploaded model
-(`assetStatus = UPLOADED`); otherwise creating an invitation returns `409
-PROJECT_NOT_SHAREABLE`. Revoking a Viewer simply sets `revokedAt`; downstream
+Acceptance is open for invitations: the first signed-in user to redeem a pending
+invitation makes it `ACCEPTED` (recording `acceptedAt` and `acceptedByUserId`)
+and receives an active Viewer access row in one database transaction —
+`ProjectAccess` for project scope or `ScanAccess` for scan scope. The `@@unique`
+constraint on `(projectId, userId)` or `(scanId, userId)` guarantees at most one
+access row per resource per user, so accepting can never create a duplicate, and
+the repository guards the status write with a `status = PENDING` predicate so a
+concurrent double-accept resolves to `409 INVITATION_ALREADY_ACCEPTED`. A user
+with an active access row cannot accept or decline again
+(`409 ACCESS_ALREADY_EXISTS`), an accepted or declined invitation is terminal,
+and the resource Owner cannot accept or decline
+(`409 CANNOT_ACCEPT_OWN_INVITATION`).
+
+Reusable share links behave differently: acceptance never transitions the link —
+a `ShareLink` row retains its status (`ACTIVE`, `EXPIRED`, or `REVOKED`) and
+remains redeemable by any other signed-in user until it expires or the Owner
+revokes it; accepting only creates the access row (via `acceptedAt`) and never a
+second access. A revoked or expired share link cannot be accepted
+(`409 SHARE_LINK_REVOKED` or `409 SHARE_LINK_EXPIRED`), has no decline
+operation, and newly created access via a revoked or expired link is rejected —
+`grantProjectAccess`/`grantScanAccess` refuse to re-grant once the user has a
+previously revoked access record, and re-granting an active user is blocked by
+`409 ACCESS_ALREADY_EXISTS`.
+
+Revoked (`409 INVITATION_REVOKED`), expired (`409 INVITATION_EXPIRED`), accepted
+(`409 INVITATION_ALREADY_ACCEPTED`), and declined (`409 INVITATION_DECLINED`)
+invitations cannot be accepted, declined, resend, or revoked, and a revoked or
+expired invitation token can no longer be redeemed (it is not reusable);
+revoking an already revoked invitation remains idempotent and returns its
+existing revocation timestamp.
+
+Preview (`GET /invitations/:token`) requires no authentication and resolves
+either an invitation or a generic share link, returning a discriminated response
+with `type` (`invitation` or `share-link`), `scope` (`project` or `scan`), the
+matching entity (`project` or `scan`), and the link status; when a valid Bearer
+token is supplied it additionally reports `hasAccess`. A project is only
+shareable once it has at least one non-deleted scan with an uploaded model
+(`assetStatus = UPLOADED`), and a scan is shareable only once that scan has an
+uploaded model; otherwise creation returns `409 PROJECT_NOT_SHAREABLE` or `409
+SCAN_NOT_SHAREABLE`. Revoking a Viewer simply sets `revokedAt`; downstream
 enforcement that revoked Viewers lose project, scan, note, and asset download
-access is inherited from the shared `ProjectPermissionService` access lookup,
-which filters on active (`revokedAt: null`) access on every request.
+access is inherited from the shared `ProjectPermissionService` and
+`ScanPermissionService` access lookups, which filter on active (`revokedAt:
+null`) access on every request.
 
 ## Shared With Me module
 
@@ -380,6 +420,37 @@ case-insensitive name search against the parent project, sort by a to-one
 relation field with a stable project `id` tie-breaker, and paginate with an
 offset. Owners never appear in the list, and a removal attempt by the project
 Owner returns `403 NOT_SHARED_PROJECT`.
+
+## Shared Scans module
+
+The Shared Scans module is the scan-granularity counterpart of the Shared With
+Me module. It lists the scans the current user accepted as a Viewer (via a
+scan-level invitation or share link), opens an active shared scan read-only, and
+lets the user remove a scan from their own list. It depends on a narrow
+`SharedScansRepository` interface and derives everything from existing rows:
+`ScanAccess` membership, the `Scan` row (including `deletedAt`, `updatedAt`, and
+the creator relation), and a non-deleted note count. Because `ScanAccess`
+already existed from the scan-sharing phase, no schema change was required.
+
+`SharedScansService` computes a `status` for each entry, mirroring the project
+surface but at scan granularity: `ACTIVE` (live scan, active access), `REVOKED`
+(live scan, revoked access), `SCAN_DELETED` (deleted scan whose access was
+revoked), and `TEMPORARILY_UNAVAILABLE` (a defensive state for an inconsistent
+record). List and detail map to a read-only response whose `permissions` always
+has `role: VIEWER` with `canView` true only for `ACTIVE`. Detail only returns a
+scan while it is `ACTIVE`; revoked, deleted, and never-shared scans are hidden
+behind the standard `404 SCAN_NOT_FOUND`.
+
+`PrismaSharedScansRepository` restricts every `scan_accesses` lookup to `VIEWER`
+rows: list filters by `userId` and the `VIEWER` role, detail and access-status
+checks match on `(scanId, userId)` with the same role filter, and removal runs a
+guarded `updateMany` on the access row (`role: VIEWER`, `revokedAt: null`), so
+owner records are never returned or revoked and a concurrent removal or Owner
+revocation resolves to `409 NOT_IN_SHARED_WITH_ME`. Lookups apply case-insensitive
+name search against the parent scan, sort by a to-one relation field with a
+stable scan `id` tie-breaker, and paginate with an offset. The "owner" check for
+removal resolves the scan's project owner; owners never appear in the list, and a
+removal attempt by the scan Owner returns `403 NOT_SHARED_SCAN`.
 
 ## Mail
 
@@ -471,24 +542,28 @@ The composition root creates one Prisma Client and injects it into the database
 health/lifecycle adapter, the Apple user repository, the current-user
 repository, the project repository, the scan repository, the scan-asset
 repository, the refresh-token repository, the note repository, the share
-repository, the shared-projects repository, the sync repository, and the
-idempotency executor, plus the storage, sync-cryptography, and mail adapters. It
-also creates the three
+repository, the shared-projects repository, the shared-scans repository, the
+sync repository, and the idempotency executor, plus the storage,
+sync-cryptography, and mail adapters. It also creates the three
 rate-limit middleware instances, the access-token and refresh-token verifiers,
-the project permission service, the project service, the scan service, the
-scan-asset service, the refresh-token service, the note service, the share
-service, the shared-projects service, and the sync service once per process.
-Product modules never import the Prisma client
+the project and scan permission services, the project service, the scan service,
+the scan-asset service, the refresh-token service, the note service, the share
+service, the share-link service, the shared-projects service, the
+shared-scans service, and the sync service once per process. Product modules
+never import the Prisma client
 directly. The unique provider identity constraint makes concurrent first-time
 Apple logins idempotent at the database boundary. The projects table has a
 foreign key to users with `onDelete: Restrict`; project access has unique
 `(projectId, userId)` membership, revocation state, and an optional
-`invitationId` with an acceptance timestamp. Notes belong to a scan with
-`onDelete: Cascade` and to a creator with `onDelete: Restrict`. Invitations
-belong to a project with `onDelete: Cascade` and to a creator with
-`onDelete: Restrict`; their `tokenHash` is unique, their `recipientEmail` is
-indexed per project, and the access rows referencing them use
-`onDelete: SetNull` so revoking an invitation never orphans Viewer access.
+`invitationId` or `shareLinkId` with an acceptance timestamp. Scan access has
+unique `(scanId, userId)` membership with the same lifecycle. Notes belong to a
+scan with `onDelete: Cascade` and to a creator with `onDelete: Restrict`.
+Invitations belong to a project or scan with `onDelete: Cascade` and to a
+creator with `onDelete: Restrict`; their `tokenHash` is unique, their
+`recipientEmail` is indexed per project and per scan, and the access rows
+referencing them use `onDelete: SetNull` so revoking an invitation never orphans
+Viewer access. Share links belong to a project or scan with
+`onDelete: Cascade` and to a creator with `onDelete: Restrict`.
 
 ## Lifecycle
 

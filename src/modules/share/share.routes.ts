@@ -17,6 +17,8 @@ import type {
 import { validateRequest } from '../../common/middleware/validate-request.js';
 import { ProjectNotFoundError } from '../project/project.errors.js';
 import { ProjectIdParamSchema, type ProjectIdParam } from '../project/project.schemas.js';
+import { ScanNotFoundError } from '../scan/scan.errors.js';
+import { ScanIdParamSchema, type ScanIdParam } from '../scan/scan.schemas.js';
 import {
   AccessAlreadyExistsError,
   CannotAcceptOwnInvitationError,
@@ -28,8 +30,13 @@ import {
   InvitationRevokedError,
   NotOwnerError,
   ProjectNotShareableError,
+  ScanNotShareableError,
+  ShareLinkExpiredError,
+  ShareLinkNotFoundError,
+  ShareLinkRevokedError,
   ViewerAccessNotFoundError,
 } from './share.errors.js';
+import type { ShareLinkService } from './share-link.service.js';
 import {
   InvitationAcceptResponseSchema,
   InvitationCreateBodySchema,
@@ -40,18 +47,30 @@ import {
   InvitationResendResponseSchema,
   InvitationRevokeResponseSchema,
   InvitationTokenParamSchema,
+  ScanShareRevokeParamsSchema,
+  ScanSharesListResponseSchema,
+  ScanViewerRevokeResponseSchema,
+  ProjectShareLinkIdParamSchema,
+  ScanShareLinkIdParamSchema,
+  ShareLinkCreateResponseSchema,
+  ShareLinkListResponseSchema,
+  ShareLinkRevokeResponseSchema,
   SharesListResponseSchema,
   ShareRevokeParamsSchema,
   ViewerRevokeResponseSchema,
   type InvitationCreateBody,
   type InvitationIdParam,
   type InvitationTokenParam,
+  type ProjectShareLinkIdParam,
+  type ScanShareRevokeParams,
+  type ScanShareLinkIdParam,
   type ShareRevokeParams,
 } from './share.schemas.js';
 import type { ShareService } from './share.service.js';
 
 export interface ShareRouterDependencies {
   shareService: ShareService;
+  shareLinkService: ShareLinkService;
   accessTokenVerifier: AccessTokenVerifier;
   currentUserRepository: CurrentUserRepository;
 }
@@ -66,11 +85,25 @@ function mapError(error: unknown): AppError | undefined {
       message: 'Project was not found',
     });
   }
+  if (error instanceof ScanNotFoundError) {
+    return new AppError({
+      statusCode: 404,
+      code: 'SCAN_NOT_FOUND',
+      message: 'Scan was not found',
+    });
+  }
   if (error instanceof InvitationNotFoundError) {
     return new AppError({
       statusCode: 404,
       code: 'INVITATION_NOT_FOUND',
       message: 'Invitation was not found',
+    });
+  }
+  if (error instanceof ShareLinkNotFoundError) {
+    return new AppError({
+      statusCode: 404,
+      code: 'SHARE_LINK_NOT_FOUND',
+      message: 'Share link was not found',
     });
   }
   if (error instanceof ViewerAccessNotFoundError) {
@@ -126,14 +159,14 @@ function mapError(error: unknown): AppError | undefined {
     return new AppError({
       statusCode: 409,
       code: 'ACCESS_ALREADY_EXISTS',
-      message: 'The user already has access to this project',
+      message: 'The user already has access to this resource',
     });
   }
   if (error instanceof CannotAcceptOwnInvitationError) {
     return new AppError({
       statusCode: 409,
       code: 'CANNOT_ACCEPT_OWN_INVITATION',
-      message: 'The project owner cannot accept their own invitation',
+      message: 'The resource owner cannot accept their own invitation',
     });
   }
   if (error instanceof ProjectNotShareableError) {
@@ -143,11 +176,33 @@ function mapError(error: unknown): AppError | undefined {
       message: 'Project is not ready to be shared',
     });
   }
+  if (error instanceof ScanNotShareableError) {
+    return new AppError({
+      statusCode: 409,
+      code: 'SCAN_NOT_SHAREABLE',
+      message: 'Scan is not ready to be shared',
+    });
+  }
+  if (error instanceof ShareLinkRevokedError) {
+    return new AppError({
+      statusCode: 409,
+      code: 'SHARE_LINK_REVOKED',
+      message: 'Share link has been revoked',
+    });
+  }
+  if (error instanceof ShareLinkExpiredError) {
+    return new AppError({
+      statusCode: 409,
+      code: 'SHARE_LINK_EXPIRED',
+      message: 'Share link has expired',
+    });
+  }
   return undefined;
 }
 
 export function createShareRouter({
   shareService,
+  shareLinkService,
   accessTokenVerifier,
   currentUserRepository,
 }: ShareRouterDependencies): Router {
@@ -187,6 +242,32 @@ export function createShareRouter({
         const responseBody = InvitationCreateResponseSchema.parse(result.body);
 
         response.status(result.statusCode).json(responseBody);
+      } catch (error) {
+        next(mapError(error) ?? error);
+      }
+    },
+  );
+
+  router.post(
+    '/scans/:scanId/invitations',
+    requireAuth,
+    validateRequest({ body: InvitationCreateBodySchema, params: ScanIdParamSchema }),
+    async (request, response, next) => {
+      try {
+        const userId = getUserId(request);
+        const { body, params } = response.locals.validated as {
+          body: InvitationCreateBody;
+          params: ScanIdParam;
+        };
+        const result = await shareService.createScanInvitation(userId, params.scanId, {
+          recipientEmail: body.recipientEmail,
+          ...(body.expiresInSeconds === undefined
+            ? {}
+            : { expiresInSeconds: body.expiresInSeconds }),
+        });
+        const responseBody = InvitationCreateResponseSchema.parse(result);
+
+        response.status(201).json(responseBody);
       } catch (error) {
         next(mapError(error) ?? error);
       }
@@ -301,6 +382,24 @@ export function createShareRouter({
     },
   );
 
+  router.get(
+    '/scans/:scanId/shares',
+    requireAuth,
+    validateRequest({ params: ScanIdParamSchema }),
+    async (request, response, next) => {
+      try {
+        const userId = getUserId(request);
+        const { params } = response.locals.validated as { params: ScanIdParam };
+        const result = await shareService.listScanShares(userId, params.scanId);
+        const responseBody = ScanSharesListResponseSchema.parse(result);
+
+        response.status(200).json(responseBody);
+      } catch (error) {
+        next(mapError(error) ?? error);
+      }
+    },
+  );
+
   router.delete(
     '/projects/:projectId/shares/:userId',
     requireAuth,
@@ -311,6 +410,136 @@ export function createShareRouter({
         const { params } = response.locals.validated as { params: ShareRevokeParams };
         const result = await shareService.revokeViewer(userId, params.projectId, params.userId);
         const responseBody = ViewerRevokeResponseSchema.parse(result);
+
+        response.status(200).json(responseBody);
+      } catch (error) {
+        next(mapError(error) ?? error);
+      }
+    },
+  );
+
+  router.delete(
+    '/scans/:scanId/shares/:userId',
+    requireAuth,
+    validateRequest({ params: ScanShareRevokeParamsSchema }),
+    async (request, response, next) => {
+      try {
+        const userId = getUserId(request);
+        const { params } = response.locals.validated as { params: ScanShareRevokeParams };
+        const result = await shareService.revokeScanViewer(userId, params.scanId, params.userId);
+        const responseBody = ScanViewerRevokeResponseSchema.parse(result);
+
+        response.status(200).json(responseBody);
+      } catch (error) {
+        next(mapError(error) ?? error);
+      }
+    },
+  );
+
+  router.post(
+    '/projects/:projectId/share-links',
+    requireAuth,
+    validateRequest({ params: ProjectIdParamSchema }),
+    async (request, response, next) => {
+      try {
+        const userId = getUserId(request);
+        const { params } = response.locals.validated as { params: ProjectIdParam };
+        const result = await shareLinkService.createShareLink(userId, {
+          projectId: params.projectId,
+        });
+        const responseBody = ShareLinkCreateResponseSchema.parse(result);
+
+        response.status(201).json(responseBody);
+      } catch (error) {
+        next(mapError(error) ?? error);
+      }
+    },
+  );
+
+  router.post(
+    '/scans/:scanId/share-links',
+    requireAuth,
+    validateRequest({ params: ScanIdParamSchema }),
+    async (request, response, next) => {
+      try {
+        const userId = getUserId(request);
+        const { params } = response.locals.validated as { params: ScanIdParam };
+        const result = await shareLinkService.createShareLink(userId, { scanId: params.scanId });
+        const responseBody = ShareLinkCreateResponseSchema.parse(result);
+
+        response.status(201).json(responseBody);
+      } catch (error) {
+        next(mapError(error) ?? error);
+      }
+    },
+  );
+
+  router.get(
+    '/projects/:projectId/share-links',
+    requireAuth,
+    validateRequest({ params: ProjectIdParamSchema }),
+    async (request, response, next) => {
+      try {
+        const userId = getUserId(request);
+        const { params } = response.locals.validated as { params: ProjectIdParam };
+        const result = await shareLinkService.listShareLinks(userId, {
+          projectId: params.projectId,
+        });
+        const responseBody = ShareLinkListResponseSchema.parse({ items: result });
+
+        response.status(200).json(responseBody);
+      } catch (error) {
+        next(mapError(error) ?? error);
+      }
+    },
+  );
+
+  router.get(
+    '/scans/:scanId/share-links',
+    requireAuth,
+    validateRequest({ params: ScanIdParamSchema }),
+    async (request, response, next) => {
+      try {
+        const userId = getUserId(request);
+        const { params } = response.locals.validated as { params: ScanIdParam };
+        const result = await shareLinkService.listShareLinks(userId, { scanId: params.scanId });
+        const responseBody = ShareLinkListResponseSchema.parse({ items: result });
+
+        response.status(200).json(responseBody);
+      } catch (error) {
+        next(mapError(error) ?? error);
+      }
+    },
+  );
+
+  router.delete(
+    '/projects/:projectId/share-links/:shareLinkId',
+    requireAuth,
+    validateRequest({ params: ProjectShareLinkIdParamSchema }),
+    async (request, response, next) => {
+      try {
+        const userId = getUserId(request);
+        const { params } = response.locals.validated as { params: ProjectShareLinkIdParam };
+        const result = await shareLinkService.revokeShareLink(userId, params.shareLinkId);
+        const responseBody = ShareLinkRevokeResponseSchema.parse(result);
+
+        response.status(200).json(responseBody);
+      } catch (error) {
+        next(mapError(error) ?? error);
+      }
+    },
+  );
+
+  router.delete(
+    '/scans/:scanId/share-links/:shareLinkId',
+    requireAuth,
+    validateRequest({ params: ScanShareLinkIdParamSchema }),
+    async (request, response, next) => {
+      try {
+        const userId = getUserId(request);
+        const { params } = response.locals.validated as { params: ScanShareLinkIdParam };
+        const result = await shareLinkService.revokeShareLink(userId, params.shareLinkId);
+        const responseBody = ShareLinkRevokeResponseSchema.parse(result);
 
         response.status(200).json(responseBody);
       } catch (error) {

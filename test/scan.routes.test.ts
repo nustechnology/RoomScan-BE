@@ -25,7 +25,9 @@ import type { ScanResult } from '../src/modules/scan/scan.types.js';
 import type { ScanAssetService } from '../src/modules/scan-asset/scan-asset.service.js';
 import type { NoteService } from '../src/modules/note/note.service.js';
 import type { ShareService } from '../src/modules/share/share.service.js';
+import type { ShareLinkService } from '../src/modules/share/share-link.service.js';
 import type { SharedProjectsService } from '../src/modules/shared-projects/shared-projects.service.js';
+import type { SharedScansService } from '../src/modules/shared-scans/shared-scans.service.js';
 import type { ProjectService } from '../src/modules/project/project.service.js';
 
 const ACCESS_SECRET = 'access-secret-that-is-at-least-32-characters';
@@ -188,11 +190,21 @@ describe('Scan HTTP endpoints', () => {
     listShares: vi.fn(),
     revokeViewer: vi.fn(),
   } as unknown as ShareService;
+  const shareLinkService = {
+    createShareLink: vi.fn(),
+    listShareLinks: vi.fn(),
+    revokeShareLink: vi.fn(),
+  } as unknown as ShareLinkService;
   const sharedProjectsService = {
     list: vi.fn(),
     detail: vi.fn(),
     remove: vi.fn(),
   } as unknown as SharedProjectsService;
+  const sharedScansService = {
+    list: vi.fn(),
+    detail: vi.fn(),
+    remove: vi.fn(),
+  } as unknown as SharedScansService;
   const app = createApp({
     config,
     database,
@@ -204,7 +216,9 @@ describe('Scan HTTP endpoints', () => {
     scanAssetService,
     noteService,
     shareService,
+    shareLinkService,
     sharedProjectsService,
+    sharedScansService,
     accessTokenVerifier,
     currentUserRepository,
     rateLimiters,

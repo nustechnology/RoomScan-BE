@@ -31,9 +31,12 @@ import type { ScanAssetService } from './modules/scan-asset/scan-asset.service.j
 import { createScanRouter } from './modules/scan/scan.routes.js';
 import type { ScanService } from './modules/scan/scan.service.js';
 import { createShareRouter } from './modules/share/share.routes.js';
+import type { ShareLinkService } from './modules/share/share-link.service.js';
 import type { ShareService } from './modules/share/share.service.js';
 import { createSharedProjectsRouter } from './modules/shared-projects/shared-projects.routes.js';
 import type { SharedProjectsService } from './modules/shared-projects/shared-projects.service.js';
+import { createSharedScansRouter } from './modules/shared-scans/shared-scans.routes.js';
+import type { SharedScansService } from './modules/shared-scans/shared-scans.service.js';
 import { createSyncRouter } from './modules/sync/sync.routes.js';
 import type { SyncService } from './modules/sync/sync.service.js';
 import { createWellKnownRouter } from './modules/well-known/well-known.routes.js';
@@ -50,7 +53,9 @@ export interface AppDependencies {
   scanAssetService: ScanAssetService;
   noteService: NoteService;
   shareService: ShareService;
+  shareLinkService: ShareLinkService;
   sharedProjectsService: SharedProjectsService;
+  sharedScansService: SharedScansService;
   syncService?: SyncService;
   accessTokenVerifier: AccessTokenVerifier;
   currentUserRepository: CurrentUserRepository;
@@ -84,7 +89,9 @@ export function createApp({
   scanAssetService,
   noteService,
   shareService,
+  shareLinkService,
   sharedProjectsService,
+  sharedScansService,
   syncService,
   accessTokenVerifier,
   currentUserRepository,
@@ -212,6 +219,7 @@ export function createApp({
     API_PREFIX,
     createShareRouter({
       shareService,
+      shareLinkService,
       accessTokenVerifier,
       currentUserRepository,
     }),
@@ -220,6 +228,14 @@ export function createApp({
     API_PREFIX,
     createSharedProjectsRouter({
       sharedProjectsService,
+      accessTokenVerifier,
+      currentUserRepository,
+    }),
+  );
+  app.use(
+    API_PREFIX,
+    createSharedScansRouter({
+      sharedScansService,
       accessTokenVerifier,
       currentUserRepository,
     }),

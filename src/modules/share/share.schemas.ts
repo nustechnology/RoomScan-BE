@@ -8,8 +8,23 @@ export const InvitationIdParamSchema = z.object({
   invitationId: z.uuid(),
 });
 
+export const ProjectShareLinkIdParamSchema = z.object({
+  projectId: z.uuid(),
+  shareLinkId: z.uuid(),
+});
+
+export const ScanShareLinkIdParamSchema = z.object({
+  scanId: z.uuid(),
+  shareLinkId: z.uuid(),
+});
+
 export const ShareRevokeParamsSchema = z.object({
   projectId: z.uuid(),
+  userId: z.uuid(),
+});
+
+export const ScanShareRevokeParamsSchema = z.object({
+  scanId: z.uuid(),
   userId: z.uuid(),
 });
 
@@ -31,38 +46,94 @@ export const InvitationCreateResponseSchema = z.object({
 
 export const InvitationResendResponseSchema = InvitationCreateResponseSchema;
 
-export const InvitationPreviewResponseSchema = z.object({
-  project: z.object({
+export const ShareScopeSchema = z.enum(['project', 'scan']);
+
+const ProjectPreviewSchema = z.object({
+  id: z.uuid(),
+  name: z.string(),
+  description: z.string().nullable(),
+  thumbnail: z.url().nullable(),
+});
+
+const ProjectDetailSchema = ProjectPreviewSchema.extend({
+  owner: z.object({
     id: z.uuid(),
-    name: z.string(),
-    description: z.string().nullable(),
-    thumbnail: z.url().nullable(),
+    email: z.email().nullable(),
   }),
+});
+
+const ScanPreviewSchema = z.object({
+  id: z.uuid(),
+  projectId: z.uuid(),
+  name: z.string(),
+  description: z.string().nullable(),
+  thumbnail: z.url().nullable(),
+});
+
+const ScanDetailSchema = ScanPreviewSchema.extend({
+  creator: z.object({
+    id: z.uuid(),
+    email: z.email().nullable(),
+  }),
+});
+
+const InvitationPreviewLiteralSchema = z.object({
+  type: z.literal('invitation'),
+  scope: ShareScopeSchema,
+  project: ProjectPreviewSchema.nullable(),
+  scan: ScanPreviewSchema.nullable(),
   status: z.enum(['PENDING', 'EXPIRED', 'ACCEPTED', 'DECLINED', 'REVOKED']),
-  recipientEmail: z.email(),
+  recipientEmail: z.email().optional(),
   sentAt: z.iso.datetime(),
   expiresAt: z.iso.datetime(),
   hasAccess: z.boolean().optional(),
 });
 
-export const InvitationAcceptResponseSchema = z.object({
+const ShareLinkPreviewLiteralSchema = z.object({
+  type: z.literal('share-link'),
+  scope: ShareScopeSchema,
+  project: ProjectPreviewSchema.nullable(),
+  scan: ScanPreviewSchema.nullable(),
+  status: z.enum(['ACTIVE', 'EXPIRED', 'REVOKED']),
+  expiresAt: z.iso.datetime(),
+  hasAccess: z.boolean().optional(),
+});
+
+export const InvitationPreviewResponseSchema = z.discriminatedUnion('type', [
+  InvitationPreviewLiteralSchema,
+  ShareLinkPreviewLiteralSchema,
+]);
+
+const InvitationAcceptLiteralSchema = z.object({
+  type: z.literal('invitation'),
   invitationId: z.uuid(),
-  project: z.object({
-    id: z.uuid(),
-    name: z.string(),
-    description: z.string().nullable(),
-    thumbnail: z.url().nullable(),
-    owner: z.object({
-      id: z.uuid(),
-      email: z.email().nullable(),
-    }),
-  }),
+  scope: ShareScopeSchema,
+  project: ProjectDetailSchema.nullable(),
+  scan: ScanDetailSchema.nullable(),
   access: z.object({
     role: z.literal('VIEWER'),
     status: z.literal('ACTIVE'),
     grantedAt: z.iso.datetime(),
   }),
 });
+
+const ShareLinkAcceptLiteralSchema = z.object({
+  type: z.literal('share-link'),
+  shareLinkId: z.uuid(),
+  scope: ShareScopeSchema,
+  project: ProjectDetailSchema.nullable(),
+  scan: ScanDetailSchema.nullable(),
+  access: z.object({
+    role: z.literal('VIEWER'),
+    status: z.literal('ACTIVE'),
+    grantedAt: z.iso.datetime(),
+  }),
+});
+
+export const InvitationAcceptResponseSchema = z.discriminatedUnion('type', [
+  InvitationAcceptLiteralSchema,
+  ShareLinkAcceptLiteralSchema,
+]);
 
 export const InvitationDeclineResponseSchema = z.object({
   invitationId: z.uuid(),
@@ -89,7 +160,7 @@ export const SharesListResponseSchema = z.object({
   viewers: z.array(
     z.object({
       userId: z.uuid(),
-      revision: z.number().int().positive(),
+      revision: z.number().int().positive().optional(),
       recipientUser: z.object({
         id: z.uuid(),
         email: z.email().nullable(),
@@ -99,6 +170,8 @@ export const SharesListResponseSchema = z.object({
   ),
 });
 
+export const ScanSharesListResponseSchema = SharesListResponseSchema;
+
 export const ViewerRevokeResponseSchema = z.object({
   projectId: z.uuid(),
   userId: z.uuid(),
@@ -106,9 +179,42 @@ export const ViewerRevokeResponseSchema = z.object({
   revokedAt: z.iso.datetime(),
 });
 
+export const ScanViewerRevokeResponseSchema = z.object({
+  scanId: z.uuid(),
+  userId: z.uuid(),
+  revokedAt: z.iso.datetime(),
+});
+
+export const ShareLinkCreateResponseSchema = z.object({
+  shareLinkId: z.uuid(),
+  shareLinkUrl: z.url(),
+  scope: ShareScopeSchema,
+  expiresAt: z.iso.datetime(),
+});
+
+export const ShareLinkListResponseSchema = z.object({
+  items: z.array(
+    z.object({
+      shareLinkId: z.uuid(),
+      status: z.enum(['ACTIVE', 'EXPIRED', 'REVOKED']),
+      expiresAt: z.iso.datetime(),
+      createdAt: z.iso.datetime(),
+    }),
+  ),
+});
+
+export const ShareLinkRevokeResponseSchema = z.object({
+  shareLinkId: z.uuid(),
+  status: z.literal('REVOKED'),
+  revokedAt: z.iso.datetime(),
+});
+
 export type InvitationTokenParam = z.infer<typeof InvitationTokenParamSchema>;
 export type InvitationIdParam = z.infer<typeof InvitationIdParamSchema>;
+export type ProjectShareLinkIdParam = z.infer<typeof ProjectShareLinkIdParamSchema>;
+export type ScanShareLinkIdParam = z.infer<typeof ScanShareLinkIdParamSchema>;
 export type ShareRevokeParams = z.infer<typeof ShareRevokeParamsSchema>;
+export type ScanShareRevokeParams = z.infer<typeof ScanShareRevokeParamsSchema>;
 export type InvitationCreateBody = z.infer<typeof InvitationCreateBodySchema>;
 export type InvitationCreateResponse = z.infer<typeof InvitationCreateResponseSchema>;
 export type InvitationResendResponse = z.infer<typeof InvitationResendResponseSchema>;
@@ -118,3 +224,6 @@ export type InvitationDeclineResponse = z.infer<typeof InvitationDeclineResponse
 export type InvitationRevokeResponse = z.infer<typeof InvitationRevokeResponseSchema>;
 export type SharesListResponse = z.infer<typeof SharesListResponseSchema>;
 export type ViewerRevokeResponse = z.infer<typeof ViewerRevokeResponseSchema>;
+export type ShareLinkCreateResponse = z.infer<typeof ShareLinkCreateResponseSchema>;
+export type ShareLinkListResponse = z.infer<typeof ShareLinkListResponseSchema>;
+export type ShareLinkRevokeResponse = z.infer<typeof ShareLinkRevokeResponseSchema>;

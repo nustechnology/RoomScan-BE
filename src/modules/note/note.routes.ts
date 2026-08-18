@@ -94,6 +94,7 @@ export function createNoteRouter({
             : undefined,
         );
         const input = {
+          title: body.title,
           content: body.content,
           color: body.color,
           position: body.position,
@@ -173,6 +174,9 @@ export function createNoteRouter({
         const expectedRevision = parseIfMatch(
           typeof request.headers['if-match'] === 'string' ? request.headers['if-match'] : undefined,
         );
+        if (body.title !== undefined) {
+          data.title = body.title;
+        }
         if (body.content !== undefined) {
           data.content = body.content;
         }

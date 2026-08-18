@@ -4,6 +4,7 @@ import type { StorageAdapter } from '../src/infrastructure/storage/storage.types
 import { ProjectPermissionService } from '../src/modules/project/project.permissions.js';
 import { ScanNotFoundError } from '../src/modules/scan/scan.errors.js';
 import type { ScanRepository } from '../src/modules/scan/scan.types.js';
+import { ScanPermissionService } from '../src/modules/scan/scan.permissions.js';
 import {
   AssetNotReadyError,
   AssetUploadFailedError,
@@ -84,6 +85,14 @@ function createHarness(options: { managesSyncRollups?: boolean } = {}) {
   const permissions = new ProjectPermissionService({
     findAccessRole,
   } as unknown as ProjectRepository);
+  const scanFindAccessRole = vi
+    .fn<ScanRepository['findAccessRole']>()
+    .mockImplementation(async (_scanId, userId) =>
+      Promise.resolve(userId === OWNER_ID ? 'OWNER' : userId === VIEWER_ID ? 'VIEWER' : null),
+    );
+  const scanPermissions = new ScanPermissionService({
+    findAccessRole: scanFindAccessRole,
+  } as unknown as ScanRepository);
 
   const buildObjectKey = vi
     .fn<StorageAdapter['buildObjectKey']>()
@@ -111,6 +120,7 @@ function createHarness(options: { managesSyncRollups?: boolean } = {}) {
     repository: assetRepository,
     scanRepository,
     permissions,
+    scanPermissions,
     storage,
     clock: () => NOW,
     uploadUrlTtlSeconds: 900,
@@ -130,6 +140,7 @@ function createHarness(options: { managesSyncRollups?: boolean } = {}) {
     update,
     listByScan,
     findAccessRole,
+    scanFindAccessRole,
     createUploadUrl,
     createDownloadUrl,
     verifyObject,
@@ -480,9 +491,9 @@ describe('ScanAssetService', () => {
     );
   });
 
-  it('blocks a download URL for a scan with no project access', async () => {
-    const { service, findProjectId } = createHarness();
-    findProjectId.mockResolvedValueOnce(null);
+  it('blocks a download URL for a scan with no scan access', async () => {
+    const { service, scanFindAccessRole } = createHarness();
+    scanFindAccessRole.mockResolvedValueOnce(null);
 
     await expect(service.getDownloadUrl(VIEWER_ID, SCAN_ID, 'MODEL')).rejects.toBeInstanceOf(
       ScanNotFoundError,

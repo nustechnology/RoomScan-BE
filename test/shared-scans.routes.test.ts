@@ -13,17 +13,16 @@ import { ErrorResponseSchema } from '../src/common/schemas/error.js';
 import { TOKEN_ISSUER, TOKEN_AUDIENCE } from '../src/config/constants.js';
 import type { AppConfig } from '../src/config/env.js';
 import type { DatabaseHealth } from '../src/infrastructure/database/database.js';
-import { ProjectNotFoundError } from '../src/modules/project/project.errors.js';
+import { ScanNotFoundError } from '../src/modules/scan/scan.errors.js';
 import {
-  NotSharedProjectError,
-  SharedProjectNotInListError,
-} from '../src/modules/shared-projects/shared-projects.errors.js';
+  NotSharedScanError,
+  SharedScanNotInListError,
+} from '../src/modules/shared-scans/shared-scans.errors.js';
 import {
-  SharedProjectListResponseSchema,
-  SharedProjectRemoveResponseSchema,
-  SharedProjectResponseSchema,
-} from '../src/modules/shared-projects/shared-projects.schemas.js';
-import type { SharedProjectsService } from '../src/modules/shared-projects/shared-projects.service.js';
+  SharedScanListResponseSchema,
+  SharedScanRemoveResponseSchema,
+  SharedScanResponseSchema,
+} from '../src/modules/shared-scans/shared-scans.schemas.js';
 import type { SharedScansService } from '../src/modules/shared-scans/shared-scans.service.js';
 import type { NoteService } from '../src/modules/note/note.service.js';
 import type { ProjectService } from '../src/modules/project/project.service.js';
@@ -31,11 +30,13 @@ import type { ScanService } from '../src/modules/scan/scan.service.js';
 import type { ScanAssetService } from '../src/modules/scan-asset/scan-asset.service.js';
 import type { ShareService } from '../src/modules/share/share.service.js';
 import type { ShareLinkService } from '../src/modules/share/share-link.service.js';
+import type { SharedProjectsService } from '../src/modules/shared-projects/shared-projects.service.js';
 
 const ACCESS_SECRET = 'access-secret-that-is-at-least-32-characters';
 const USER_VIEWER = 'f1a2b3c4-d5e6-7890-abcd-ef1234567890';
 const USER_OWNER = 'eb5d278f-c857-45c7-887d-7be65288cb75';
-const PROJECT_ID = 'a1b2c3d4-e5f6-4890-abcd-ef1234567890';
+const SCAN_ID = 'a1b2c3d4-e5f6-4890-abcd-ef1234567890';
+const PROJECT_ID = '11111111-2222-4333-8444-555555555555';
 const NOW = new Date('2026-07-29T10:00:00.000Z');
 
 const config: AppConfig = {
@@ -91,7 +92,7 @@ async function signAccessToken(userId: string): Promise<string> {
     .sign(new TextEncoder().encode(ACCESS_SECRET));
 }
 
-describe('Shared With Me HTTP endpoints', () => {
+describe('Shared With Me scan HTTP endpoints', () => {
   const database: DatabaseHealth = {
     checkConnection: vi.fn(() => Promise.resolve()),
     disconnect: vi.fn(() => Promise.resolve()),
@@ -163,18 +164,18 @@ describe('Shared With Me HTTP endpoints', () => {
     listShareLinks: vi.fn(),
     revokeShareLink: vi.fn(),
   } as unknown as ShareLinkService;
-  const list = vi.fn<SharedProjectsService['list']>();
-  const detail = vi.fn<SharedProjectsService['detail']>();
-  const remove = vi.fn<SharedProjectsService['remove']>();
   const sharedProjectsService = {
-    list,
-    detail,
-    remove,
-  } as unknown as SharedProjectsService;
-  const sharedScansService = {
     list: vi.fn(),
     detail: vi.fn(),
     remove: vi.fn(),
+  } as unknown as SharedProjectsService;
+  const list = vi.fn<SharedScansService['list']>();
+  const detail = vi.fn<SharedScansService['detail']>();
+  const remove = vi.fn<SharedScansService['remove']>();
+  const sharedScansService = {
+    list,
+    detail,
+    remove,
   } as unknown as SharedScansService;
   const app = createApp({
     config,
@@ -206,55 +207,49 @@ describe('Shared With Me HTTP endpoints', () => {
     list.mockResolvedValue({
       items: [
         {
-          id: PROJECT_ID,
-          name: 'District 2 Apartment',
+          id: SCAN_ID,
+          projectId: PROJECT_ID,
+          name: 'Living Room Scan',
           description: null,
-          owner: { id: USER_OWNER, email: 'owner@example.com' },
-          scanCount: 2,
           thumbnail: null,
+          creator: { id: USER_OWNER, email: 'owner@example.com' },
+          noteCount: 2,
+          assetStatus: 'UPLOADED',
+          syncStatus: 'SYNCED',
+          modelVersion: 1,
           updatedAt: NOW.toISOString(),
           status: 'ACTIVE',
-          permissions: {
-            role: 'VIEWER',
-            canView: true,
-            canEdit: false,
-            canDelete: false,
-            canShare: false,
-            canCreateScan: false,
-          },
+          permissions: { role: 'VIEWER', canView: true, canEdit: false, canDelete: false },
         },
       ],
       pagination: { page: 1, limit: 5, total: 1, totalPages: 1 },
     });
     detail.mockResolvedValue({
-      id: PROJECT_ID,
-      name: 'District 2 Apartment',
+      id: SCAN_ID,
+      projectId: PROJECT_ID,
+      name: 'Living Room Scan',
       description: null,
-      owner: { id: USER_OWNER, email: 'owner@example.com' },
-      scanCount: 2,
       thumbnail: null,
+      creator: { id: USER_OWNER, email: 'owner@example.com' },
+      noteCount: 2,
+      assetStatus: 'UPLOADED',
+      syncStatus: 'SYNCED',
+      modelVersion: 1,
       updatedAt: NOW.toISOString(),
       status: 'ACTIVE',
-      permissions: {
-        role: 'VIEWER',
-        canView: true,
-        canEdit: false,
-        canDelete: false,
-        canShare: false,
-        canCreateScan: false,
-      },
+      permissions: { role: 'VIEWER', canView: true, canEdit: false, canDelete: false },
     });
-    remove.mockResolvedValue({ projectId: PROJECT_ID, removedAt: NOW.toISOString() });
+    remove.mockResolvedValue({ scanId: SCAN_ID, removedAt: NOW.toISOString() });
   });
 
-  describe('GET /api/v1/shared-projects', () => {
-    it('lists projects shared with the current user', async () => {
+  describe('GET /api/v1/shared-scans', () => {
+    it('lists scans shared with the current user', async () => {
       const response = await request(app)
-        .get('/api/v1/shared-projects')
+        .get('/api/v1/shared-scans')
         .set('Authorization', `Bearer ${viewerToken}`)
         .expect(200);
 
-      const body = SharedProjectListResponseSchema.parse(response.body as unknown);
+      const body = SharedScanListResponseSchema.parse(response.body as unknown);
       expect(body.items).toHaveLength(1);
       expect(body.items[0]?.status).toBe('ACTIVE');
       expect(body.items[0]?.permissions.role).toBe('VIEWER');
@@ -267,12 +262,12 @@ describe('Shared With Me HTTP endpoints', () => {
 
     it('forwards search and pagination query parameters', async () => {
       await request(app)
-        .get('/api/v1/shared-projects?search=garden&page=2&limit=10&sort=name:asc')
+        .get('/api/v1/shared-scans?search=living&page=2&limit=10&sort=name:asc')
         .set('Authorization', `Bearer ${viewerToken}`)
         .expect(200);
 
       expect(list).toHaveBeenCalledWith(USER_VIEWER, {
-        search: 'garden',
+        search: 'living',
         page: 2,
         limit: 10,
         sort: 'name:asc',
@@ -280,7 +275,7 @@ describe('Shared With Me HTTP endpoints', () => {
     });
 
     it('rejects an unauthenticated request with 401', async () => {
-      const response = await request(app).get('/api/v1/shared-projects').expect(401);
+      const response = await request(app).get('/api/v1/shared-scans').expect(401);
 
       expect(ErrorResponseSchema.parse(response.body as unknown).error.code).toBe('UNAUTHORIZED');
       expect(list).not.toHaveBeenCalled();
@@ -288,7 +283,7 @@ describe('Shared With Me HTTP endpoints', () => {
 
     it('rejects invalid query parameters with 400', async () => {
       const response = await request(app)
-        .get('/api/v1/shared-projects?limit=0&sort=unknown:desc')
+        .get('/api/v1/shared-scans?limit=0&sort=unknown:desc')
         .set('Authorization', `Bearer ${viewerToken}`)
         .expect(400);
 
@@ -299,42 +294,40 @@ describe('Shared With Me HTTP endpoints', () => {
     });
   });
 
-  describe('GET /api/v1/shared-projects/:projectId', () => {
-    it('returns an active shared project', async () => {
+  describe('GET /api/v1/shared-scans/:scanId', () => {
+    it('returns an active shared scan', async () => {
       const response = await request(app)
-        .get(`/api/v1/shared-projects/${PROJECT_ID}`)
+        .get(`/api/v1/shared-scans/${SCAN_ID}`)
         .set('Authorization', `Bearer ${viewerToken}`)
         .expect(200);
 
-      const body = SharedProjectResponseSchema.parse(response.body as unknown);
-      expect(body.id).toBe(PROJECT_ID);
+      const body = SharedScanResponseSchema.parse(response.body as unknown);
+      expect(body.id).toBe(SCAN_ID);
       expect(body.status).toBe('ACTIVE');
-      expect(detail).toHaveBeenCalledWith(USER_VIEWER, PROJECT_ID);
+      expect(detail).toHaveBeenCalledWith(USER_VIEWER, SCAN_ID);
     });
 
-    it('hides revoked, deleted, and no-access projects behind 404', async () => {
-      detail.mockRejectedValue(new ProjectNotFoundError());
+    it('hides revoked, deleted, and no-access scans behind 404', async () => {
+      detail.mockRejectedValue(new ScanNotFoundError());
 
       const response = await request(app)
-        .get(`/api/v1/shared-projects/${PROJECT_ID}`)
+        .get(`/api/v1/shared-scans/${SCAN_ID}`)
         .set('Authorization', `Bearer ${viewerToken}`)
         .expect(404);
 
-      expect(ErrorResponseSchema.parse(response.body as unknown).error.code).toBe(
-        'PROJECT_NOT_FOUND',
-      );
+      expect(ErrorResponseSchema.parse(response.body as unknown).error.code).toBe('SCAN_NOT_FOUND');
     });
 
     it('rejects an unauthenticated request with 401', async () => {
-      const response = await request(app).get(`/api/v1/shared-projects/${PROJECT_ID}`).expect(401);
+      const response = await request(app).get(`/api/v1/shared-scans/${SCAN_ID}`).expect(401);
 
       expect(ErrorResponseSchema.parse(response.body as unknown).error.code).toBe('UNAUTHORIZED');
       expect(detail).not.toHaveBeenCalled();
     });
 
-    it('rejects a malformed project id with 400', async () => {
+    it('rejects a malformed scan id with 400', async () => {
       const response = await request(app)
-        .get('/api/v1/shared-projects/not-a-uuid')
+        .get('/api/v1/shared-scans/not-a-uuid')
         .set('Authorization', `Bearer ${viewerToken}`)
         .expect(400);
 
@@ -345,36 +338,36 @@ describe('Shared With Me HTTP endpoints', () => {
     });
   });
 
-  describe('DELETE /api/v1/shared-projects/:projectId', () => {
-    it('removes a project from Shared With Me', async () => {
+  describe('DELETE /api/v1/shared-scans/:scanId', () => {
+    it('removes a scan from Shared With Me', async () => {
       const response = await request(app)
-        .delete(`/api/v1/shared-projects/${PROJECT_ID}`)
+        .delete(`/api/v1/shared-scans/${SCAN_ID}`)
         .set('Authorization', `Bearer ${viewerToken}`)
         .expect(200);
 
-      const body = SharedProjectRemoveResponseSchema.parse(response.body as unknown);
-      expect(body).toEqual({ projectId: PROJECT_ID, removedAt: NOW.toISOString() });
-      expect(remove).toHaveBeenCalledWith(USER_VIEWER, PROJECT_ID);
+      const body = SharedScanRemoveResponseSchema.parse(response.body as unknown);
+      expect(body).toEqual({ scanId: SCAN_ID, removedAt: NOW.toISOString() });
+      expect(remove).toHaveBeenCalledWith(USER_VIEWER, SCAN_ID);
     });
 
     it('rejects the owner with 403', async () => {
-      remove.mockRejectedValue(new NotSharedProjectError());
+      remove.mockRejectedValue(new NotSharedScanError());
 
       const response = await request(app)
-        .delete(`/api/v1/shared-projects/${PROJECT_ID}`)
+        .delete(`/api/v1/shared-scans/${SCAN_ID}`)
         .set('Authorization', `Bearer ${ownerToken}`)
         .expect(403);
 
       expect(ErrorResponseSchema.parse(response.body as unknown).error.code).toBe(
-        'NOT_SHARED_PROJECT',
+        'NOT_SHARED_SCAN',
       );
     });
 
-    it('rejects a project that is not in Shared With Me with 409', async () => {
-      remove.mockRejectedValue(new SharedProjectNotInListError());
+    it('rejects a scan that is not in Shared With Me with 409', async () => {
+      remove.mockRejectedValue(new SharedScanNotInListError());
 
       const response = await request(app)
-        .delete(`/api/v1/shared-projects/${PROJECT_ID}`)
+        .delete(`/api/v1/shared-scans/${SCAN_ID}`)
         .set('Authorization', `Bearer ${viewerToken}`)
         .expect(409);
 
@@ -384,27 +377,10 @@ describe('Shared With Me HTTP endpoints', () => {
     });
 
     it('rejects an unauthenticated request with 401', async () => {
-      const response = await request(app)
-        .delete(`/api/v1/shared-projects/${PROJECT_ID}`)
-        .expect(401);
+      const response = await request(app).delete(`/api/v1/shared-scans/${SCAN_ID}`).expect(401);
 
       expect(ErrorResponseSchema.parse(response.body as unknown).error.code).toBe('UNAUTHORIZED');
       expect(remove).not.toHaveBeenCalled();
-    });
-  });
-
-  describe('error envelope', () => {
-    it('returns a request ID with shared-projects errors', async () => {
-      remove.mockRejectedValue(new SharedProjectNotInListError());
-
-      const response = await request(app)
-        .delete(`/api/v1/shared-projects/${PROJECT_ID}`)
-        .set('Authorization', `Bearer ${viewerToken}`)
-        .expect(409);
-
-      const body = ErrorResponseSchema.parse(response.body as unknown);
-      expect(response.headers['x-request-id']).toEqual(expect.any(String));
-      expect(body.requestId).toBe(response.headers['x-request-id']);
     });
   });
 });

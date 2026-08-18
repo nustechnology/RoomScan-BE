@@ -61,6 +61,7 @@ const noteSelect = {
       email: true,
     },
   },
+  title: true,
   content: true,
   color: true,
   position: true,
@@ -80,6 +81,7 @@ type NoteRow = {
     id: string;
     email: string | null;
   };
+  title: string;
   content: string;
   color: NoteRecord['color'];
   position: Prisma.JsonValue;
@@ -97,6 +99,7 @@ function toNoteRecord(row: NoteRow): NoteRecord {
     scanId: row.scanId,
     createdById: row.createdById,
     creator: row.creator,
+    title: row.title,
     content: row.content,
     color: row.color,
     position: parseVector3(row.position),
@@ -113,6 +116,7 @@ function toOwnerResult(record: NoteRecord): NoteResult {
   return {
     id: record.id,
     scanId: record.scanId,
+    title: record.title,
     content: record.content,
     color: record.color,
     position: record.position,
@@ -150,21 +154,35 @@ function viewableNoteWhere(noteId: string, userId: string) {
     deletedAt: null,
     scan: {
       deletedAt: null,
-      project: {
-        deletedAt: null,
-        OR: [
-          { ownerId: userId },
-          {
-            accesses: {
-              some: {
-                userId,
-                role: PrismaProjectRole.VIEWER,
-                revokedAt: null,
+      OR: [
+        {
+          project: {
+            deletedAt: null,
+            OR: [
+              { ownerId: userId },
+              {
+                accesses: {
+                  some: {
+                    userId,
+                    role: PrismaProjectRole.VIEWER,
+                    revokedAt: null,
+                  },
+                },
               },
+            ],
+          },
+        },
+        {
+          project: { deletedAt: null },
+          accesses: {
+            some: {
+              userId,
+              role: PrismaProjectRole.VIEWER,
+              revokedAt: null,
             },
           },
-        ],
-      },
+        },
+      ],
     },
   };
 }
@@ -236,6 +254,7 @@ export class PrismaNoteRepository implements NoteRepository {
         data: {
           scanId,
           createdById,
+          title: data.title,
           content: data.content,
           color: data.color,
           position: data.position as unknown as Prisma.InputJsonValue,
@@ -270,6 +289,7 @@ export class PrismaNoteRepository implements NoteRepository {
         data: {
           scanId,
           createdById,
+          title: data.title,
           content: data.content,
           color: data.color,
           position: data.position as unknown as Prisma.InputJsonValue,

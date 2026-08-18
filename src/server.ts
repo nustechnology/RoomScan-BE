@@ -17,6 +17,7 @@ import { PrismaScanAssetRepository } from './infrastructure/database/prisma-scan
 import { PrismaNoteRepository } from './infrastructure/database/prisma-note-repository.js';
 import { PrismaShareRepository } from './infrastructure/database/prisma-share-repository.js';
 import { PrismaSharedProjectsRepository } from './infrastructure/database/prisma-shared-projects-repository.js';
+import { PrismaSharedScansRepository } from './infrastructure/database/prisma-shared-scans-repository.js';
 import { LocalStorageAdapter } from './infrastructure/storage/local-storage-adapter.js';
 import { MinioStorageAdapter } from './infrastructure/storage/minio-storage-adapter.js';
 import type { StorageAdapter } from './infrastructure/storage/storage.types.js';
@@ -31,10 +32,13 @@ import { AuthService, RefreshTokenService } from './modules/auth/auth.service.js
 import { ProjectPermissionService } from './modules/project/project.permissions.js';
 import { ProjectService } from './modules/project/project.service.js';
 import { ScanService } from './modules/scan/scan.service.js';
+import { ScanPermissionService } from './modules/scan/scan.permissions.js';
 import { ScanAssetService } from './modules/scan-asset/scan-asset.service.js';
 import { NoteService } from './modules/note/note.service.js';
 import { ShareService } from './modules/share/share.service.js';
+import { ShareLinkService } from './modules/share/share-link.service.js';
 import { SharedProjectsService } from './modules/shared-projects/shared-projects.service.js';
+import { SharedScansService } from './modules/shared-scans/shared-scans.service.js';
 import { SyncService } from './modules/sync/sync.service.js';
 
 const config = loadConfig();
@@ -54,6 +58,7 @@ const scanAssetRepository = new PrismaScanAssetRepository(prismaClient, idempote
 const noteRepository = new PrismaNoteRepository(prismaClient, idempotency);
 const shareRepository = new PrismaShareRepository(prismaClient, idempotency);
 const sharedProjectsRepository = new PrismaSharedProjectsRepository(prismaClient);
+const sharedScansRepository = new PrismaSharedScansRepository(prismaClient);
 const syncRepository = new PrismaSyncRepository(prismaClient);
 function createStorageAdapter(): StorageAdapter {
   if (config.storageProvider === 'minio') {
@@ -114,6 +119,7 @@ const refreshTokenService = new RefreshTokenService({
   tokenIssuer,
 });
 const projectPermissions = new ProjectPermissionService(projectRepository);
+const scanPermissions = new ScanPermissionService(scanRepository);
 const projectService = new ProjectService({
   repository: projectRepository,
   permissions: projectPermissions,
@@ -123,6 +129,7 @@ const scanAssetService = new ScanAssetService({
   repository: scanAssetRepository,
   scanRepository,
   permissions: projectPermissions,
+  scanPermissions,
   storage: storageAdapter,
   uploadUrlTtlSeconds: config.storageUploadUrlTtlSeconds,
   downloadUrlTtlSeconds: config.storageDownloadUrlTtlSeconds,
@@ -140,6 +147,7 @@ const scanService = new ScanService({
 const noteService = new NoteService({
   repository: noteRepository,
   permissions: projectPermissions,
+  scanPermissions,
   idempotency,
 });
 const shareService = new ShareService({
@@ -150,8 +158,16 @@ const shareService = new ShareService({
   invitationBaseUrl: config.invitationBaseUrl,
   idempotency,
 });
+const shareLinkService = new ShareLinkService({
+  repository: shareRepository,
+  invitationTtlSeconds: config.invitationTtlSeconds,
+  invitationBaseUrl: config.invitationBaseUrl,
+});
 const sharedProjectsService = new SharedProjectsService({
   repository: sharedProjectsRepository,
+});
+const sharedScansService = new SharedScansService({
+  repository: sharedScansRepository,
 });
 const syncService = new SyncService({ repository: syncRepository, crypto: syncCrypto });
 const rateLimiters = createRateLimiters(config, logger);
@@ -166,7 +182,9 @@ const app = createApp({
   scanAssetService,
   noteService,
   shareService,
+  shareLinkService,
   sharedProjectsService,
+  sharedScansService,
   syncService,
   accessTokenVerifier,
   currentUserRepository,

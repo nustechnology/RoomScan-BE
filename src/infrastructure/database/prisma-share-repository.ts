@@ -8,13 +8,22 @@ import type {
   IdempotencyContext,
   IdempotencyResult,
 } from '../../common/idempotency/idempotency.types.js';
-import { InvitationAlreadySentError } from '../../modules/share/share.errors.js';
+import {
+  InvitationAlreadySentError,
+  AccessAlreadyExistsError,
+} from '../../modules/share/share.errors.js';
 import type {
+  InvitationCreateData,
   InvitationRecord,
   InvitationCreateResult,
-  InvitationWithProject,
+  InvitationWithEntity,
+  ShareLinkCreateData,
+  ShareLinkRecord,
+  ShareLinkResourceData,
+  ShareLinkWithEntity,
   ShareProjectInfo,
   ShareRepository,
+  ShareScanInfo,
 } from '../../modules/share/share.types.js';
 import type { PrismaIdempotencyExecutor } from './prisma-idempotency.js';
 import {
@@ -27,6 +36,7 @@ import {
 const invitationSelect = {
   id: true,
   projectId: true,
+  scanId: true,
   createdById: true,
   recipientEmail: true,
   tokenHash: true,
@@ -43,7 +53,8 @@ const invitationSelect = {
 
 interface InvitationRow {
   id: string;
-  projectId: string;
+  projectId: string | null;
+  scanId: string | null;
   createdById: string;
   recipientEmail: string;
   tokenHash: string;
@@ -58,10 +69,35 @@ interface InvitationRow {
   updatedAt: Date;
 }
 
+const shareLinkSelect = {
+  id: true,
+  projectId: true,
+  scanId: true,
+  createdById: true,
+  tokenHash: true,
+  expiresAt: true,
+  revokedAt: true,
+  createdAt: true,
+  updatedAt: true,
+} as const;
+
+interface ShareLinkRow {
+  id: string;
+  projectId: string | null;
+  scanId: string | null;
+  createdById: string;
+  tokenHash: string;
+  expiresAt: Date;
+  revokedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 function toInvitationRecord(row: InvitationRow): InvitationRecord {
   return {
     id: row.id,
     projectId: row.projectId,
+    scanId: row.scanId,
     createdById: row.createdById,
     recipientEmail: row.recipientEmail,
     tokenHash: row.tokenHash,
@@ -77,9 +113,23 @@ function toInvitationRecord(row: InvitationRow): InvitationRecord {
   };
 }
 
+function toShareLinkRecord(row: ShareLinkRow): ShareLinkRecord {
+  return {
+    id: row.id,
+    projectId: row.projectId,
+    scanId: row.scanId,
+    createdById: row.createdById,
+    tokenHash: row.tokenHash,
+    expiresAt: row.expiresAt,
+    revokedAt: row.revokedAt,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
 type ShareClient = Pick<
   PrismaClient,
-  'invitation' | 'projectAccess' | 'project' | 'scan' | '$transaction'
+  'invitation' | 'projectAccess' | 'scanAccess' | 'shareLink' | 'project' | 'scan' | '$transaction'
 >;
 
 export class PrismaShareRepository implements ShareRepository {
@@ -136,18 +186,59 @@ export class PrismaShareRepository implements ShareRepository {
     return scan !== null;
   }
 
-  async createInvitation(data: {
-    projectId: string;
-    createdById: string;
-    recipientEmail: string;
-    tokenHash: string;
-    expiresAt: Date;
-    sentAt: Date;
-  }): Promise<InvitationRecord> {
+  async findScanInfo(scanId: string): Promise<ShareScanInfo | null> {
+    const scan = await this.#client.scan.findFirst({
+      where: { id: scanId, deletedAt: null, project: { deletedAt: null } },
+      select: {
+        name: true,
+        projectId: true,
+        project: {
+          select: {
+            ownerId: true,
+            owner: {
+              select: {
+                email: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (scan === null) {
+      return null;
+    }
+
+    return {
+      name: scan.name,
+      projectId: scan.projectId,
+      ownerId: scan.project.ownerId,
+      ownerEmail: scan.project.owner.email,
+    };
+  }
+
+  async hasUploadedScanModel(scanId: string): Promise<boolean> {
+    const scan = await this.#client.scan.findFirst({
+      where: {
+        id: scanId,
+        deletedAt: null,
+        assetStatus: AssetStatus.UPLOADED,
+      },
+      select: { id: true },
+    });
+    return scan !== null;
+  }
+
+  async createInvitation(data: InvitationCreateData): Promise<InvitationRecord> {
     return await this.#client.$transaction(async (transaction) => {
+      const scopeWhere =
+        data.projectId !== undefined
+          ? { projectId: data.projectId, scanId: null }
+          : { scanId: data.scanId, projectId: null };
+
       await transaction.invitation.updateMany({
         where: {
-          projectId: data.projectId,
+          ...scopeWhere,
           recipientEmail: data.recipientEmail,
           status: InvitationStatus.PENDING,
           expiresAt: { lte: data.sentAt },
@@ -161,7 +252,7 @@ export class PrismaShareRepository implements ShareRepository {
       try {
         const row = await transaction.invitation.create({
           data: {
-            projectId: data.projectId,
+            ...scopeWhere,
             createdById: data.createdById,
             recipientEmail: data.recipientEmail,
             tokenHash: data.tokenHash,
@@ -230,11 +321,14 @@ export class PrismaShareRepository implements ShareRepository {
     });
   }
 
-  async findByTokenHash(tokenHash: string): Promise<InvitationWithProject | null> {
+  async findByTokenHash(tokenHash: string): Promise<InvitationWithEntity | null> {
     const row = await this.#client.invitation.findFirst({
       where: {
         tokenHash,
-        project: { deletedAt: null },
+        OR: [
+          { projectId: { not: null }, project: { deletedAt: null } },
+          { scanId: { not: null }, scan: { deletedAt: null, project: { deletedAt: null } } },
+        ],
       },
       select: {
         ...invitationSelect,
@@ -251,6 +345,26 @@ export class PrismaShareRepository implements ShareRepository {
             },
           },
         },
+        scan: {
+          select: {
+            id: true,
+            projectId: true,
+            name: true,
+            description: true,
+            thumbnail: true,
+            creator: {
+              select: {
+                id: true,
+                email: true,
+              },
+            },
+            project: {
+              select: {
+                ownerId: true,
+              },
+            },
+          },
+        },
       },
     });
 
@@ -260,13 +374,28 @@ export class PrismaShareRepository implements ShareRepository {
 
     return {
       invitation: toInvitationRecord(row),
-      project: {
-        id: row.project.id,
-        name: row.project.name,
-        description: row.project.description,
-        thumbnail: null,
-        owner: row.project.owner,
-      },
+      project:
+        row.project === null
+          ? null
+          : {
+              id: row.project.id,
+              name: row.project.name,
+              description: row.project.description,
+              thumbnail: null,
+              owner: row.project.owner,
+            },
+      scan:
+        row.scan === null
+          ? null
+          : {
+              id: row.scan.id,
+              projectId: row.scan.projectId,
+              name: row.scan.name,
+              description: row.scan.description,
+              thumbnail: row.scan.thumbnail,
+              creator: row.scan.creator,
+              ownerId: row.scan.project.ownerId,
+            },
     };
   }
 
@@ -331,6 +460,57 @@ export class PrismaShareRepository implements ShareRepository {
         changedAt: acceptedAt,
       });
       await writeProjectBootstrap(transaction, projectId, userId, acceptedAt);
+
+      const row = await transaction.invitation.findUnique({
+        where: { id: invitationId },
+        select: invitationSelect,
+      });
+      return row === null ? null : toInvitationRecord(row);
+    });
+  }
+
+  async acceptScanInvitation(
+    invitationId: string,
+    scanId: string,
+    userId: string,
+    acceptedAt: Date,
+  ): Promise<InvitationRecord | null> {
+    return await this.#client.$transaction(async (transaction) => {
+      const updated = await transaction.invitation.updateMany({
+        where: {
+          id: invitationId,
+          scanId,
+          status: InvitationStatus.PENDING,
+          expiresAt: { gt: acceptedAt },
+        },
+        data: {
+          status: InvitationStatus.ACCEPTED,
+          acceptedAt,
+          acceptedByUserId: userId,
+        },
+      });
+
+      if (updated.count === 0) {
+        return null;
+      }
+
+      await transaction.scanAccess.upsert({
+        where: { scanId_userId: { scanId, userId } },
+        create: {
+          scanId,
+          userId,
+          role: PrismaProjectRole.VIEWER,
+          invitationId,
+          acceptedAt,
+          revokedAt: null,
+        },
+        update: {
+          role: PrismaProjectRole.VIEWER,
+          invitationId,
+          acceptedAt,
+          revokedAt: null,
+        },
+      });
 
       const row = await transaction.invitation.findUnique({
         where: { id: invitationId },
@@ -416,9 +596,25 @@ export class PrismaShareRepository implements ShareRepository {
     return rows.map(toInvitationRecord);
   }
 
+  async listPendingByScan(scanId: string): Promise<InvitationRecord[]> {
+    const rows = await this.#client.invitation.findMany({
+      where: { scanId, status: InvitationStatus.PENDING },
+      orderBy: [{ sentAt: 'desc' }, { id: 'desc' }],
+      select: invitationSelect,
+    });
+    return rows.map(toInvitationRecord);
+  }
+
   async findActiveViewerAccess(projectId: string, userId: string): Promise<{ id: string } | null> {
     return await this.#client.projectAccess.findFirst({
       where: { projectId, userId, revokedAt: null },
+      select: { id: true },
+    });
+  }
+
+  async findActiveScanAccess(scanId: string, userId: string): Promise<{ id: string } | null> {
+    return await this.#client.scanAccess.findFirst({
+      where: { scanId, userId, revokedAt: null },
       select: { id: true },
     });
   }
@@ -451,6 +647,34 @@ export class PrismaShareRepository implements ShareRepository {
     return rows.map((row) => ({
       userId: row.userId,
       revision: row.revision,
+      user: row.user,
+      grantedAt: row.acceptedAt ?? row.createdAt,
+    }));
+  }
+
+  async listActiveScanViewers(
+    scanId: string,
+  ): Promise<
+    Array<{ userId: string; user: { id: string; email: string | null }; grantedAt: Date }>
+  > {
+    const rows = await this.#client.scanAccess.findMany({
+      where: { scanId, role: PrismaProjectRole.VIEWER, revokedAt: null },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      select: {
+        userId: true,
+        acceptedAt: true,
+        createdAt: true,
+        user: {
+          select: {
+            id: true,
+            email: true,
+          },
+        },
+      },
+    });
+
+    return rows.map((row) => ({
+      userId: row.userId,
       user: row.user,
       grantedAt: row.acceptedAt ?? row.createdAt,
     }));
@@ -509,5 +733,230 @@ export class PrismaShareRepository implements ShareRepository {
       await refreshProjectRollup(transaction, projectId, revokedAt);
       return { revokedAt, revision: access.revision + 1 };
     });
+  }
+
+  async revokeScanViewerAccess(
+    scanId: string,
+    userId: string,
+    revokedAt: Date,
+  ): Promise<{ revokedAt: Date } | null> {
+    const access = await this.#client.scanAccess.findUnique({
+      where: { scanId_userId: { scanId, userId } },
+      select: { id: true, revokedAt: true },
+    });
+
+    if (access === null) {
+      return null;
+    }
+    if (access.revokedAt !== null) {
+      return { revokedAt: access.revokedAt };
+    }
+
+    const updated = await this.#client.scanAccess.update({
+      where: { id: access.id },
+      data: { revokedAt },
+      select: { revokedAt: true },
+    });
+    return { revokedAt: updated.revokedAt as Date };
+  }
+
+  async createShareLink(data: ShareLinkCreateData): Promise<ShareLinkRecord> {
+    const row = await this.#client.shareLink.create({
+      data: {
+        createdById: data.createdById,
+        tokenHash: data.tokenHash,
+        expiresAt: data.expiresAt,
+        ...(data.projectId !== undefined ? { projectId: data.projectId } : { scanId: data.scanId }),
+      },
+      select: shareLinkSelect,
+    });
+    return toShareLinkRecord(row);
+  }
+
+  async findShareLinkByTokenHash(tokenHash: string): Promise<ShareLinkWithEntity | null> {
+    const row = await this.#client.shareLink.findFirst({
+      where: {
+        tokenHash,
+        OR: [
+          { projectId: { not: null }, project: { deletedAt: null } },
+          { scanId: { not: null }, scan: { deletedAt: null, project: { deletedAt: null } } },
+        ],
+      },
+      select: {
+        ...shareLinkSelect,
+        project: {
+          select: {
+            id: true,
+            name: true,
+            description: true,
+            owner: {
+              select: {
+                id: true,
+                email: true,
+              },
+            },
+          },
+        },
+        scan: {
+          select: {
+            id: true,
+            projectId: true,
+            name: true,
+            description: true,
+            thumbnail: true,
+            creator: {
+              select: {
+                id: true,
+                email: true,
+              },
+            },
+            project: {
+              select: {
+                ownerId: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (row === null) {
+      return null;
+    }
+
+    return {
+      shareLink: toShareLinkRecord(row),
+      project:
+        row.project === null
+          ? null
+          : {
+              id: row.project.id,
+              name: row.project.name,
+              description: row.project.description,
+              thumbnail: null,
+              owner: row.project.owner,
+            },
+      scan:
+        row.scan === null
+          ? null
+          : {
+              id: row.scan.id,
+              projectId: row.scan.projectId,
+              name: row.scan.name,
+              description: row.scan.description,
+              thumbnail: row.scan.thumbnail,
+              creator: row.scan.creator,
+              ownerId: row.scan.project.ownerId,
+            },
+    };
+  }
+
+  async findShareLinkById(id: string): Promise<ShareLinkRecord | null> {
+    const row = await this.#client.shareLink.findUnique({
+      where: { id },
+      select: shareLinkSelect,
+    });
+    return row === null ? null : toShareLinkRecord(row);
+  }
+
+  async listShareLinksByResource(data: ShareLinkResourceData): Promise<ShareLinkRecord[]> {
+    const rows = await this.#client.shareLink.findMany({
+      where: {
+        revokedAt: null,
+        ...(data.projectId !== undefined
+          ? { projectId: data.projectId, scanId: null }
+          : { scanId: data.scanId, projectId: null }),
+      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      select: shareLinkSelect,
+    });
+    return rows.map(toShareLinkRecord);
+  }
+
+  async revokeShareLink(id: string, revokedAt: Date): Promise<ShareLinkRecord | null> {
+    const updated = await this.#client.shareLink.updateMany({
+      where: { id, revokedAt: null },
+      data: { revokedAt },
+    });
+
+    if (updated.count === 0) {
+      return null;
+    }
+
+    const row = await this.#client.shareLink.findUnique({
+      where: { id },
+      select: shareLinkSelect,
+    });
+    return row === null ? null : toShareLinkRecord(row);
+  }
+
+  async grantProjectAccess(
+    projectId: string,
+    userId: string,
+    shareLinkId: string,
+    acceptedAt: Date,
+  ): Promise<{ id: string }> {
+    const existingRevoked = await this.#client.projectAccess.findFirst({
+      where: { projectId, userId, revokedAt: { not: null } },
+      select: { id: true },
+    });
+
+    if (existingRevoked !== null) {
+      throw new AccessAlreadyExistsError();
+    }
+
+    const access = await this.#client.projectAccess.upsert({
+      where: { projectId_userId: { projectId, userId } },
+      create: {
+        projectId,
+        userId,
+        role: PrismaProjectRole.VIEWER,
+        shareLinkId,
+        acceptedAt,
+        revokedAt: null,
+      },
+      update: {
+        role: PrismaProjectRole.VIEWER,
+        shareLinkId,
+        acceptedAt,
+      },
+      select: { id: true },
+    });
+    return { id: access.id };
+  }
+
+  async grantScanAccess(
+    scanId: string,
+    userId: string,
+    shareLinkId: string,
+    acceptedAt: Date,
+  ): Promise<{ id: string }> {
+    const existingRevoked = await this.#client.scanAccess.findFirst({
+      where: { scanId, userId, revokedAt: { not: null } },
+      select: { id: true },
+    });
+
+    if (existingRevoked !== null) {
+      throw new AccessAlreadyExistsError();
+    }
+
+    const access = await this.#client.scanAccess.upsert({
+      where: { scanId_userId: { scanId, userId } },
+      create: {
+        scanId,
+        userId,
+        role: PrismaProjectRole.VIEWER,
+        shareLinkId,
+        acceptedAt,
+        revokedAt: null,
+      },
+      update: {
+        role: PrismaProjectRole.VIEWER,
+        shareLinkId,
+        acceptedAt,
+      },
+      select: { id: true },
+    });
+    return { id: access.id };
   }
 }

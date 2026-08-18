@@ -3,6 +3,7 @@ import { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
 import { ErrorResponseSchema } from '../../common/schemas/error.js';
 import { IdempotencyKeyHeaderSchema } from '../../common/schemas/sync-headers.js';
 import { ProjectIdParamSchema } from '../project/project.schemas.js';
+import { ScanIdParamSchema } from '../scan/scan.schemas.js';
 import {
   InvitationAcceptResponseSchema,
   InvitationCreateBodySchema,
@@ -13,6 +14,14 @@ import {
   InvitationResendResponseSchema,
   InvitationRevokeResponseSchema,
   InvitationTokenParamSchema,
+  ScanShareRevokeParamsSchema,
+  ScanSharesListResponseSchema,
+  ScanViewerRevokeResponseSchema,
+  ProjectShareLinkIdParamSchema,
+  ScanShareLinkIdParamSchema,
+  ShareLinkCreateResponseSchema,
+  ShareLinkListResponseSchema,
+  ShareLinkRevokeResponseSchema,
   SharesListResponseSchema,
   ShareRevokeParamsSchema,
   ViewerRevokeResponseSchema,
@@ -58,9 +67,29 @@ const sharesListResponse = shareOpenApiRegistry.register(
   'SharesListResponse',
   SharesListResponseSchema,
 );
+const scanSharesListResponse = shareOpenApiRegistry.register(
+  'ScanSharesListResponse',
+  ScanSharesListResponseSchema,
+);
 const viewerRevokeResponse = shareOpenApiRegistry.register(
   'ViewerRevokeResponse',
   ViewerRevokeResponseSchema,
+);
+const scanViewerRevokeResponse = shareOpenApiRegistry.register(
+  'ScanViewerRevokeResponse',
+  ScanViewerRevokeResponseSchema,
+);
+const shareLinkCreateResponse = shareOpenApiRegistry.register(
+  'ShareLinkCreateResponse',
+  ShareLinkCreateResponseSchema,
+);
+const shareLinkListResponse = shareOpenApiRegistry.register(
+  'ShareLinkListResponse',
+  ShareLinkListResponseSchema,
+);
+const shareLinkRevokeResponse = shareOpenApiRegistry.register(
+  'ShareLinkRevokeResponse',
+  ShareLinkRevokeResponseSchema,
 );
 const errorResponse = shareOpenApiRegistry.register('ShareErrorResponse', ErrorResponseSchema);
 
@@ -108,7 +137,8 @@ const errorResponses = {
     },
   },
   404: {
-    description: 'The project, invitation, or viewer access is missing, deleted, or inaccessible',
+    description:
+      'The project, scan, invitation, share link, or viewer access is missing, deleted, or inaccessible',
     headers: rateLimitHeaders,
     content: {
       'application/json': {
@@ -118,7 +148,7 @@ const errorResponses = {
   },
   409: {
     description:
-      'The invitation or access state is final: already sent to this email, already accepted, expired, revoked, declined, already has access, or the project is not shareable',
+      'The invitation, share link, or access state is final: already sent to this email, already accepted, expired, revoked, declined, already has access, or the resource is not shareable',
     headers: rateLimitHeaders,
     content: {
       'application/json': {
@@ -218,16 +248,16 @@ shareOpenApiRegistry.registerPath({
   method: 'get',
   path: '/api/v1/invitations/{token}',
   tags: ['Shares'],
-  summary: 'Preview an invitation',
+  summary: 'Preview an invitation or share link',
   description:
-    'No authentication is required. When a valid Bearer token is supplied, the response includes whether the current user already has access.',
+    'No authentication is required. Resolves either an invitation or a generic share link for a project or scan. When a valid Bearer token is supplied, the response includes whether the current user already has access.',
   security: [{ [bearerAuth.name]: [] }, {}],
   request: {
     params: InvitationTokenParamSchema,
   },
   responses: {
     200: {
-      description: 'The invitation and a safe project summary',
+      description: 'The invitation or share link and a safe entity summary',
       headers: rateLimitHeaders,
       content: {
         'application/json': {
@@ -246,14 +276,14 @@ shareOpenApiRegistry.registerPath({
   method: 'post',
   path: '/api/v1/invitations/{token}/accept',
   tags: ['Shares'],
-  summary: 'Accept an invitation and gain Viewer access',
+  summary: 'Accept an invitation or share link and gain Viewer access',
   security: [{ [bearerAuth.name]: [] }],
   request: {
     params: InvitationTokenParamSchema,
   },
   responses: {
     200: {
-      description: 'The invitation was accepted and Viewer access is active',
+      description: 'The token was accepted and Viewer access is active',
       headers: rateLimitHeaders,
       content: {
         'application/json': {
@@ -350,6 +380,227 @@ shareOpenApiRegistry.registerPath({
       content: {
         'application/json': {
           schema: viewerRevokeResponse,
+        },
+      },
+    },
+    ...errorResponses,
+  },
+});
+
+shareOpenApiRegistry.registerPath({
+  method: 'post',
+  path: '/api/v1/scans/{scanId}/invitations',
+  tags: ['Shares'],
+  summary: 'Create a scan-scope invitation link',
+  description:
+    'Owner only. The scan must have an uploaded model before it can be shared. Sends the invitation email to the recipient.',
+  security: [{ [bearerAuth.name]: [] }],
+  request: {
+    params: ScanIdParamSchema,
+    body: {
+      required: true,
+      content: {
+        'application/json': {
+          schema: invitationCreateBody,
+        },
+      },
+    },
+  },
+  responses: {
+    201: {
+      description: 'The scan invitation link was created and the email queued',
+      headers: rateLimitHeaders,
+      content: {
+        'application/json': {
+          schema: invitationCreateResponse,
+        },
+      },
+    },
+    ...errorResponses,
+  },
+});
+
+shareOpenApiRegistry.registerPath({
+  method: 'get',
+  path: '/api/v1/scans/{scanId}/shares',
+  tags: ['Shares'],
+  summary: 'List scan-scope pending invitations and accepted Viewers',
+  security: [{ [bearerAuth.name]: [] }],
+  request: {
+    params: ScanIdParamSchema,
+  },
+  responses: {
+    200: {
+      description: 'The pending scan invitations and active scan Viewers',
+      headers: rateLimitHeaders,
+      content: {
+        'application/json': {
+          schema: scanSharesListResponse,
+        },
+      },
+    },
+    ...errorResponses,
+  },
+});
+
+shareOpenApiRegistry.registerPath({
+  method: 'delete',
+  path: '/api/v1/scans/{scanId}/shares/{userId}',
+  tags: ['Shares'],
+  summary: 'Revoke scan Viewer access for a user',
+  security: [{ [bearerAuth.name]: [] }],
+  request: {
+    params: ScanShareRevokeParamsSchema,
+  },
+  responses: {
+    200: {
+      description: 'The scan Viewer access was revoked',
+      headers: rateLimitHeaders,
+      content: {
+        'application/json': {
+          schema: scanViewerRevokeResponse,
+        },
+      },
+    },
+    ...errorResponses,
+  },
+});
+
+shareOpenApiRegistry.registerPath({
+  method: 'post',
+  path: '/api/v1/projects/{projectId}/share-links',
+  tags: ['Shares'],
+  summary: 'Create a generic project share link',
+  description:
+    'Owner only. The project must have at least one scan with an uploaded model. Creates a reusable link without sending an email.',
+  security: [{ [bearerAuth.name]: [] }],
+  request: {
+    params: ProjectIdParamSchema,
+  },
+  responses: {
+    201: {
+      description: 'The project share link was created',
+      headers: rateLimitHeaders,
+      content: {
+        'application/json': {
+          schema: shareLinkCreateResponse,
+        },
+      },
+    },
+    ...errorResponses,
+  },
+});
+
+shareOpenApiRegistry.registerPath({
+  method: 'get',
+  path: '/api/v1/projects/{projectId}/share-links',
+  tags: ['Shares'],
+  summary: 'List active project share links',
+  security: [{ [bearerAuth.name]: [] }],
+  request: {
+    params: ProjectIdParamSchema,
+  },
+  responses: {
+    200: {
+      description: 'The active project share links',
+      headers: rateLimitHeaders,
+      content: {
+        'application/json': {
+          schema: shareLinkListResponse,
+        },
+      },
+    },
+    ...errorResponses,
+  },
+});
+
+shareOpenApiRegistry.registerPath({
+  method: 'delete',
+  path: '/api/v1/projects/{projectId}/share-links/{shareLinkId}',
+  tags: ['Shares'],
+  summary: 'Revoke a project share link',
+  security: [{ [bearerAuth.name]: [] }],
+  request: {
+    params: ProjectShareLinkIdParamSchema,
+  },
+  responses: {
+    200: {
+      description: 'The project share link was revoked',
+      headers: rateLimitHeaders,
+      content: {
+        'application/json': {
+          schema: shareLinkRevokeResponse,
+        },
+      },
+    },
+    ...errorResponses,
+  },
+});
+
+shareOpenApiRegistry.registerPath({
+  method: 'post',
+  path: '/api/v1/scans/{scanId}/share-links',
+  tags: ['Shares'],
+  summary: 'Create a generic scan share link',
+  description:
+    'Owner only. The scan must have an uploaded model. Creates a reusable link without sending an email.',
+  security: [{ [bearerAuth.name]: [] }],
+  request: {
+    params: ScanIdParamSchema,
+  },
+  responses: {
+    201: {
+      description: 'The scan share link was created',
+      headers: rateLimitHeaders,
+      content: {
+        'application/json': {
+          schema: shareLinkCreateResponse,
+        },
+      },
+    },
+    ...errorResponses,
+  },
+});
+
+shareOpenApiRegistry.registerPath({
+  method: 'get',
+  path: '/api/v1/scans/{scanId}/share-links',
+  tags: ['Shares'],
+  summary: 'List active scan share links',
+  security: [{ [bearerAuth.name]: [] }],
+  request: {
+    params: ScanIdParamSchema,
+  },
+  responses: {
+    200: {
+      description: 'The active scan share links',
+      headers: rateLimitHeaders,
+      content: {
+        'application/json': {
+          schema: shareLinkListResponse,
+        },
+      },
+    },
+    ...errorResponses,
+  },
+});
+
+shareOpenApiRegistry.registerPath({
+  method: 'delete',
+  path: '/api/v1/scans/{scanId}/share-links/{shareLinkId}',
+  tags: ['Shares'],
+  summary: 'Revoke a scan share link',
+  security: [{ [bearerAuth.name]: [] }],
+  request: {
+    params: ScanShareLinkIdParamSchema,
+  },
+  responses: {
+    200: {
+      description: 'The scan share link was revoked',
+      headers: rateLimitHeaders,
+      content: {
+        'application/json': {
+          schema: shareLinkRevokeResponse,
         },
       },
     },

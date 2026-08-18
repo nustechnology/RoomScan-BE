@@ -7,6 +7,7 @@ import {
   LOCAL_TEST_NOTES,
   LOCAL_TEST_PROJECT_ID,
   LOCAL_TEST_PROJECTS,
+  LOCAL_TEST_SCAN_ACCESSES,
   LOCAL_TEST_SHARED_PROJECTS,
   seedLocalTestProject,
 } from '../src/infrastructure/database/local-test-project-seed.js';
@@ -19,6 +20,7 @@ describe('seedLocalTestProject', () => {
     const scanAssetUpsert = vi.fn().mockResolvedValue({});
     const noteUpsert = vi.fn().mockResolvedValue({});
     const projectAccessUpsert = vi.fn().mockResolvedValue({});
+    const scanAccessUpsert = vi.fn().mockResolvedValue({});
     const invitationUpsert = vi.fn().mockResolvedValue({});
     const transaction = vi.fn(async (operation: unknown) => {
       return (
@@ -28,6 +30,7 @@ describe('seedLocalTestProject', () => {
           scanAsset: { upsert: typeof scanAssetUpsert };
           note: { upsert: typeof noteUpsert };
           projectAccess: { upsert: typeof projectAccessUpsert };
+          scanAccess: { upsert: typeof scanAccessUpsert };
           invitation: { upsert: typeof invitationUpsert };
         }) => Promise<unknown>
       )({
@@ -36,6 +39,7 @@ describe('seedLocalTestProject', () => {
         scanAsset: { upsert: scanAssetUpsert },
         note: { upsert: noteUpsert },
         projectAccess: { upsert: projectAccessUpsert },
+        scanAccess: { upsert: scanAccessUpsert },
         invitation: { upsert: invitationUpsert },
       });
     });
@@ -157,6 +161,7 @@ describe('seedLocalTestProject', () => {
           id: note.id,
           scanId: note.scanId,
           createdById: LOCAL_TEST_USER_ID,
+          title: note.title,
           content: note.content,
           color: note.color,
           position: note.position,
@@ -165,6 +170,7 @@ describe('seedLocalTestProject', () => {
         },
         update: {
           scanId: note.scanId,
+          title: note.title,
           content: note.content,
           color: note.color,
           position: note.position,
@@ -238,6 +244,37 @@ describe('seedLocalTestProject', () => {
       revokedAt: null,
     });
     expect(viewerAccessCreate?.acceptedAt).toBeInstanceOf(Date);
+
+    expect(scanAccessUpsert).toHaveBeenCalledTimes(LOCAL_TEST_SCAN_ACCESSES.length);
+    const scanAccessCalls = scanAccessUpsert.mock.calls as unknown as Array<
+      [
+        {
+          where: { scanId_userId: { scanId: string; userId: string } };
+          create: {
+            scanId: string;
+            userId: string;
+            role: string;
+            acceptedAt: Date;
+            revokedAt: Date | null;
+          };
+        },
+      ]
+    >;
+    LOCAL_TEST_SCAN_ACCESSES.forEach((scanAccess, index) => {
+      const accessCreate = scanAccessCalls[index]?.[0]?.create;
+      expect(accessCreate).toBeDefined();
+      expect(accessCreate).toMatchObject({
+        scanId: scanAccess.scanId,
+        userId: LOCAL_TEST_USER_ID,
+        role: 'VIEWER',
+        revokedAt: scanAccess.accessRevokedAt,
+      });
+      expect(accessCreate?.acceptedAt).toBeInstanceOf(Date);
+      expect(scanAccessCalls[index]?.[0]?.where.scanId_userId).toMatchObject({
+        scanId: scanAccess.scanId,
+        userId: LOCAL_TEST_USER_ID,
+      });
+    });
 
     expect(invitationUpsert).toHaveBeenCalledWith(
       expect.objectContaining({
