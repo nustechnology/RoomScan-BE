@@ -558,7 +558,7 @@ inaccessible scans, projects, and notes are hidden behind `404`.
 | `POST`   | `/api/v1/scans/:scanId/notes`    | Create a note on a scan; Owner only; return `201`        |
 | `GET`    | `/api/v1/scans/:scanId/notes`    | List notes for a scan; Owner or active Viewer; paginated |
 | `GET`    | `/api/v1/notes/:noteId`          | Get note detail; Owner or active Viewer                  |
-| `PATCH`  | `/api/v1/notes/:noteId`          | Update note content or color; Owner only                 |
+| `PATCH`  | `/api/v1/notes/:noteId`          | Update note title, content, or color; Owner only         |
 | `PATCH`  | `/api/v1/notes/:noteId/position` | Move a note to a new 3D position; Owner only             |
 | `DELETE` | `/api/v1/notes/:noteId`          | Delete a note; Owner only; return `204`                  |
 
@@ -568,6 +568,7 @@ Note response:
 {
   "id": "b1a2c3d4-e5f6-4890-abcd-ef1234567890",
   "scanId": "f1e2d3c4-a5b6-7890-abcd-ef1234567890",
+  "title": "Cabinet hinge",
   "content": "Cabinet hinge is loose",
   "color": "YELLOW",
   "position": { "x": 1.5, "y": -2, "z": 3.25 },
@@ -602,9 +603,12 @@ tie-breaker.
 Validation rules:
 
 - `scanId` and `noteId`: UUID.
+- `title` on create: required, trimmed Unicode string, 1–50 characters, not
+  whitespace-only; on update it is optional with the same bounds.
 - `content` on create: required, trimmed Unicode string, 1–2000 characters, not
   whitespace-only; on update it is optional with the same bounds.
-- `color`: one of `YELLOW`, `RED`, `BLUE`, `GREEN`, `ORANGE`, `PURPLE`.
+- `color`: one of `YELLOW`, `RED`, `BLUE`, `GREEN`, `ORANGE`, `PURPLE`, `CYAN`,
+  `GRAY`.
 - `position`: object with numeric `x`, `y`, and `z`.
 - `orientation`: optional nullable object with numeric `x`, `y`, and `z`.
 - `modelVersion` on create and on move: required string, 1–64 characters, and

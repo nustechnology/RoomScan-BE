@@ -1,6 +1,15 @@
 import { z } from '../../openapi/zod.js';
 
-export const NoteColorSchema = z.enum(['YELLOW', 'RED', 'BLUE', 'GREEN', 'ORANGE', 'PURPLE']);
+export const NoteColorSchema = z.enum([
+  'YELLOW',
+  'RED',
+  'BLUE',
+  'GREEN',
+  'ORANGE',
+  'PURPLE',
+  'CYAN',
+  'GRAY',
+]);
 
 export const Vector3Schema = z.object({
   x: z.number(),
@@ -18,6 +27,7 @@ export const NotePermissionsSchema = z.object({
 export const NoteResponseSchema = z.object({
   id: z.uuid(),
   scanId: z.uuid(),
+  title: z.string(),
   content: z.string(),
   color: NoteColorSchema,
   position: Vector3Schema,
@@ -44,6 +54,7 @@ export const NoteListResponseSchema = z.object({
 
 export const CreateNoteBodySchema = z
   .object({
+    title: z.string().trim().min(1).max(50),
     content: z.string().trim().min(1).max(2000),
     color: NoteColorSchema,
     position: Vector3Schema,
@@ -54,13 +65,17 @@ export const CreateNoteBodySchema = z
 
 export const UpdateNoteBodySchema = z
   .object({
+    title: z.string().trim().min(1).max(50).optional(),
     content: z.string().trim().min(1).max(2000).optional(),
     color: NoteColorSchema.optional(),
   })
   .strict()
-  .refine((data) => data.content !== undefined || data.color !== undefined, {
-    message: 'At least one field must be provided',
-  });
+  .refine(
+    (data) => data.title !== undefined || data.content !== undefined || data.color !== undefined,
+    {
+      message: 'At least one field must be provided',
+    },
+  );
 
 export const MoveNoteBodySchema = z
   .object({

@@ -149,6 +149,7 @@ describe('seedLocalTestProject', () => {
           id: note.id,
           scanId: note.scanId,
           createdById: LOCAL_TEST_USER_ID,
+          title: note.title,
           content: note.content,
           color: note.color,
           position: note.position,
@@ -157,6 +158,7 @@ describe('seedLocalTestProject', () => {
         },
         update: {
           scanId: note.scanId,
+          title: note.title,
           content: note.content,
           color: note.color,
           position: note.position,

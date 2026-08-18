@@ -191,6 +191,7 @@ export const LOCAL_TEST_NOTES = [
   {
     id: '00000000-0000-4000-8000-000000000301',
     scanId: '00000000-0000-4000-8000-000000000201',
+    title: 'Cabinet hinge',
     content: 'Cabinet hinge on the island is loose',
     color: 'YELLOW',
     position: { x: 1.25, y: -0.5, z: 0.75 },
@@ -200,6 +201,7 @@ export const LOCAL_TEST_NOTES = [
   {
     id: '00000000-0000-4000-8000-000000000302',
     scanId: '00000000-0000-4000-8000-000000000201',
+    title: 'Recessed downlights',
     content: 'Replace the recessed downlights',
     color: 'BLUE',
     position: { x: 2.0, y: 1.5, z: 2.4 },
@@ -209,6 +211,7 @@ export const LOCAL_TEST_NOTES = [
   {
     id: '00000000-0000-4000-8000-000000000303',
     scanId: '00000000-0000-4000-8000-000000000202',
+    title: 'Window handle',
     content: 'Window handle needs tightening',
     color: 'RED',
     position: { x: -1.1, y: 0.2, z: 1.3 },
@@ -218,6 +221,7 @@ export const LOCAL_TEST_NOTES = [
   {
     id: '00000000-0000-4000-8000-000000000304',
     scanId: '00000000-0000-4000-8000-000000000203',
+    title: 'Countertop outlet',
     content: 'Consider an extra countertop outlet',
     color: 'ORANGE',
     position: { x: 0.4, y: -0.3, z: 0.9 },
@@ -281,6 +285,7 @@ export async function seedLocalTestProject(client: SeedClient): Promise<{ invita
           id: note.id,
           scanId: note.scanId,
           createdById: LOCAL_TEST_USER_ID,
+          title: note.title,
           content: note.content,
           color: note.color,
           position: note.position,
@@ -289,6 +294,7 @@ export async function seedLocalTestProject(client: SeedClient): Promise<{ invita
         },
         update: {
           scanId: note.scanId,
+          title: note.title,
           content: note.content,
           color: note.color,
           position: note.position,
