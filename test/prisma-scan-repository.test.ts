@@ -79,14 +79,25 @@ function createClient() {
   const project = {
     update: vi.fn().mockResolvedValue({}),
   };
+  const note = {
+    updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+  };
+  const scanAsset = {
+    updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+  };
   const transaction = vi.fn(async (operation: unknown) => {
     if (Array.isArray(operation)) {
       return Promise.all(operation);
     }
 
     return (
-      operation as (client: { scan: typeof scan; project: typeof project }) => Promise<unknown>
-    )({ scan, project });
+      operation as (client: {
+        scan: typeof scan;
+        project: typeof project;
+        note: typeof note;
+        scanAsset: typeof scanAsset;
+      }) => Promise<unknown>
+    )({ scan, project, note, scanAsset });
   });
   const client = {
     scan,
@@ -94,7 +105,7 @@ function createClient() {
     $transaction: transaction,
   } as unknown as Pick<PrismaClient, 'scan' | 'project' | '$transaction'>;
 
-  return { client, scan, project, transaction };
+  return { client, scan, project, note, scanAsset, transaction };
 }
 
 describe('PrismaScanRepository', () => {
@@ -572,5 +583,96 @@ describe('PrismaScanRepository', () => {
     await expect(repository.softDelete(SCAN_ID, VIEWER_ID)).rejects.toBeInstanceOf(
       ScanNotFoundError,
     );
+  });
+
+  it('batches descendant note and asset soft-deletions in one updateMany per type with sync tombstones', async () => {
+    const { client, scan, note, scanAsset, transaction } = createClient();
+    const project = {
+      update: vi.fn().mockResolvedValue({}),
+      findUniqueOrThrow: vi.fn().mockResolvedValue({
+        id: PROJECT_ID,
+        ownerId: OWNER_ID,
+        owner: { email: 'owner@example.com' },
+        name: 'Project',
+        description: null,
+        revision: 1,
+        syncStatus: 'SYNCED',
+        lastSyncedAt: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        scans: [],
+      }),
+    };
+    const syncChange = {
+      create: vi.fn().mockResolvedValue({ id: 1n }),
+      createMany: vi.fn().mockResolvedValue({ count: 1 }),
+    };
+    const syncConflict = {
+      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+    };
+
+    transaction.mockImplementationOnce(async (operation: unknown) => {
+      return (
+        operation as (c: {
+          scan: typeof scan;
+          project: typeof project;
+          note: typeof note;
+          scanAsset: typeof scanAsset;
+          syncChange: typeof syncChange;
+          syncConflict: typeof syncConflict;
+        }) => Promise<unknown>
+      )({ scan, project, note, scanAsset, syncChange, syncConflict });
+    });
+
+    const NOTE_ID = '11111111-2222-3333-4444-555555555555';
+    const ASSET_ID = '66666666-7777-8888-9999-000000000000';
+
+    scan.findFirst.mockResolvedValueOnce(
+      createScanRow({
+        projectId: PROJECT_ID,
+        revision: 1,
+        deletedAt: null,
+        notes: [{ id: NOTE_ID, revision: 2 }],
+        assets: [{ id: ASSET_ID, revision: 3 }],
+      }),
+    );
+
+    const repository = new PrismaScanRepository(client);
+    await expect(repository.softDelete(SCAN_ID, OWNER_ID, 1)).resolves.toBe(2);
+
+    const noteUpdate = note.updateMany.mock.calls[0]?.[0] as
+      | { where: { id: { in: string[] } }; data: { deletedAt: unknown; revision: unknown } }
+      | undefined;
+    expect(noteUpdate?.where).toEqual({ id: { in: [NOTE_ID] } });
+    expect(noteUpdate?.data.deletedAt).toBeInstanceOf(Date);
+    expect(noteUpdate?.data.revision).toEqual({ increment: 1 });
+
+    const assetUpdate = scanAsset.updateMany.mock.calls[0]?.[0] as
+      | { where: { id: { in: string[] } }; data: { deletedAt: unknown; revision: unknown } }
+      | undefined;
+    expect(assetUpdate?.where).toEqual({ id: { in: [ASSET_ID] } });
+    expect(assetUpdate?.data.deletedAt).toBeInstanceOf(Date);
+    expect(assetUpdate?.data.revision).toEqual({ increment: 1 });
+
+    expect(syncChange.createMany).toHaveBeenNthCalledWith(1, {
+      data: [
+        expect.objectContaining({
+          resourceType: 'NOTE',
+          resourceId: NOTE_ID,
+          revision: 3,
+          operation: 'DELETE',
+        }),
+      ],
+    });
+    expect(syncChange.createMany).toHaveBeenNthCalledWith(2, {
+      data: [
+        expect.objectContaining({
+          resourceType: 'SCAN_ASSET',
+          resourceId: ASSET_ID,
+          revision: 4,
+          operation: 'DELETE',
+        }),
+      ],
+    });
   });
 });

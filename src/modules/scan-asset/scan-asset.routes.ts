@@ -11,6 +11,7 @@ import type {
   CurrentUserRepository,
 } from '../../common/middleware/authenticate.js';
 import { validateRequest } from '../../common/middleware/validate-request.js';
+import { IdempotencyKeyHeaderSchema } from '../../common/schemas/sync-headers.js';
 import { ScanIdParamSchema, type ScanIdParam } from '../scan/scan.schemas.js';
 import { ScanNotFoundError } from '../scan/scan.errors.js';
 import { ProjectNotFoundError } from '../project/project.errors.js';
@@ -123,13 +124,18 @@ export function createScanAssetRouter({
   router.post(
     '/scans/:scanId/assets/upload-sessions',
     requireAuth,
-    validateRequest({ body: CreateUploadSessionBodySchema, params: ScanIdParamSchema }),
+    validateRequest({
+      body: CreateUploadSessionBodySchema,
+      params: ScanIdParamSchema,
+      headers: IdempotencyKeyHeaderSchema,
+    }),
     async (request, response, next) => {
       try {
         const userId = getUserId(request);
-        const { body, params } = response.locals.validated as {
+        const { body, params, headers } = response.locals.validated as {
           body: CreateUploadSessionBody;
           params: ScanIdParam;
+          headers: { 'Idempotency-Key': string };
         };
         const data = {
           assetType: body.assetType,
@@ -139,12 +145,7 @@ export function createScanAssetRouter({
           ...(body.modelVersion === undefined ? {} : { modelVersion: body.modelVersion }),
           ...(body.idempotencyKey === undefined ? {} : { idempotencyKey: body.idempotencyKey }),
         };
-        const key = resolveIdempotencyKey(
-          typeof request.headers['idempotency-key'] === 'string'
-            ? request.headers['idempotency-key']
-            : undefined,
-          body.idempotencyKey,
-        );
+        const key = resolveIdempotencyKey(headers['Idempotency-Key'], body.idempotencyKey);
         const result =
           typeof scanAssetService.createUploadSessionIdempotently === 'function'
             ? await scanAssetService.createUploadSessionIdempotently(

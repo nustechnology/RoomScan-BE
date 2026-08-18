@@ -99,6 +99,15 @@ function createClient() {
   const projectAccess = {
     updateMany: vi.fn().mockResolvedValue({ count: 2 }),
   };
+  const note = {
+    updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+  };
+  const scanAsset = {
+    updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+  };
+  const scan = {
+    updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+  };
   const transaction = vi.fn(async (operation: unknown) => {
     if (Array.isArray(operation)) {
       return Promise.all(operation);
@@ -108,15 +117,18 @@ function createClient() {
       operation as (client: {
         project: typeof project;
         projectAccess: typeof projectAccess;
+        note: typeof note;
+        scanAsset: typeof scanAsset;
+        scan: typeof scan;
       }) => Promise<unknown>
-    )({ project, projectAccess });
+    )({ project, projectAccess, note, scanAsset, scan });
   });
   const client = {
     project,
     $transaction: transaction,
   } as unknown as Pick<PrismaClient, 'project' | '$transaction'>;
 
-  return { client, project, projectAccess, transaction };
+  return { client, project, projectAccess, note, scanAsset, scan, transaction };
 }
 
 describe('PrismaProjectRepository', () => {
@@ -471,5 +483,129 @@ describe('PrismaProjectRepository', () => {
     await expect(repository.softDelete(PROJECT_ID, VIEWER_ID)).rejects.toBeInstanceOf(
       ProjectNotFoundError,
     );
+  });
+
+  it('batches descendant note, asset, scan, and project-access soft-deletions in one updateMany per type with sync tombstones', async () => {
+    const { client, project, projectAccess, note, scanAsset, scan, transaction } = createClient();
+    const syncChange = {
+      create: vi.fn().mockResolvedValue({ id: 1n }),
+      createMany: vi.fn().mockResolvedValue({ count: 1 }),
+    };
+    const syncConflict = {
+      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+    };
+
+    transaction.mockImplementationOnce(async (operation: unknown) => {
+      return (
+        operation as (c: {
+          project: typeof project;
+          projectAccess: typeof projectAccess;
+          note: typeof note;
+          scanAsset: typeof scanAsset;
+          scan: typeof scan;
+          syncChange: typeof syncChange;
+          syncConflict: typeof syncConflict;
+        }) => Promise<unknown>
+      )({ project, projectAccess, note, scanAsset, scan, syncChange, syncConflict });
+    });
+
+    const SCAN_ID = 'f1e2d3c4-a5b6-7890-abcd-ef1234567890';
+    const NOTE_ID = '11111111-2222-3333-4444-555555555555';
+    const ASSET_ID = '66666666-7777-8888-9999-000000000000';
+    const ACCESS_ID = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+
+    project.findFirst.mockResolvedValueOnce({
+      ownerId: OWNER_ID,
+      revision: 1,
+      deletedAt: null,
+      scans: [
+        {
+          id: SCAN_ID,
+          revision: 2,
+          notes: [{ id: NOTE_ID, revision: 3 }],
+          assets: [{ id: ASSET_ID, revision: 4 }],
+        },
+      ],
+      accesses: [{ id: ACCESS_ID, userId: VIEWER_ID, revision: 5 }],
+    });
+
+    const repository = new PrismaProjectRepository(client);
+    await expect(repository.softDelete(PROJECT_ID, OWNER_ID, 1)).resolves.toBe(2);
+
+    const noteUpdate = note.updateMany.mock.calls[0]?.[0] as
+      | { where: { id: { in: string[] } }; data: { deletedAt: unknown; revision: unknown } }
+      | undefined;
+    expect(noteUpdate?.where).toEqual({ id: { in: [NOTE_ID] } });
+    expect(noteUpdate?.data.deletedAt).toBeInstanceOf(Date);
+    expect(noteUpdate?.data.revision).toEqual({ increment: 1 });
+
+    const assetUpdate = scanAsset.updateMany.mock.calls[0]?.[0] as
+      | { where: { id: { in: string[] } }; data: { deletedAt: unknown; revision: unknown } }
+      | undefined;
+    expect(assetUpdate?.where).toEqual({ id: { in: [ASSET_ID] } });
+    expect(assetUpdate?.data.deletedAt).toBeInstanceOf(Date);
+    expect(assetUpdate?.data.revision).toEqual({ increment: 1 });
+
+    const scanUpdate = scan.updateMany.mock.calls[0]?.[0] as
+      | { where: { id: { in: string[] } }; data: { deletedAt: unknown; revision: unknown } }
+      | undefined;
+    expect(scanUpdate?.where).toEqual({ id: { in: [SCAN_ID] } });
+    expect(scanUpdate?.data.deletedAt).toBeInstanceOf(Date);
+    expect(scanUpdate?.data.revision).toEqual({ increment: 1 });
+
+    const accessUpdate = projectAccess.updateMany.mock.calls[0]?.[0] as
+      | { where: { id: { in: string[] } }; data: { revokedAt: unknown; revision: unknown } }
+      | undefined;
+    expect(accessUpdate?.where).toEqual({ id: { in: [ACCESS_ID] } });
+    expect(accessUpdate?.data.revokedAt).toBeInstanceOf(Date);
+    expect(accessUpdate?.data.revision).toEqual({ increment: 1 });
+
+    expect(syncChange.createMany).toHaveBeenNthCalledWith(1, {
+      data: [
+        expect.objectContaining({
+          resourceType: 'NOTE',
+          resourceId: NOTE_ID,
+          revision: 4,
+          operation: 'DELETE',
+        }),
+      ],
+    });
+    expect(syncChange.createMany).toHaveBeenNthCalledWith(2, {
+      data: [
+        expect.objectContaining({
+          resourceType: 'SCAN_ASSET',
+          resourceId: ASSET_ID,
+          revision: 5,
+          operation: 'DELETE',
+        }),
+      ],
+    });
+    expect(syncChange.createMany).toHaveBeenNthCalledWith(3, {
+      data: [
+        expect.objectContaining({
+          resourceType: 'SCAN',
+          resourceId: SCAN_ID,
+          revision: 3,
+          operation: 'DELETE',
+        }),
+      ],
+    });
+    expect(syncChange.createMany).toHaveBeenNthCalledWith(4, {
+      data: [
+        expect.objectContaining({
+          resourceType: 'PROJECT_ACCESS',
+          resourceId: ACCESS_ID,
+          revision: 6,
+          operation: 'DELETE',
+        }),
+        expect.objectContaining({
+          resourceType: 'PROJECT_ACCESS',
+          resourceId: ACCESS_ID,
+          targetUserId: VIEWER_ID,
+          revision: 6,
+          operation: 'DELETE',
+        }),
+      ],
+    });
   });
 });

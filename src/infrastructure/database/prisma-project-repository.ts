@@ -20,6 +20,7 @@ import {
   resolveSyncConflict,
   upsertSyncConflict,
   writeDeleteChange,
+  writeDeleteChangesBatch,
   writeProjectUpsert,
 } from './prisma-sync-writer.js';
 import type { PrismaIdempotencyExecutor } from './prisma-idempotency.js';
@@ -528,63 +529,91 @@ export class PrismaProjectRepository implements ProjectRepository {
         });
       }
 
-      for (const scan of project.scans) {
-        for (const note of scan.notes) {
-          await transaction.note.update({
-            where: { id: note.id },
-            data: { deletedAt, revision: { increment: 1 }, updatedAt: deletedAt },
-          });
-          await writeDeleteChange(transaction, {
+      const notes = (project.scans ?? []).flatMap((scan) => scan.notes ?? []);
+      if (notes.length > 0) {
+        await transaction.note.updateMany({
+          where: { id: { in: notes.map((note) => note.id) } },
+          data: { deletedAt, revision: { increment: 1 }, updatedAt: deletedAt },
+        });
+        await writeDeleteChangesBatch(
+          transaction,
+          notes.map((note) => ({
             projectId: id,
             ownerId,
             resourceType: 'NOTE',
             resourceId: note.id,
             revision: note.revision + 1,
             deletedAt,
-          });
-        }
-        for (const asset of scan.assets) {
-          await transaction.scanAsset.update({
-            where: { id: asset.id },
-            data: { deletedAt, revision: { increment: 1 }, updatedAt: deletedAt },
-          });
-          await writeDeleteChange(transaction, {
+          })),
+        );
+      }
+
+      const assets = (project.scans ?? []).flatMap((scan) => scan.assets ?? []);
+      if (assets.length > 0) {
+        await transaction.scanAsset.updateMany({
+          where: { id: { in: assets.map((asset) => asset.id) } },
+          data: { deletedAt, revision: { increment: 1 }, updatedAt: deletedAt },
+        });
+        await writeDeleteChangesBatch(
+          transaction,
+          assets.map((asset) => ({
             projectId: id,
             ownerId,
             resourceType: 'SCAN_ASSET',
             resourceId: asset.id,
             revision: asset.revision + 1,
             deletedAt,
-          });
-        }
-        await transaction.scan.update({
-          where: { id: scan.id },
+          })),
+        );
+      }
+
+      const scans = project.scans ?? [];
+      if (scans.length > 0) {
+        await transaction.scan.updateMany({
+          where: { id: { in: scans.map((scan) => scan.id) } },
           data: { deletedAt, revision: { increment: 1 }, updatedAt: deletedAt },
         });
-        await writeDeleteChange(transaction, {
-          projectId: id,
-          ownerId,
-          resourceType: 'SCAN',
-          resourceId: scan.id,
-          revision: scan.revision + 1,
-          deletedAt,
-        });
+        await writeDeleteChangesBatch(
+          transaction,
+          scans.map((scan) => ({
+            projectId: id,
+            ownerId,
+            resourceType: 'SCAN',
+            resourceId: scan.id,
+            revision: scan.revision + 1,
+            deletedAt,
+          })),
+        );
       }
-      for (const access of project.accesses) {
-        await transaction.projectAccess.update({
-          where: { id: access.id },
+
+      const accesses = project.accesses ?? [];
+      if (accesses.length > 0) {
+        await transaction.projectAccess.updateMany({
+          where: { id: { in: accesses.map((access) => access.id) } },
           data: { revokedAt: deletedAt, revision: { increment: 1 }, updatedAt: deletedAt },
         });
-        const change = {
-          projectId: id,
-          ownerId,
-          resourceType: 'PROJECT_ACCESS' as const,
-          resourceId: access.id,
-          revision: access.revision + 1,
-          deletedAt,
-        };
-        await writeDeleteChange(transaction, change);
-        await writeDeleteChange(transaction, { ...change, targetUserId: access.userId });
+        await writeDeleteChangesBatch(
+          transaction,
+          accesses.flatMap((access) => [
+            {
+              projectId: id,
+              ownerId,
+              resourceType: 'PROJECT_ACCESS' as const,
+              resourceId: access.id,
+              revision: access.revision + 1,
+              deletedAt,
+            },
+            {
+              projectId: id,
+              ownerId,
+              targetUserId: access.userId,
+              resourceType: 'PROJECT_ACCESS' as const,
+              resourceId: access.id,
+              revision: access.revision + 1,
+              deletedAt,
+            },
+          ]),
+        );
       }
       await writeDeleteChange(transaction, {
         projectId: id,

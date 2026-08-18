@@ -26,6 +26,7 @@ import {
   upsertSyncConflict,
   writeAssetUpsert,
   writeDeleteChange,
+  writeDeleteChangesBatch,
   writeScanUpsert,
 } from './prisma-sync-writer.js';
 
@@ -618,33 +619,41 @@ export class PrismaScanRepository implements ScanRepository {
           data: { deletedAt, revision: { increment: 1 }, updatedAt: deletedAt },
         });
       }
-      for (const note of scan.notes) {
-        await transaction.note.update({
-          where: { id: note.id },
+      const notes = scan.notes ?? [];
+      if (notes.length > 0) {
+        await transaction.note.updateMany({
+          where: { id: { in: notes.map((note) => note.id) } },
           data: { deletedAt, revision: { increment: 1 }, updatedAt: deletedAt },
         });
-        await writeDeleteChange(transaction, {
-          projectId: scan.projectId,
-          ownerId,
-          resourceType: 'NOTE',
-          resourceId: note.id,
-          revision: note.revision + 1,
-          deletedAt,
-        });
+        await writeDeleteChangesBatch(
+          transaction,
+          notes.map((note) => ({
+            projectId: scan.projectId,
+            ownerId,
+            resourceType: 'NOTE',
+            resourceId: note.id,
+            revision: note.revision + 1,
+            deletedAt,
+          })),
+        );
       }
-      for (const asset of scan.assets) {
-        await transaction.scanAsset.update({
-          where: { id: asset.id },
+      const assets = scan.assets ?? [];
+      if (assets.length > 0) {
+        await transaction.scanAsset.updateMany({
+          where: { id: { in: assets.map((asset) => asset.id) } },
           data: { deletedAt, revision: { increment: 1 }, updatedAt: deletedAt },
         });
-        await writeDeleteChange(transaction, {
-          projectId: scan.projectId,
-          ownerId,
-          resourceType: 'SCAN_ASSET',
-          resourceId: asset.id,
-          revision: asset.revision + 1,
-          deletedAt,
-        });
+        await writeDeleteChangesBatch(
+          transaction,
+          assets.map((asset) => ({
+            projectId: scan.projectId,
+            ownerId,
+            resourceType: 'SCAN_ASSET',
+            resourceId: asset.id,
+            revision: asset.revision + 1,
+            deletedAt,
+          })),
+        );
       }
       await writeDeleteChange(transaction, {
         projectId: scan.projectId,

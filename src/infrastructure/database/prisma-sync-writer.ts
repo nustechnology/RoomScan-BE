@@ -57,6 +57,39 @@ export async function writeDeleteChange(
   return change.id;
 }
 
+export async function writeDeleteChangesBatch(
+  transaction: PrismaTransactionClient,
+  inputs: DeleteChangeInput[],
+): Promise<void> {
+  if (!supportsSync(transaction) || inputs.length === 0) return;
+  const candidate = transaction as unknown as {
+    syncChange?: { createMany?: (args: { data: unknown[] }) => Promise<unknown> };
+  };
+  if (typeof candidate.syncChange?.createMany === 'function') {
+    await candidate.syncChange.createMany({
+      data: inputs.map((input) => ({
+        projectId: input.projectId,
+        ownerId: input.ownerId,
+        ...(input.targetUserId === undefined ? {} : { targetUserId: input.targetUserId }),
+        resourceType: input.resourceType,
+        resourceId: input.resourceId,
+        operation: 'DELETE',
+        revision: input.revision,
+        syncStatus: input.syncStatus ?? 'SYNCED',
+        data: Prisma.DbNull,
+        deletedAt: input.deletedAt,
+        changedAt: input.deletedAt,
+      })),
+    });
+  } else {
+    for (const input of inputs) {
+      await writeDeleteChange(transaction, input);
+    }
+  }
+}
+
+export const writeDeleteChanges = writeDeleteChangesBatch;
+
 export async function upsertSyncConflict(
   transaction: PrismaTransactionClient,
   input: {
