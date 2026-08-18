@@ -11,10 +11,10 @@ import { ProjectNotFoundError } from '../project/project.errors.js';
 import { NotSharedProjectError, SharedProjectNotInListError } from './shared-projects.errors.js';
 import {
   ListSharedProjectsQuerySchema,
+  SharedProjectDetailResponseSchema,
   SharedProjectIdParamSchema,
   SharedProjectListResponseSchema,
   SharedProjectRemoveResponseSchema,
-  SharedProjectResponseSchema,
   type ListSharedProjectsQuery,
 } from './shared-projects.schemas.js';
 import type { SharedProjectsService } from './shared-projects.service.js';
@@ -90,7 +90,7 @@ export function createSharedProjectsRouter({
         const userId = getUserId(request);
         const { params } = response.locals.validated as { params: { projectId: string } };
         const result = await sharedProjectsService.detail(userId, params.projectId);
-        const responseBody = SharedProjectResponseSchema.parse(result);
+        const responseBody = SharedProjectDetailResponseSchema.parse(result);
 
         response.status(200).json(responseBody);
       } catch (error) {

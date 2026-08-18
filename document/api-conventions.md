@@ -965,7 +965,8 @@ the Owner, and other Viewers are never affected.
 | `GET`    | `/api/v1/shared-projects/:projectId` | Get shared project detail; active Viewer only         |
 | `DELETE` | `/api/v1/shared-projects/:projectId` | Remove a project from the current user's list         |
 
-Shared project item (list and detail share the same shape):
+Shared project item (list and detail share the same shape, except the detail also
+returns `scans`):
 
 ```json
 {
@@ -990,6 +991,12 @@ Shared project item (list and detail share the same shape):
   }
 }
 ```
+
+`GET /api/v1/shared-projects/:projectId` additionally returns the project's
+active scans ordered by newest `createdAt` first, with the same `scans` array
+shape (`id`, `name`, `description`, `thumbnail`, `noteCount`, `assetStatus`,
+`syncStatus`, `createdAt`) as the canonical project detail. The Shared With Me
+list response omits `scans` to keep each list item lightweight.
 
 `owner.email` is nullable. `scanCount` counts active (non-deleted) scans in the
 project. `thumbnail` is `null` until the thumbnail persistence feature is

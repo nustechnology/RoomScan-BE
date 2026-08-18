@@ -1,6 +1,8 @@
 import { ProjectNotFoundError } from '../project/project.errors.js';
 import { NotSharedProjectError, SharedProjectNotInListError } from './shared-projects.errors.js';
 import type {
+  SharedProjectDetailRecord,
+  SharedProjectDetailResult,
   SharedProjectRecord,
   SharedProjectRemoveResult,
   SharedProjectResult,
@@ -48,6 +50,22 @@ function toResult(record: SharedProjectRecord): SharedProjectResult {
   };
 }
 
+function toDetailResult(record: SharedProjectDetailRecord): SharedProjectDetailResult {
+  return {
+    ...toResult(record),
+    scans: record.scans.map((scan) => ({
+      id: scan.id,
+      name: scan.name,
+      description: scan.description,
+      thumbnail: scan.thumbnail,
+      noteCount: scan.noteCount,
+      assetStatus: scan.assetStatus,
+      syncStatus: scan.syncStatus,
+      createdAt: scan.createdAt.toISOString(),
+    })),
+  };
+}
+
 export class SharedProjectsService {
   readonly #repository: SharedProjectsRepository;
   readonly #clock: () => Date;
@@ -74,14 +92,14 @@ export class SharedProjectsService {
     };
   }
 
-  async detail(userId: string, projectId: string): Promise<SharedProjectResult> {
+  async detail(userId: string, projectId: string): Promise<SharedProjectDetailResult> {
     const record = await this.#repository.findSharedForUser(projectId, userId);
 
     if (record === null || sharedProjectStatus(record) !== 'ACTIVE') {
       throw new ProjectNotFoundError();
     }
 
-    return toResult(record);
+    return toDetailResult(record);
   }
 
   async remove(userId: string, projectId: string): Promise<SharedProjectRemoveResult> {

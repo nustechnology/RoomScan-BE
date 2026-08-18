@@ -3,10 +3,10 @@ import { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
 import { ErrorResponseSchema } from '../../common/schemas/error.js';
 import {
   ListSharedProjectsQuerySchema,
+  SharedProjectDetailResponseSchema,
   SharedProjectIdParamSchema,
   SharedProjectListResponseSchema,
   SharedProjectRemoveResponseSchema,
-  SharedProjectResponseSchema,
 } from './shared-projects.schemas.js';
 
 export const sharedProjectsOpenApiRegistry = new OpenAPIRegistry();
@@ -21,9 +21,9 @@ const bearerAuth = sharedProjectsOpenApiRegistry.registerComponent(
   },
 );
 
-const sharedProjectResponse = sharedProjectsOpenApiRegistry.register(
-  'SharedProjectResponse',
-  SharedProjectResponseSchema,
+const sharedProjectDetailResponse = sharedProjectsOpenApiRegistry.register(
+  'SharedProjectDetailResponse',
+  SharedProjectDetailResponseSchema,
 );
 const sharedProjectListResponse = sharedProjectsOpenApiRegistry.register(
   'SharedProjectListResponse',
@@ -166,11 +166,11 @@ sharedProjectsOpenApiRegistry.registerPath({
   },
   responses: {
     200: {
-      description: 'The shared project with read-only permissions',
+      description: 'The shared project with read-only permissions and its scans',
       headers: rateLimitHeaders,
       content: {
         'application/json': {
-          schema: sharedProjectResponse,
+          schema: sharedProjectDetailResponse,
         },
       },
     },
