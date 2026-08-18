@@ -9,9 +9,9 @@ ALTER TYPE "NoteColor" ADD VALUE 'CYAN';
 ALTER TYPE "NoteColor" ADD VALUE 'GRAY';
 
 -- AlterTable
--- The required column `title` is added with a placeholder backfill so the
--- migration also applies when the `notes` table already contains rows (for
--- example on a partially deployed database).
-ALTER TABLE "notes" ADD COLUMN     "title" VARCHAR(50) NOT NULL DEFAULT '';
+-- The required column `title` is added with a deterministic non-empty
+-- placeholder backfill so the migration also applies when the `notes` table
+-- already contains rows (for example on a partially deployed database).
+ALTER TABLE "notes" ADD COLUMN     "title" VARCHAR(50) NOT NULL DEFAULT 'Untitled note';
 
 ALTER TABLE "notes" ALTER COLUMN "title" DROP DEFAULT;

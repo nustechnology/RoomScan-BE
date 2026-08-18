@@ -308,7 +308,7 @@ describe('PrismaNoteRepository', () => {
     expect(result).toBeNull();
   });
 
-  it('updates title, content and color as the Owner and touches activity', async () => {
+  it('updates title and content as the Owner and touches activity', async () => {
     const { client, note, scan, project } = createClient();
     note.findFirst.mockResolvedValueOnce({ scanId: SCAN_ID });
     note.update.mockResolvedValueOnce(

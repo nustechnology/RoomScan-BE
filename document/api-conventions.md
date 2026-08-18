@@ -558,7 +558,7 @@ inaccessible scans, projects, and notes are hidden behind `404`.
 | `POST`   | `/api/v1/scans/:scanId/notes`    | Create a note on a scan; Owner only; return `201`        |
 | `GET`    | `/api/v1/scans/:scanId/notes`    | List notes for a scan; Owner or active Viewer; paginated |
 | `GET`    | `/api/v1/notes/:noteId`          | Get note detail; Owner or active Viewer                  |
-| `PATCH`  | `/api/v1/notes/:noteId`          | Update note content or color; Owner only                 |
+| `PATCH`  | `/api/v1/notes/:noteId`          | Update note title, content, or color; Owner only         |
 | `PATCH`  | `/api/v1/notes/:noteId/position` | Move a note to a new 3D position; Owner only             |
 | `DELETE` | `/api/v1/notes/:noteId`          | Delete a note; Owner only; return `204`                  |
 
