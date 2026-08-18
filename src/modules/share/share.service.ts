@@ -13,6 +13,7 @@ import {
   InvitationDeclinedError,
   InvitationExpiredError,
   InvitationNotFoundError,
+  InvitationNotForUserError,
   InvitationRevokedError,
   NotOwnerError,
   ProjectNotShareableError,
@@ -58,6 +59,11 @@ export interface ShareServiceDependencies {
   invitationBaseUrl: string;
 }
 
+export interface PreviewContextUser {
+  id: string;
+  email: string | null;
+}
+
 export function generateInvitationToken(): string {
   return randomBytes(32).toString('base64url');
 }
@@ -90,6 +96,8 @@ function toPreviewScan(scan: ShareScanSummary | null): ShareScanPreview | null {
     name: scan.name,
     description: scan.description,
     thumbnail: scan.thumbnail,
+    noteCount: scan.noteCount,
+    creator: scan.creator,
   };
 }
 
@@ -226,6 +234,16 @@ export class ShareService {
         { err: error, to: input.recipientEmail },
         'Failed to deliver an invitation email',
       );
+    }
+  }
+
+  #assertRecipientMatch(recipientEmail: string, currentUser: PreviewContextUser): void {
+    const matches =
+      currentUser.email !== null &&
+      recipientEmail.toLowerCase() === currentUser.email.toLowerCase();
+
+    if (!matches) {
+      throw new InvitationNotForUserError();
     }
   }
 
@@ -383,27 +401,29 @@ export class ShareService {
     };
   }
 
-  async previewInvitation(rawToken: string, userId?: string): Promise<TokenPreviewResult> {
+  async previewInvitation(
+    rawToken: string,
+    currentUser: PreviewContextUser,
+  ): Promise<TokenPreviewResult> {
     const invitation = await this.#repository.findByTokenHash(hashInvitationToken(rawToken));
 
     if (invitation !== null) {
+      this.#assertRecipientMatch(invitation.invitation.recipientEmail, currentUser);
+
       const result: InvitationPreviewResult = {
         type: 'invitation',
         scope: this.#scopeOf(invitation.invitation),
         project: toPreviewProject(invitation.project),
         scan: toPreviewScan(invitation.scan),
         status: this.#viewStatus(invitation.invitation),
+        recipientEmail: invitation.invitation.recipientEmail,
         sentAt: invitation.invitation.sentAt.toISOString(),
         expiresAt: invitation.invitation.expiresAt.toISOString(),
       };
-
-      if (userId !== undefined) {
-        result.recipientEmail = invitation.invitation.recipientEmail;
-        const { scope, project, scan } = this.#entityOf(invitation);
-        const entityId = scope === 'project' ? project?.id : scan?.id;
-        result.hasAccess =
-          entityId !== undefined && (await this.#hasActiveAccess(scope, entityId, userId));
-      }
+      const { scope, project, scan } = this.#entityOf(invitation);
+      const entityId = scope === 'project' ? project?.id : scan?.id;
+      result.hasAccess =
+        entityId !== undefined && (await this.#hasActiveAccess(scope, entityId, currentUser.id));
 
       return result;
     }
@@ -422,12 +442,10 @@ export class ShareService {
         expiresAt: shareLink.shareLink.expiresAt.toISOString(),
       };
 
-      if (userId !== undefined) {
-        const { scope, project, scan } = this.#entityOf(shareLink);
-        const entityId = scope === 'project' ? project?.id : scan?.id;
-        result.hasAccess =
-          entityId !== undefined && (await this.#hasActiveAccess(scope, entityId, userId));
-      }
+      const { scope, project, scan } = this.#entityOf(shareLink);
+      const entityId = scope === 'project' ? project?.id : scan?.id;
+      result.hasAccess =
+        entityId !== undefined && (await this.#hasActiveAccess(scope, entityId, currentUser.id));
 
       return result;
     }
@@ -445,11 +463,14 @@ export class ShareService {
     return 'ACTIVE';
   }
 
-  async acceptInvitation(userId: string, rawToken: string): Promise<TokenAcceptResult> {
+  async acceptInvitation(
+    currentUser: PreviewContextUser,
+    rawToken: string,
+  ): Promise<TokenAcceptResult> {
     const invitation = await this.#repository.findByTokenHash(hashInvitationToken(rawToken));
 
     if (invitation !== null) {
-      return await this.#acceptEmailInvitation(invitation, userId);
+      return await this.#acceptEmailInvitation(invitation, currentUser);
     }
 
     const shareLink = await this.#repository.findShareLinkByTokenHash(
@@ -457,7 +478,7 @@ export class ShareService {
     );
 
     if (shareLink !== null) {
-      return await this.#acceptShareLink(shareLink, userId);
+      return await this.#acceptShareLink(shareLink, currentUser.id);
     }
 
     throw new InvitationNotFoundError();
@@ -465,10 +486,11 @@ export class ShareService {
 
   async #acceptEmailInvitation(
     context: InvitationWithEntity,
-    userId: string,
+    currentUser: PreviewContextUser,
   ): Promise<InvitationAcceptResult> {
     const { invitation } = context;
     const { scope, project, scan } = this.#entityOf(context);
+    const userId = currentUser.id;
 
     if (invitation.status === 'REVOKED') {
       throw new InvitationRevokedError();
@@ -492,6 +514,7 @@ export class ShareService {
       if (project.owner.id === userId) {
         throw new CannotAcceptOwnInvitationError();
       }
+      this.#assertRecipientMatch(invitation.recipientEmail, currentUser);
       if (await this.#hasActiveAccess(scope, project.id, userId)) {
         throw new AccessAlreadyExistsError();
       }
@@ -524,6 +547,7 @@ export class ShareService {
     if (scan.ownerId === userId) {
       throw new CannotAcceptOwnInvitationError();
     }
+    this.#assertRecipientMatch(invitation.recipientEmail, currentUser);
     if (await this.#hasActiveAccess(scope, scan.id, userId)) {
       throw new AccessAlreadyExistsError();
     }
@@ -576,7 +600,10 @@ export class ShareService {
     return await this.#grantAccessFromShareLink(context, userId, this.#clock());
   }
 
-  async declineInvitation(userId: string, rawToken: string): Promise<InvitationDeclineResult> {
+  async declineInvitation(
+    currentUser: PreviewContextUser,
+    rawToken: string,
+  ): Promise<InvitationDeclineResult> {
     const invitation = await this.#repository.findByTokenHash(hashInvitationToken(rawToken));
 
     if (invitation === null) {
@@ -584,6 +611,8 @@ export class ShareService {
     }
 
     const { invitation: record } = invitation;
+    const userId = currentUser.id;
+
     const { scope, project, scan } = this.#entityOf(invitation);
 
     if (record.status === 'REVOKED') {
@@ -602,6 +631,7 @@ export class ShareService {
     if (ownerId === userId) {
       throw new CannotAcceptOwnInvitationError();
     }
+    this.#assertRecipientMatch(record.recipientEmail, currentUser);
     const entityId = scope === 'project' ? project?.id : scan?.id;
     if (entityId !== undefined && (await this.#hasActiveAccess(scope, entityId, userId))) {
       throw new AccessAlreadyExistsError();

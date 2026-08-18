@@ -77,14 +77,14 @@ const ScanPreviewSchema = z.object({
   name: z.string(),
   description: z.string().nullable(),
   thumbnail: z.url().nullable(),
-});
-
-const ScanDetailSchema = ScanPreviewSchema.extend({
+  noteCount: z.number().int().nonnegative(),
   creator: z.object({
     id: z.uuid(),
     email: z.email().nullable(),
   }),
 });
+
+const ScanDetailSchema = ScanPreviewSchema;
 
 const InvitationPreviewLiteralSchema = z.object({
   type: z.literal('invitation'),

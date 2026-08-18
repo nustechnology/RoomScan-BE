@@ -21,6 +21,7 @@ export interface ShareScanSummary {
   name: string;
   description: string | null;
   thumbnail: string | null;
+  noteCount: number;
   creator: {
     id: string;
     email: string | null;
@@ -34,6 +35,11 @@ export interface ShareScanPreview {
   name: string;
   description: string | null;
   thumbnail: string | null;
+  noteCount: number;
+  creator: {
+    id: string;
+    email: string | null;
+  };
 }
 
 export interface ShareProjectPreview {

@@ -127,7 +127,8 @@ const errorResponses = {
     },
   },
   403: {
-    description: 'Only the project owner can manage sharing',
+    description:
+      "The caller lacks permission: the current user is not the project owner, or the current user's email does not match the invited email",
     headers: rateLimitHeaders,
     content: {
       'application/json': {
@@ -248,8 +249,8 @@ shareOpenApiRegistry.registerPath({
   tags: ['Shares'],
   summary: 'Preview an invitation or share link',
   description:
-    'No authentication is required. Resolves either an invitation or a generic share link for a project or scan. When a valid Bearer token is supplied, the response includes whether the current user already has access.',
-  security: [{ [bearerAuth.name]: [] }, {}],
+    'Requires a valid Bearer token. Resolves either an invitation or a generic share link for a project or scan and reports whether the current user already has access. For a per-recipient invitation, a preview whose email does not match the invited email returns 403.',
+  security: [{ [bearerAuth.name]: [] }],
   request: {
     params: InvitationTokenParamSchema,
   },
@@ -264,6 +265,8 @@ shareOpenApiRegistry.registerPath({
       },
     },
     400: errorResponses[400],
+    401: errorResponses[401],
+    403: errorResponses[403],
     404: errorResponses[404],
     429: errorResponses[429],
     500: errorResponses[500],

@@ -23,6 +23,7 @@ import {
   InvitationDeclinedError,
   InvitationExpiredError,
   InvitationNotFoundError,
+  InvitationNotForUserError,
   InvitationRevokedError,
   NotOwnerError,
   ProjectNotShareableError,
@@ -554,8 +555,11 @@ describe('Share HTTP endpoints', () => {
   });
 
   describe('GET /api/v1/invitations/:token', () => {
-    it('previews a valid invitation anonymously', async () => {
-      const response = await request(app).get(`/api/v1/invitations/${TOKEN}`).expect(200);
+    it('previews a valid invitation when authenticated', async () => {
+      const response = await request(app)
+        .get(`/api/v1/invitations/${TOKEN}`)
+        .set('Authorization', `Bearer ${recipientToken}`)
+        .expect(200);
 
       const body = InvitationPreviewResponseSchema.parse(response.body as unknown);
       expect(body).toEqual({
@@ -574,7 +578,17 @@ describe('Share HTTP endpoints', () => {
         sentAt: NOW.toISOString(),
         expiresAt,
       });
-      expect(previewInvitation).toHaveBeenCalledWith(TOKEN, undefined);
+      expect(previewInvitation).toHaveBeenCalledWith(TOKEN, {
+        id: USER_RECIPIENT,
+        email: RECIPIENT_EMAIL,
+      });
+    });
+
+    it('rejects an unauthenticated preview with 401', async () => {
+      const response = await request(app).get(`/api/v1/invitations/${TOKEN}`).expect(401);
+
+      expect(ErrorResponseSchema.parse(response.body as unknown).error.code).toBe('UNAUTHORIZED');
+      expect(previewInvitation).not.toHaveBeenCalled();
     });
 
     it('reports hasAccess when a valid token is supplied', async () => {
@@ -603,21 +617,43 @@ describe('Share HTTP endpoints', () => {
         .expect(200);
 
       expect((response.body as Record<string, unknown>).hasAccess).toBe(true);
-      expect(previewInvitation).toHaveBeenCalledWith(TOKEN, USER_RECIPIENT);
+      expect(previewInvitation).toHaveBeenCalledWith(TOKEN, {
+        id: USER_RECIPIENT,
+        email: RECIPIENT_EMAIL,
+      });
     });
 
     it('returns 404 for an unknown token', async () => {
       previewInvitation.mockRejectedValue(new InvitationNotFoundError());
 
-      const response = await request(app).get(`/api/v1/invitations/${TOKEN}`).expect(404);
+      const response = await request(app)
+        .get(`/api/v1/invitations/${TOKEN}`)
+        .set('Authorization', `Bearer ${recipientToken}`)
+        .expect(404);
 
       expect(ErrorResponseSchema.parse(response.body as unknown).error.code).toBe(
         'INVITATION_NOT_FOUND',
       );
     });
 
+    it('returns 403 with a no-permission code when the email does not match the invite', async () => {
+      previewInvitation.mockRejectedValue(new InvitationNotForUserError());
+
+      const response = await request(app)
+        .get(`/api/v1/invitations/${TOKEN}`)
+        .set('Authorization', `Bearer ${recipientToken}`)
+        .expect(403);
+
+      const body = ErrorResponseSchema.parse(response.body as unknown);
+      expect(body.error.code).toBe('INVITATION_NOT_FOR_USER');
+      expect(body.error.message).toBe('You do not have permission to access this item');
+    });
+
     it('returns 400 for a malformed token', async () => {
-      const response = await request(app).get('/api/v1/invitations/not-a-valid-token').expect(400);
+      const response = await request(app)
+        .get('/api/v1/invitations/not-a-valid-token')
+        .set('Authorization', `Bearer ${recipientToken}`)
+        .expect(400);
 
       expect(ErrorResponseSchema.parse(response.body as unknown).error.code).toBe(
         'VALIDATION_ERROR',
@@ -648,7 +684,10 @@ describe('Share HTTP endpoints', () => {
         scan: null,
         access: { role: 'VIEWER', status: 'ACTIVE', grantedAt: NOW.toISOString() },
       });
-      expect(acceptInvitation).toHaveBeenCalledWith(USER_RECIPIENT, TOKEN);
+      expect(acceptInvitation).toHaveBeenCalledWith(
+        { id: USER_RECIPIENT, email: RECIPIENT_EMAIL },
+        TOKEN,
+      );
     });
 
     it('rejects an unauthenticated accept with 401', async () => {
@@ -714,7 +753,10 @@ describe('Share HTTP endpoints', () => {
         status: 'DECLINED',
         declinedAt: NOW.toISOString(),
       });
-      expect(declineInvitation).toHaveBeenCalledWith(USER_RECIPIENT, TOKEN);
+      expect(declineInvitation).toHaveBeenCalledWith(
+        { id: USER_RECIPIENT, email: RECIPIENT_EMAIL },
+        TOKEN,
+      );
     });
 
     it('rejects an unauthenticated decline with 401', async () => {

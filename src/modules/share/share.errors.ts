@@ -47,6 +47,13 @@ export class InvitationDeclinedError extends Error {
   }
 }
 
+export class InvitationNotForUserError extends Error {
+  constructor() {
+    super('This invitation is not for the current user');
+    this.name = 'InvitationNotForUserError';
+  }
+}
+
 export class AccessAlreadyExistsError extends Error {
   constructor() {
     super('The user already has access to this project');

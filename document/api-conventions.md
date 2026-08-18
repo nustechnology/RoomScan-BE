@@ -676,7 +676,7 @@ its assets without granting project-level access.
 | `POST`   | `/api/v1/projects/:projectId/invitations`              | Create a project invitation for an email; Owner only; `201`       |
 | `POST`   | `/api/v1/scans/:scanId/invitations`                    | Create a scan invitation for an email; Owner only; `201`          |
 | `POST`   | `/api/v1/invitations/:invitationId/resend`             | Resend a pending invitation; Owner only; `200`                    |
-| `GET`    | `/api/v1/invitations/:token`                           | Preview an invitation or share link; anonymous or optional Bearer |
+| `GET`    | `/api/v1/invitations/:token`                           | Preview an invitation or share link; requires authentication      |
 | `POST`   | `/api/v1/invitations/:token/accept`                    | Accept and gain Viewer access; `200`                              |
 | `POST`   | `/api/v1/invitations/:token/decline`                   | Decline an invitation for the current user; `200`                 |
 | `DELETE` | `/api/v1/invitations/:invitationId`                    | Revoke a pending invitation; Owner only; `200`                    |
@@ -725,11 +725,10 @@ Preview `200` resolves either an invitation or a generic share link and returns
 a `type` (`invitation` or `share-link`) and `scope` (`project` or `scan`) plus
 the matching entity (`project` or `scan`); the other entity is `null`. An
 invitation adds `sentAt` and its lifecycle `status`; a share link has no
-recipient and reports `ACTIVE`, `EXPIRED`, or `REVOKED`. The invitation
-`recipientEmail` is submitted only when the caller is authorized (a valid Bearer
-token is supplied); anonymous previews omit it.
-`hasAccess` is present only when a valid Bearer token is supplied and reports
-whether that user already has active access. A project-scope invitation preview:
+recipient and reports `ACTIVE`, `EXPIRED`, or `REVOKED`. The preview endpoint
+requires a valid Bearer access token. The invitation `recipientEmail` is always
+submitted, and `hasAccess` reports whether that user already has active access. A
+project-scope invitation preview:
 
 ```json
 {
@@ -761,8 +760,19 @@ set to the thumbnail of the project's most recently created scan (nullable). The
 `owner` and `scanCount` fields are always present for a project-scope link and are
 absent for a scan-scope link, where `project` is `null`.
 
+For a scan-scope link, `scan` includes `id`, `projectId`, `name`, `description`,
+`thumbnail`, `creator` (the parent project Owner: `id` and nullable `email`), and
+`noteCount` (number of active notes on the scan). `project` is `null` for a
+scan-scope link.
+
 `status` is `PENDING`, `EXPIRED`, `ACCEPTED`, `DECLINED`, or `REVOKED` for
 invitations and `ACTIVE`, `EXPIRED`, or `REVOKED` for share links.
+
+Per-recipient invitations are restricted to the invited recipient: when the
+current user's email does not match the invited email (case-insensitive,
+null-safe), preview, accept, or decline returns `403 INVITATION_NOT_FOR_USER`
+with the message "You do not have permission to access this item." Generic share
+links (which have no recipient) are not subject to this check.
 
 Accept `200` also discriminates on `type` and `scope` and returns the matching
 entity. A project-scope invitation accept:
@@ -792,8 +802,8 @@ entity. A project-scope invitation accept:
 ```
 
 A scan-scope accept returns the scan entity (`id`, `projectId`, `name`,
-`description`, `thumbnail`, `creator`, `ownerId`) with `project` set to `null`,
-and a share-link accept reports `shareLinkId` instead of `invitationId`.
+`description`, `thumbnail`, `noteCount`, `creator`, `ownerId`) with `project` set
+to `null`, and a share-link accept reports `shareLinkId` instead of `invitationId`.
 
 Decline `200`:
 
@@ -882,9 +892,9 @@ INVITATION_ALREADY_SENT`. Re-inviting an email whose earlier invitation is
   `409` instead of creating a second pending link.
 - Invitations are per-recipient: the first acceptance marks the invitation
   `ACCEPTED`; an already accepted or declined invitation cannot be accepted
-  again. Acceptance is open (any signed-in user with the link can accept)
-  because Apple Sign-In may deliver a private-relay email different from the
-  invited address.
+  again. Previewing, accepting, or declining a per-recipient invitation requires
+  the current user's email to match the invited email; otherwise the endpoint
+  returns `403 INVITATION_NOT_FOR_USER`.
 - An invitation can be revoked while pending; revocation is idempotent. Expired,
   accepted, and declined invitations cannot be revoked.
 - Resend requires a pending, unexpired invitation; it rotates the token and
@@ -938,8 +948,10 @@ Error behavior:
 
 - `400 VALIDATION_ERROR`: malformed token, invalid body, or invalid path/query.
 - `401 UNAUTHORIZED`: missing/invalid access token where authentication is
-  required (accept, decline, and all Owner-only endpoints).
+  required (preview, accept, decline, and all Owner-only endpoints).
 - `403 NOT_OWNER`: a non-owner attempts share management.
+- `403 INVITATION_NOT_FOR_USER`: an authenticated user's email does not match the
+  invited email (per-recipient invitations only); the caller lacks permission.
 - `404 PROJECT_NOT_FOUND`: project missing, deleted, or inaccessible.
 - `404 SCAN_NOT_FOUND`: scan missing, deleted, or inaccessible.
 - `404 INVITATION_NOT_FOUND`: unknown token or invitation, or the invitation's

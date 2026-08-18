@@ -1,11 +1,7 @@
 import { Router } from 'express';
 
 import { AppError } from '../../common/errors/app-error.js';
-import {
-  authenticate,
-  getUserId,
-  optionalAuthenticate,
-} from '../../common/middleware/authenticate.js';
+import { authenticate, getUserId } from '../../common/middleware/authenticate.js';
 import type {
   AccessTokenVerifier,
   CurrentUserRepository,
@@ -23,6 +19,7 @@ import {
   InvitationDeclinedError,
   InvitationExpiredError,
   InvitationNotFoundError,
+  InvitationNotForUserError,
   InvitationRevokedError,
   NotOwnerError,
   ProjectNotShareableError,
@@ -149,6 +146,13 @@ function mapError(error: unknown): AppError | undefined {
       message: 'Invitation has already been declined',
     });
   }
+  if (error instanceof InvitationNotForUserError) {
+    return new AppError({
+      statusCode: 403,
+      code: 'INVITATION_NOT_FOR_USER',
+      message: 'You do not have permission to access this item',
+    });
+  }
   if (error instanceof AccessAlreadyExistsError) {
     return new AppError({
       statusCode: 409,
@@ -202,7 +206,6 @@ export function createShareRouter({
 }: ShareRouterDependencies): Router {
   const router = Router();
   const requireAuth = authenticate(accessTokenVerifier, currentUserRepository);
-  const requireOptionalAuth = optionalAuthenticate(accessTokenVerifier, currentUserRepository);
 
   router.post(
     '/projects/:projectId/invitations',
@@ -276,13 +279,16 @@ export function createShareRouter({
 
   router.get(
     '/invitations/:token',
-    requireOptionalAuth,
+    requireAuth,
     validateRequest({ params: InvitationTokenParamSchema }),
     async (request, response, next) => {
       try {
         const { params } = response.locals.validated as { params: InvitationTokenParam };
-        const currentUserId = request.locals?.currentUser?.id;
-        const result = await shareService.previewInvitation(params.token, currentUserId);
+        const currentUser = request.locals!.currentUser;
+        const result = await shareService.previewInvitation(params.token, {
+          id: currentUser.id,
+          email: currentUser.email,
+        });
         const responseBody = InvitationPreviewResponseSchema.parse(result);
 
         response.status(200).json(responseBody);
@@ -298,9 +304,12 @@ export function createShareRouter({
     validateRequest({ params: InvitationTokenParamSchema }),
     async (request, response, next) => {
       try {
-        const userId = getUserId(request);
+        const currentUser = request.locals!.currentUser;
         const { params } = response.locals.validated as { params: InvitationTokenParam };
-        const result = await shareService.acceptInvitation(userId, params.token);
+        const result = await shareService.acceptInvitation(
+          { id: currentUser.id, email: currentUser.email },
+          params.token,
+        );
         const responseBody = InvitationAcceptResponseSchema.parse(result);
 
         response.status(200).json(responseBody);
@@ -316,9 +325,12 @@ export function createShareRouter({
     validateRequest({ params: InvitationTokenParamSchema }),
     async (request, response, next) => {
       try {
-        const userId = getUserId(request);
+        const currentUser = request.locals!.currentUser;
         const { params } = response.locals.validated as { params: InvitationTokenParam };
-        const result = await shareService.declineInvitation(userId, params.token);
+        const result = await shareService.declineInvitation(
+          { id: currentUser.id, email: currentUser.email },
+          params.token,
+        );
         const responseBody = InvitationDeclineResponseSchema.parse(result);
 
         response.status(200).json(responseBody);

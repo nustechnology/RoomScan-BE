@@ -104,6 +104,32 @@ const shareProjectSummarySelect = {
   },
 } as const;
 
+const shareScanSummarySelect = {
+  select: {
+    id: true,
+    projectId: true,
+    name: true,
+    description: true,
+    thumbnail: true,
+    creator: {
+      select: {
+        id: true,
+        email: true,
+      },
+    },
+    project: {
+      select: {
+        ownerId: true,
+      },
+    },
+    _count: {
+      select: {
+        notes: true,
+      },
+    },
+  },
+} as const;
+
 interface ShareLinkRow {
   id: string;
   projectId: string | null;
@@ -305,26 +331,7 @@ export class PrismaShareRepository implements ShareRepository {
       select: {
         ...invitationSelect,
         project: shareProjectSummarySelect,
-        scan: {
-          select: {
-            id: true,
-            projectId: true,
-            name: true,
-            description: true,
-            thumbnail: true,
-            creator: {
-              select: {
-                id: true,
-                email: true,
-              },
-            },
-            project: {
-              select: {
-                ownerId: true,
-              },
-            },
-          },
-        },
+        scan: shareScanSummarySelect,
       },
     });
 
@@ -354,6 +361,7 @@ export class PrismaShareRepository implements ShareRepository {
               name: row.scan.name,
               description: row.scan.description,
               thumbnail: row.scan.thumbnail,
+              noteCount: row.scan._count.notes,
               creator: row.scan.creator,
               ownerId: row.scan.project.ownerId,
             },
@@ -700,26 +708,7 @@ export class PrismaShareRepository implements ShareRepository {
       select: {
         ...shareLinkSelect,
         project: shareProjectSummarySelect,
-        scan: {
-          select: {
-            id: true,
-            projectId: true,
-            name: true,
-            description: true,
-            thumbnail: true,
-            creator: {
-              select: {
-                id: true,
-                email: true,
-              },
-            },
-            project: {
-              select: {
-                ownerId: true,
-              },
-            },
-          },
-        },
+        scan: shareScanSummarySelect,
       },
     });
 
@@ -749,6 +738,7 @@ export class PrismaShareRepository implements ShareRepository {
               name: row.scan.name,
               description: row.scan.description,
               thumbnail: row.scan.thumbnail,
+              noteCount: row.scan._count.notes,
               creator: row.scan.creator,
               ownerId: row.scan.project.ownerId,
             },
