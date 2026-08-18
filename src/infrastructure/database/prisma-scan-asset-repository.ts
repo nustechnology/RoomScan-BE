@@ -106,13 +106,6 @@ export class PrismaScanAssetRepository implements ScanAssetRepository {
   }
 
   async findById(id: string): Promise<ScanAssetRecord | null> {
-    if (this.#idempotency === undefined) {
-      const row = await this.#client.scanAsset.findUnique({
-        where: { id },
-        select: legacyScanAssetSelect,
-      });
-      return row === null ? null : toScanAssetRecord(row as ScanAssetRow);
-    }
     const row = await this.#client.scanAsset.findFirst({
       where: { id, deletedAt: null },
       select: scanAssetSelect,
@@ -124,13 +117,6 @@ export class PrismaScanAssetRepository implements ScanAssetRepository {
     scanId: string,
     assetType: ScanAssetType,
   ): Promise<ScanAssetRecord | null> {
-    if (this.#idempotency === undefined) {
-      const row = await this.#client.scanAsset.findUnique({
-        where: { scanId_assetType: { scanId, assetType } },
-        select: legacyScanAssetSelect,
-      });
-      return row === null ? null : toScanAssetRecord(row as ScanAssetRow);
-    }
     const row = await this.#client.scanAsset.findFirst({
       where: { scanId, assetType, deletedAt: null },
       select: scanAssetSelect,

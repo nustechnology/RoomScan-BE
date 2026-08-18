@@ -30,3 +30,4 @@ tmp/
 !.yarn/sdks
 !.yarn/versions
 .pnp.*
+.openez/

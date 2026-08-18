@@ -324,14 +324,6 @@ export class PrismaShareRepository implements ShareRepository {
         select: { id: true },
       });
 
-      if (this.#idempotency === undefined) {
-        const row = await transaction.invitation.findUnique({
-          where: { id: invitationId },
-          select: invitationSelect,
-        });
-        return row === null ? null : toInvitationRecord(row);
-      }
-
       await refreshProjectRollup(transaction, projectId, acceptedAt);
       await writeAccessUpsert(transaction, access.id, { changedAt: acceptedAt });
       await writeAccessUpsert(transaction, access.id, {

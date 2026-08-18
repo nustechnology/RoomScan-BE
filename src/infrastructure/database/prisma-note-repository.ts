@@ -387,15 +387,25 @@ export class PrismaNoteRepository implements NoteRepository {
         throw new NoteNotFoundError();
       }
 
-      if (this.#idempotency === undefined) {
-        const deletedAt = new Date();
-        await transaction.note.delete({ where: { id: noteId } });
-        await refreshScanRollup(transaction, note.scanId, deletedAt);
-        return { kind: 'deleted' as const, revision: undefined };
-      }
-
       if (note.deletedAt !== null) return { kind: 'deleted' as const, revision: note.revision };
       const deletedAt = new Date();
+      if (this.#idempotency === undefined) {
+        await transaction.note.update({
+          where: { id: noteId },
+          data: { deletedAt, revision: { increment: 1 }, updatedAt: deletedAt },
+        });
+        await writeDeleteChange(transaction, {
+          projectId: note.projectId,
+          ownerId,
+          resourceType: 'NOTE',
+          resourceId: noteId,
+          revision: note.revision + 1,
+          deletedAt,
+        });
+        await resolveSyncConflict(transaction, ownerId, 'NOTE', noteId, deletedAt);
+        await refreshScanRollup(transaction, note.scanId, deletedAt);
+        return { kind: 'deleted' as const, revision: note.revision + 1 };
+      }
       if (expectedRevision !== undefined && expectedRevision !== note.revision) {
         const refreshChangeId = await writeNoteUpsert(transaction, noteId, {
           targetUserId: ownerId,

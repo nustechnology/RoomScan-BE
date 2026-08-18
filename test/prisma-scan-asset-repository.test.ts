@@ -25,6 +25,12 @@ const scanAssetSelect = {
   updatedAt: true,
 };
 
+const activeScanAssetSelect = {
+  ...scanAssetSelect,
+  revision: true,
+  deletedAt: true,
+};
+
 function createAssetRow(overrides: Record<string, unknown> = {}) {
   return {
     id: ASSET_ID,
@@ -48,6 +54,7 @@ function createAssetRow(overrides: Record<string, unknown> = {}) {
 function createClient() {
   const scanAsset = {
     findUnique: vi.fn().mockResolvedValue(createAssetRow()),
+    findFirst: vi.fn().mockResolvedValue(createAssetRow()),
     create: vi.fn().mockResolvedValue(createAssetRow()),
     update: vi.fn().mockResolvedValue(createAssetRow()),
     findMany: vi.fn().mockResolvedValue([createAssetRow()]),
@@ -61,29 +68,29 @@ function createClient() {
 }
 
 describe('PrismaScanAssetRepository', () => {
-  it('finds an asset by id', async () => {
+  it('finds an active asset by id', async () => {
     const { client, scanAsset } = createClient();
     const repository = new PrismaScanAssetRepository(client);
 
     const result = await repository.findById(ASSET_ID);
 
-    expect(scanAsset.findUnique).toHaveBeenCalledWith({
-      where: { id: ASSET_ID },
-      select: scanAssetSelect,
+    expect(scanAsset.findFirst).toHaveBeenCalledWith({
+      where: { id: ASSET_ID, deletedAt: null },
+      select: activeScanAssetSelect,
     });
     expect(result?.id).toBe(ASSET_ID);
     expect(result?.status).toBe('PENDING');
   });
 
-  it('finds an asset by scan and type', async () => {
+  it('finds an active asset by scan and type', async () => {
     const { client, scanAsset } = createClient();
     const repository = new PrismaScanAssetRepository(client);
 
     const result = await repository.findByScanAndType(SCAN_ID, 'MODEL');
 
-    expect(scanAsset.findUnique).toHaveBeenCalledWith({
-      where: { scanId_assetType: { scanId: SCAN_ID, assetType: 'MODEL' } },
-      select: scanAssetSelect,
+    expect(scanAsset.findFirst).toHaveBeenCalledWith({
+      where: { scanId: SCAN_ID, assetType: 'MODEL', deletedAt: null },
+      select: activeScanAssetSelect,
     });
     expect(result?.assetType).toBe('MODEL');
   });

@@ -352,14 +352,22 @@ describe('PrismaNoteRepository', () => {
     expect(result.position).toEqual({ x: 9, y: 8, z: 7 });
   });
 
-  it('deletes a note as the Owner and touches activity', async () => {
+  it('soft-deletes a note as the Owner and touches activity', async () => {
     const { client, note, scan, project } = createClient();
     note.findFirst.mockResolvedValueOnce({ scanId: SCAN_ID });
     const repository = new PrismaNoteRepository(client);
 
-    await repository.delete(NOTE_ID, OWNER_ID);
+    await expect(repository.delete(NOTE_ID, OWNER_ID)).resolves.toBe(2);
 
-    expect(note.delete).toHaveBeenCalledWith({ where: { id: NOTE_ID } });
+    expect(note.update).toHaveBeenCalledOnce();
+    const [updateArguments] = note.update.mock.calls[0] as unknown as [
+      { where: { id: string }; data: Record<string, unknown> },
+    ];
+    expect(updateArguments.where).toEqual({ id: NOTE_ID });
+    expect(updateArguments.data).toMatchObject({ revision: { increment: 1 } });
+    expect(updateArguments.data.deletedAt).toBeInstanceOf(Date);
+    expect(updateArguments.data.updatedAt).toBeInstanceOf(Date);
+    expect(note.delete).not.toHaveBeenCalled();
     expect(scan.update).toHaveBeenCalledOnce();
     expect(project.update).toHaveBeenCalledOnce();
   });
@@ -389,6 +397,6 @@ describe('PrismaNoteRepository', () => {
     const repository = new PrismaNoteRepository(client);
 
     await expect(repository.delete(NOTE_ID, VIEWER_ID)).rejects.toBeInstanceOf(NoteNotFoundError);
-    expect(note.delete).not.toHaveBeenCalled();
+    expect(note.update).not.toHaveBeenCalled();
   });
 });
