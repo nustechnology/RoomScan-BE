@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from 'vitest';
 import type { ProjectRepository } from '../src/modules/project/project.types.js';
 import { ProjectPermissionService } from '../src/modules/project/project.permissions.js';
 import { ScanNotFoundError } from '../src/modules/scan/scan.errors.js';
+import type { ScanRepository } from '../src/modules/scan/scan.types.js';
+import { ScanPermissionService } from '../src/modules/scan/scan.permissions.js';
 import { ModelVersionMismatchError, NoteNotFoundError } from '../src/modules/note/note.errors.js';
 import { NoteService } from '../src/modules/note/note.service.js';
 import type { NoteRecord, NoteRepository } from '../src/modules/note/note.types.js';
@@ -62,9 +64,17 @@ function createHarness() {
   const permissions = new ProjectPermissionService({
     findAccessRole,
   } as unknown as ProjectRepository);
-  const service = new NoteService({ repository, permissions });
+  const scanFindAccessRole = vi
+    .fn<ScanRepository['findAccessRole']>()
+    .mockImplementation(async (_scanId, userId) =>
+      Promise.resolve(userId === OWNER_ID ? 'OWNER' : userId === VIEWER_ID ? 'VIEWER' : null),
+    );
+  const scanPermissions = new ScanPermissionService({
+    findAccessRole: scanFindAccessRole,
+  } as unknown as ScanRepository);
+  const service = new NoteService({ repository, permissions, scanPermissions });
 
-  return { mocks, repository, permissions, service, findAccessRole };
+  return { mocks, repository, permissions, service, findAccessRole, scanFindAccessRole };
 }
 
 describe('NoteService', () => {
@@ -168,9 +178,9 @@ describe('NoteService', () => {
     expect(result.items[0]?.permissions.canDelete).toBe(false);
   });
 
-  it('rejects list when the Viewer has no project access', async () => {
-    const { findAccessRole, service } = createHarness();
-    findAccessRole.mockResolvedValueOnce(null);
+  it('rejects list when the Viewer has no scan access', async () => {
+    const { scanFindAccessRole, service } = createHarness();
+    scanFindAccessRole.mockResolvedValueOnce(null);
 
     await expect(
       service.list(VIEWER_ID, SCAN_ID, {

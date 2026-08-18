@@ -107,21 +107,35 @@ function viewableNoteWhere(noteId: string, userId: string) {
     id: noteId,
     scan: {
       deletedAt: null,
-      project: {
-        deletedAt: null,
-        OR: [
-          { ownerId: userId },
-          {
-            accesses: {
-              some: {
-                userId,
-                role: PrismaProjectRole.VIEWER,
-                revokedAt: null,
+      OR: [
+        {
+          project: {
+            deletedAt: null,
+            OR: [
+              { ownerId: userId },
+              {
+                accesses: {
+                  some: {
+                    userId,
+                    role: PrismaProjectRole.VIEWER,
+                    revokedAt: null,
+                  },
+                },
               },
+            ],
+          },
+        },
+        {
+          project: { deletedAt: null },
+          accesses: {
+            some: {
+              userId,
+              role: PrismaProjectRole.VIEWER,
+              revokedAt: null,
             },
           },
-        ],
-      },
+        },
+      ],
     },
   };
 }

@@ -1,6 +1,7 @@
 import { ProjectNotFoundError } from '../project/project.errors.js';
 import type { ProjectPermissionService } from '../project/project.permissions.js';
 import { ScanNotFoundError } from '../scan/scan.errors.js';
+import type { ScanPermissionService } from '../scan/scan.permissions.js';
 import { ModelVersionMismatchError, NoteNotFoundError } from './note.errors.js';
 import type {
   NoteCreateInput,
@@ -17,6 +18,7 @@ import type {
 export interface NoteServiceDependencies {
   repository: NoteRepository;
   permissions: ProjectPermissionService;
+  scanPermissions: ScanPermissionService;
 }
 
 function permissionsFor(role: NoteRole): NoteResult['permissions'] {
@@ -49,10 +51,12 @@ function toResult(record: NoteRecord, role: NoteRole): NoteResult {
 export class NoteService {
   readonly #repository: NoteRepository;
   readonly #permissions: ProjectPermissionService;
+  readonly #scanPermissions: ScanPermissionService;
 
-  constructor({ repository, permissions }: NoteServiceDependencies) {
+  constructor({ repository, permissions, scanPermissions }: NoteServiceDependencies) {
     this.#repository = repository;
     this.#permissions = permissions;
+    this.#scanPermissions = scanPermissions;
   }
 
   async #requireScanOwner(scanId: string, userId: string): Promise<NoteRecord['modelVersion']> {
@@ -75,20 +79,7 @@ export class NoteService {
   }
 
   async #requireScanView(scanId: string, userId: string): Promise<NoteRole> {
-    const context = await this.#repository.findScanContext(scanId);
-
-    if (context === null) {
-      throw new ScanNotFoundError();
-    }
-
-    try {
-      return await this.#permissions.requireView(context.projectId, userId);
-    } catch (error) {
-      if (error instanceof ProjectNotFoundError) {
-        throw new ScanNotFoundError();
-      }
-      throw error;
-    }
+    return await this.#scanPermissions.requireView(scanId, userId);
   }
 
   async #requireNoteOwner(noteId: string, userId: string): Promise<string> {

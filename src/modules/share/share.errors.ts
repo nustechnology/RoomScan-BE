@@ -68,6 +68,34 @@ export class ProjectNotShareableError extends Error {
   }
 }
 
+export class ScanNotShareableError extends Error {
+  constructor() {
+    super('Scan is not ready to be shared');
+    this.name = 'ScanNotShareableError';
+  }
+}
+
+export class ShareLinkNotFoundError extends Error {
+  constructor() {
+    super('Share link was not found');
+    this.name = 'ShareLinkNotFoundError';
+  }
+}
+
+export class ShareLinkRevokedError extends Error {
+  constructor() {
+    super('Share link has been revoked');
+    this.name = 'ShareLinkRevokedError';
+  }
+}
+
+export class ShareLinkExpiredError extends Error {
+  constructor() {
+    super('Share link has expired');
+    this.name = 'ShareLinkExpiredError';
+  }
+}
+
 export class NotOwnerError extends Error {
   constructor() {
     super('Only the project owner can manage sharing');

@@ -82,7 +82,9 @@ the local user accepted (or was granted) as a Viewer — "Garden House"
 (`ACTIVE`), "Maple Cottage" (`REVOKED`), "Willow Townhouse"
 (`PROJECT_DELETED`), and "Cedar Bungalow" (`TEMPORARILY_UNAVAILABLE`) — so the
 Shared With Me list exercises every status and the viewer-removal flow is
-demoable locally. With the shortcut enabled, use:
+demoable locally. It also seeds a couple of scan-level Viewers for the local
+user — "Garden Studio" (`ACTIVE`) and "Cottage Living Room" (`REVOKED`) — so the
+Shared Scans surface is demoable locally too. With the shortcut enabled, use:
 
 ```json
 {
@@ -110,8 +112,12 @@ The `postman/` directory holds the operator-facing API test collection
 them in sync with the public HTTP surface: whenever a public route, request
 field, or response shape changes, add or update the matching request in the
 collection on the same branch. The collection description documents setup, the
-sequential upload flow, the invitation sharing flow (including the `409`
-states and token rotation), and the Shared With Me endpoints.
+sequential upload flow, the project and scan invitation sharing flow (including
+the `409` states and token rotation), generic share links (project and scan),
+and the Shared With Me endpoints. The _Sharing & Invitations_ folder is split
+into _Projects_, _Scans_, and _General_ subfolders, as is the dedicated
+_Share Links_ folder (scan/project links plus the shared token preview/accept
+requests). The Shared With Me surface covers both projects and scans.
 
 ## Before handoff
 
@@ -190,7 +196,16 @@ migration. The `add_invitation_recipient_and_lifecycle` migration extends
 exists per recipient, and drops the now-unused `declinedAt` column from
 `project_accesses`. Final decline lifecycle data is stored on the invitation
 row (`status` and `declinedAt`); declined invitations never create project
-access rows.
+access rows. The `add_scan_sharing_and_share_links` migration makes `projectId`
+on `invitations` nullable and adds a `scanId` so a single invitation row models
+either a project or a scan scope, adds partial unique indexes guarding one
+`PENDING` invitation per `(scan, recipientEmail)`, adds a scope CHECK constraint
+to `invitations`, and creates the `share_links` table (generic reusable links
+with exactly one of `projectId`/`scanId`) and the `scan_accesses` table
+(scan-level Viewer access). It also adds `shareLinkId` to `project_accesses` so
+link-granted project access is traceable. The raw partial unique index and CHECK
+constraints are expressed in the migration SQL, matching how the earlier
+`(projectId, recipientEmail)` `PENDING` partial index is handled.
 Tests use Prisma delegate doubles; native migration and endpoint verification
 use the PostgreSQL `db` container.
 
