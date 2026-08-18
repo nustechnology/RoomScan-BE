@@ -704,7 +704,7 @@ days). Create response `201`:
 ```json
 {
   "invitationId": "b1a2c3d4-e5f6-4890-abcd-ef1234567890",
-  "invitationUrl": "https://invite.roomscan.dev/invitations/AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-ab",
+  "invitationUrl": "https://invite.roomscan.dev/invitations/AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-ab?scope=project",
   "recipientEmail": "recipient@example.com",
   "expiresAt": "2026-08-05T10:00:00.000Z",
   "status": "PENDING",
@@ -712,9 +712,14 @@ days). Create response `201`:
 }
 ```
 
-`invitationUrl` is `{INVITATION_BASE_URL}/invitations/{rawToken}`. Creating the
-invitation sends an AC5-style invitation email to `recipientEmail`; a mail
-delivery failure is logged and does not fail the request.
+`invitationUrl` is `{INVITATION_BASE_URL}/invitations/{rawToken}?scope={scope}`,
+where `scope` is `project` or `scan`. The `scope` query parameter is an
+informational hint only that lets a client (such as the mobile universal-link
+parser) know whether the link targets a project or a scan before it previews the
+token; it is never trusted server-side, and the preview, accept, and decline
+endpoints always resolve the scope from the token. Creating the invitation
+sends an AC5-style invitation email to `recipientEmail`; a mail delivery failure
+is logged and does not fail the request.
 
 Resend `200` has the same shape as the create response. Resending a pending
 invitation rotates the token (the previous link stops working), extends
@@ -930,7 +935,7 @@ Share-link create `201`:
 ```json
 {
   "shareLinkId": "c0ffee00-0000-4000-8000-0000000000aa",
-  "shareLinkUrl": "https://invite.roomscan.dev/invitations/AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-ab",
+  "shareLinkUrl": "https://invite.roomscan.dev/invitations/AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-ab?scope=project",
   "scope": "project",
   "expiresAt": "2026-08-05T10:00:00.000Z"
 }
@@ -939,8 +944,10 @@ Share-link create `201`:
 The share link list returns `{ "items": [{ "shareLinkId", "status": "ACTIVE",
 "expiresAt", "createdAt" }] }`; revoked and expired links are omitted. Revoking
 a share link returns `{ "shareLinkId", "status": "REVOKED", "revokedAt" }` and
-is idempotent. `shareLinkUrl` is `{INVITATION_BASE_URL}/invitations/{rawToken}`,
-the same token namespace as invitations.
+is idempotent. `shareLinkUrl` is `{INVITATION_BASE_URL}/invitations/{rawToken}?scope={scope}`
+(the same scope hint as invitations, where `scope` is `project` or `scan`, used
+only as a client-side hint and never trusted server-side), and shares the same
+token namespace as invitations.
 
 Validation rules:
 

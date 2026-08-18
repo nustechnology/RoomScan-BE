@@ -141,6 +141,10 @@ export class ShareService {
     return 'PENDING';
   }
 
+  #inviteUrl(rawToken: string, scope: ShareScope): string {
+    return `${this.#invitationBaseUrl}/invitations/${rawToken}?scope=${scope}`;
+  }
+
   #scopeOf(record: InvitationRecord | ShareLinkRecord): ShareScope {
     return record.scanId !== null ? 'scan' : 'project';
   }
@@ -331,7 +335,7 @@ export class ShareService {
       sentAt: now,
     });
 
-    const invitationUrl = `${this.#invitationBaseUrl}/invitations/${rawToken}`;
+    const invitationUrl = this.#inviteUrl(rawToken, 'project');
     await this.#sendInvitationEmail({
       scope: 'project',
       recipientEmail: data.recipientEmail,
@@ -381,7 +385,7 @@ export class ShareService {
       sentAt: now,
     });
 
-    const invitationUrl = `${this.#invitationBaseUrl}/invitations/${rawToken}`;
+    const invitationUrl = this.#inviteUrl(rawToken, 'scan');
     await this.#sendInvitationEmail({
       scope: 'scan',
       recipientEmail: data.recipientEmail,
@@ -746,8 +750,8 @@ export class ShareService {
       throw new InvitationNotFoundError();
     }
 
-    const invitationUrl = `${this.#invitationBaseUrl}/invitations/${rawToken}`;
     const scope = this.#scopeOf(updated);
+    const invitationUrl = this.#inviteUrl(rawToken, scope);
 
     if (scope === 'project') {
       if (updated.projectId === null) {

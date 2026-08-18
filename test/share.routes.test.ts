@@ -109,7 +109,7 @@ const config: AppConfig = {
   mailFrom: 'RoomScan App <notifications@roomscan.app>',
 };
 
-const invitationUrl = `https://invite.roomscan.dev/invitations/${TOKEN}`;
+const invitationUrl = `https://invite.roomscan.dev/invitations/${TOKEN}?scope=project`;
 const expiresAt = new Date(NOW.getTime() + 604_800 * 1000).toISOString();
 
 async function signAccessToken(userId: string): Promise<string> {
@@ -362,7 +362,7 @@ describe('Share HTTP endpoints', () => {
     });
     createShareLink.mockResolvedValue({
       shareLinkId: SHARE_LINK_ID,
-      shareLinkUrl: `https://invite.roomscan.dev/invitations/${TOKEN}`,
+      shareLinkUrl: `https://invite.roomscan.dev/invitations/${TOKEN}?scope=project`,
       scope: 'project',
       expiresAt,
     });
@@ -1093,7 +1093,7 @@ describe('Share HTTP endpoints', () => {
       const body = ShareLinkCreateResponseSchema.parse(response.body as unknown);
       expect(body).toEqual({
         shareLinkId: SHARE_LINK_ID,
-        shareLinkUrl: `https://invite.roomscan.dev/invitations/${TOKEN}`,
+        shareLinkUrl: `https://invite.roomscan.dev/invitations/${TOKEN}?scope=project`,
         scope: 'project',
         expiresAt,
       });
@@ -1151,7 +1151,7 @@ describe('Share HTTP endpoints', () => {
     it('creates a generic scan share link for the owner', async () => {
       createShareLink.mockResolvedValue({
         shareLinkId: SHARE_LINK_ID,
-        shareLinkUrl: `https://invite.roomscan.dev/invitations/${TOKEN}`,
+        shareLinkUrl: `https://invite.roomscan.dev/invitations/${TOKEN}?scope=scan`,
         scope: 'scan',
         expiresAt,
       });

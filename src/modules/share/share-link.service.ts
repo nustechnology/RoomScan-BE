@@ -101,7 +101,7 @@ export class ShareLinkService {
 
     return {
       shareLinkId: record.id,
-      shareLinkUrl: `${this.#invitationBaseUrl}/invitations/${rawToken}`,
+      shareLinkUrl: `${this.#invitationBaseUrl}/invitations/${rawToken}?scope=${this.#scopeOf(resource)}`,
       scope: this.#scopeOf(resource),
       expiresAt: expiresAt.toISOString(),
     };
