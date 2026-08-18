@@ -281,11 +281,19 @@ payload returns `409`. Presigned URLs are prepared before the transaction, so
 storage failure writes no receipt. Create Scan commits optional asset sessions
 together with the scan and one receipt.
 
-`Idempotency-Key` and `If-Match` are read and validated by the shared helpers
-`resolveIdempotencyKey` and `parseIfMatch` (backed by the Zod header schemas in
-`common/schemas/sync-headers.ts`) rather than the generic `validateRequest`
-middleware: the idempotency key may arrive through a deprecated body alias, and
-each malformed header must surface a distinct stable error code.
+`If-Match` is read and validated by the shared `parseIfMatch` helper, and
+`Idempotency-Key` by the shared `resolveIdempotencyKey` helper (both backed by
+the Zod header schemas in `common/schemas/sync-headers.ts`), rather than the
+generic `validateRequest` middleware on Project, Scan, and Note routes: the
+idempotency key may arrive through a deprecated body alias, and each malformed
+header must surface a distinct stable error code. The Create Upload Session
+endpoint additionally registers `IdempotencyKeyHeaderSchema` as a `headers`
+source in `validateRequest`, so the middleware enforces header presence and
+format (returning `400 VALIDATION_ERROR` on a missing or malformed key) before
+`resolveIdempotencyKey` reconciles the deprecated body alias. The
+`validateRequest` middleware normalizes header keys case-insensitively via
+`normalizeHeaders` before Zod parsing, so `idempotency-key`, `Idempotency-key`,
+and `IDEMPOTENCY-KEY` all match the schema's `Idempotency-Key` field.
 
 Project, Scan, Note, ScanAsset, and ProjectAccess carry integer revisions.
 Owner PATCH/DELETE routes require a strong `If-Match: "N"`; guarded writes use

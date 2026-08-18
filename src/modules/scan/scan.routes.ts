@@ -332,7 +332,7 @@ export function createScanRouter({
         );
         const revision = await scanService.delete(userId, params.scanId, expectedRevision);
 
-        if (revision !== undefined) setRevisionEtag(response, revision);
+        setRevisionEtag(response, revision);
         response.status(204).end();
       } catch (error) {
         next(notFoundToAppError(error) ?? error);

@@ -50,6 +50,7 @@ const config: AppConfig = {
   appleClientId: 'com.example.roomscan',
   accessTokenSecret: ACCESS_SECRET,
   refreshTokenSecret: 'refresh-secret-that-is-at-least-32-characters',
+  syncCryptoKey: 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=',
   accessTokenTtlSeconds: 3600,
   refreshTokenTtlSeconds: 2_592_000,
   localTestAuthEnabled: false,
@@ -236,7 +237,7 @@ describe('Note HTTP endpoints', () => {
     getById.mockResolvedValue(noteResult());
     update.mockResolvedValue(noteResult({ title: 'Updated title', content: 'Updated content' }));
     move.mockResolvedValue(noteResult({ position: { x: 9, y: 8, z: 7 } }));
-    remove.mockResolvedValue(undefined);
+    remove.mockResolvedValue(1);
   });
 
   describe('POST /api/v1/scans/:scanId/notes', () => {

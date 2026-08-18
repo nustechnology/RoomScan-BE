@@ -173,7 +173,7 @@ export function createProjectRouter({
         const expectedRevision = parseIfMatch(request.headers['if-match']);
         const revision = await projectService.delete(userId, params.projectId, expectedRevision);
 
-        if (revision !== undefined) setRevisionEtag(response, revision);
+        setRevisionEtag(response, revision);
         response.status(204).end();
       } catch (error) {
         next(projectNotFoundToAppError(error) ?? error);

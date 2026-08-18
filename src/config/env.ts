@@ -253,7 +253,7 @@ export interface AppConfig {
   appleClientId: string;
   accessTokenSecret: string;
   refreshTokenSecret: string;
-  syncCryptoKey?: string;
+  syncCryptoKey: string;
   accessTokenTtlSeconds: number;
   refreshTokenTtlSeconds: number;
   localTestAuthEnabled: boolean;

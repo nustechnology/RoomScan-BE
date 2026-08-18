@@ -32,7 +32,7 @@ export interface ScanRecord {
   assetStatus: ScanAssetStatus;
   syncStatus: ScanSyncStatus;
   modelVersion: number;
-  revision?: number;
+  revision: number;
   clientMutationId: string | null;
   deletedAt: Date | null;
   createdAt: Date;
@@ -57,7 +57,7 @@ export interface ScanResult {
   assetStatus: ScanAssetStatus;
   syncStatus: ScanSyncStatus;
   modelVersion: number;
-  revision?: number;
+  revision: number;
   createdAt: string;
   updatedAt: string;
   permissions: ScanPermissions;
@@ -158,10 +158,10 @@ export interface ScanRepository {
   update(
     id: string,
     ownerId: string,
-    expectedRevisionOrData: number | ScanUpdateInput,
-    data?: ScanUpdateInput,
+    expectedRevision: number,
+    data: ScanUpdateInput,
   ): Promise<ScanRecord>;
-  softDelete(id: string, ownerId: string, expectedRevision?: number): Promise<number | undefined>;
+  softDelete(id: string, ownerId: string, expectedRevision: number): Promise<number>;
   updateAssetStatus(
     scanId: string,
     data: { assetStatus?: ScanAssetStatus; syncStatus?: ScanSyncStatus },

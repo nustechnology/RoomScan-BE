@@ -346,14 +346,19 @@ describe('PrismaProjectRepository', () => {
     const { client, project, transaction } = createClient();
     const repository = new PrismaProjectRepository(client);
 
-    await repository.update(PROJECT_ID, OWNER_ID, {
+    await repository.update(PROJECT_ID, OWNER_ID, 1, {
       name: 'Updated',
       description: null,
     });
 
-    expect(project.updateMany).toHaveBeenCalledWith({
-      where: { id: PROJECT_ID, ownerId: OWNER_ID, deletedAt: null },
-      data: { name: 'Updated', description: null },
+    expect(project.updateMany).toHaveBeenNthCalledWith(1, {
+      where: { id: PROJECT_ID, ownerId: OWNER_ID, deletedAt: null, revision: 1 },
+      data: {
+        name: 'Updated',
+        description: null,
+        revision: { increment: 1 },
+        updatedAt: expect.any(Date) as Date,
+      },
     });
     expect(project.findFirst).toHaveBeenCalledWith({
       where: { id: PROJECT_ID, ownerId: OWNER_ID, deletedAt: null },
@@ -362,15 +367,30 @@ describe('PrismaProjectRepository', () => {
     expect(transaction).toHaveBeenCalledOnce();
   });
 
-  it('throws a hidden not-found error when an update affects no rows', async () => {
+  it('returns a revision conflict when an update loses to a newer revision', async () => {
     const { client, project } = createClient();
     project.updateMany.mockResolvedValue({ count: 0 });
+    project.findFirst.mockResolvedValueOnce({ revision: 2, deletedAt: null });
     const repository = new PrismaProjectRepository(client);
 
     await expect(
-      repository.update(PROJECT_ID, OWNER_ID, { name: 'Updated' }),
+      repository.update(PROJECT_ID, OWNER_ID, 1, { name: 'Updated' }),
+    ).rejects.toMatchObject({
+      name: RevisionConflictError.name,
+      currentRevision: 2,
+      deleted: false,
+    });
+  });
+
+  it('throws a hidden not-found error when an update targets a missing project', async () => {
+    const { client, project } = createClient();
+    project.updateMany.mockResolvedValue({ count: 0 });
+    project.findFirst.mockResolvedValueOnce(null);
+    const repository = new PrismaProjectRepository(client);
+
+    await expect(
+      repository.update(PROJECT_ID, OWNER_ID, 1, { name: 'Updated' }),
     ).rejects.toBeInstanceOf(ProjectNotFoundError);
-    expect(project.findFirst).not.toHaveBeenCalled();
   });
 
   it('throws if the project disappears after an update', async () => {
@@ -379,44 +399,8 @@ describe('PrismaProjectRepository', () => {
     const repository = new PrismaProjectRepository(client);
 
     await expect(
-      repository.update(PROJECT_ID, OWNER_ID, { name: 'Updated' }),
+      repository.update(PROJECT_ID, OWNER_ID, 1, { name: 'Updated' }),
     ).rejects.toBeInstanceOf(ProjectNotFoundError);
-  });
-
-  it('soft-deletes a project and revokes active Viewer access in one transaction', async () => {
-    const { client, project, projectAccess } = createClient();
-    project.findFirst.mockResolvedValueOnce({ deletedAt: null });
-    const repository = new PrismaProjectRepository(client);
-
-    await repository.softDelete(PROJECT_ID, OWNER_ID);
-
-    const [findArguments] = project.findFirst.mock.calls.at(-1) as unknown as [
-      { where: unknown; select: Record<string, unknown> },
-    ];
-    expect(findArguments.where).toEqual({ id: PROJECT_ID, ownerId: OWNER_ID });
-    expect(findArguments.select).toMatchObject({ deletedAt: true, revision: true });
-    expect(project.update).toHaveBeenCalledOnce();
-    const projectUpdate = project.update.mock.calls[0]?.[0] as
-      | {
-          where: { id: string };
-          data: { deletedAt: unknown };
-        }
-      | undefined;
-    expect(projectUpdate?.where).toEqual({ id: PROJECT_ID });
-    expect(projectUpdate?.data.deletedAt).toBeInstanceOf(Date);
-
-    expect(projectAccess.updateMany).toHaveBeenCalledOnce();
-    const accessUpdate = projectAccess.updateMany.mock.calls[0]?.[0] as
-      | {
-          where: { projectId: string; revokedAt: null };
-          data: { revokedAt: unknown };
-        }
-      | undefined;
-    expect(accessUpdate?.where).toEqual({
-      projectId: PROJECT_ID,
-      revokedAt: null,
-    });
-    expect(accessUpdate?.data.revokedAt).toBe(projectUpdate?.data.deletedAt);
   });
 
   it('claims an Owner delete with an atomic revision predicate', async () => {
@@ -467,11 +451,17 @@ describe('PrismaProjectRepository', () => {
 
   it('keeps repeated deletion idempotent for the same Owner', async () => {
     const { client, project, projectAccess } = createClient();
-    project.findFirst.mockResolvedValueOnce({ deletedAt: NOW });
+    project.findFirst.mockResolvedValueOnce({
+      ownerId: OWNER_ID,
+      revision: 1,
+      deletedAt: NOW,
+      scans: [],
+      accesses: [],
+    });
     const repository = new PrismaProjectRepository(client);
 
-    await expect(repository.softDelete(PROJECT_ID, OWNER_ID)).resolves.toBeUndefined();
-    expect(project.update).not.toHaveBeenCalled();
+    await expect(repository.softDelete(PROJECT_ID, OWNER_ID, 1)).resolves.toBe(1);
+    expect(project.updateMany).not.toHaveBeenCalled();
     expect(projectAccess.updateMany).not.toHaveBeenCalled();
   });
 
@@ -480,7 +470,7 @@ describe('PrismaProjectRepository', () => {
     project.findFirst.mockResolvedValueOnce(null);
     const repository = new PrismaProjectRepository(client);
 
-    await expect(repository.softDelete(PROJECT_ID, VIEWER_ID)).rejects.toBeInstanceOf(
+    await expect(repository.softDelete(PROJECT_ID, VIEWER_ID, 1)).rejects.toBeInstanceOf(
       ProjectNotFoundError,
     );
   });
@@ -606,6 +596,56 @@ describe('PrismaProjectRepository', () => {
           operation: 'DELETE',
         }),
       ],
+    });
+  });
+
+  it('returns a revision conflict when a soft-delete targets a stale revision', async () => {
+    const { client, project } = createClient();
+    project.findFirst.mockResolvedValueOnce({
+      ownerId: OWNER_ID,
+      revision: 3,
+      deletedAt: null,
+      scans: [],
+      accesses: [],
+    });
+    const repository = new PrismaProjectRepository(client);
+
+    await expect(repository.softDelete(PROJECT_ID, OWNER_ID, 4)).rejects.toMatchObject({
+      name: RevisionConflictError.name,
+      currentRevision: 3,
+      deleted: false,
+    });
+  });
+
+  it('keeps a soft-delete idempotent when a concurrent delete wins the claim', async () => {
+    const { client, project } = createClient();
+    project.findFirst
+      .mockResolvedValueOnce({
+        ownerId: OWNER_ID,
+        revision: 1,
+        deletedAt: null,
+        scans: [],
+        accesses: [],
+      })
+      .mockResolvedValueOnce({ revision: 2, deletedAt: NOW });
+    project.updateMany.mockResolvedValue({ count: 0 });
+    const repository = new PrismaProjectRepository(client);
+
+    await expect(repository.softDelete(PROJECT_ID, OWNER_ID, 1)).resolves.toBe(2);
+  });
+
+  it('returns a tombstone conflict when an update targets an already-deleted project', async () => {
+    const { client, project } = createClient();
+    project.updateMany.mockResolvedValue({ count: 0 });
+    project.findFirst.mockResolvedValueOnce({ revision: 2, deletedAt: NOW });
+    const repository = new PrismaProjectRepository(client);
+
+    await expect(
+      repository.update(PROJECT_ID, OWNER_ID, 1, { name: 'Updated' }),
+    ).rejects.toMatchObject({
+      name: RevisionConflictError.name,
+      currentRevision: 2,
+      deleted: true,
     });
   });
 });

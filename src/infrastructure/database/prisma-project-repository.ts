@@ -330,31 +330,13 @@ export class PrismaProjectRepository implements ProjectRepository {
   async update(
     id: string,
     ownerId: string,
-    expectedRevisionOrData: number | ProjectUpdateInput,
-    maybeData?: ProjectUpdateInput,
+    expectedRevision: number,
+    data: ProjectUpdateInput,
   ): Promise<ProjectRecord> {
-    const expectedRevision =
-      typeof expectedRevisionOrData === 'number' ? expectedRevisionOrData : undefined;
-    const data =
-      typeof expectedRevisionOrData === 'number' ? (maybeData ?? {}) : expectedRevisionOrData;
     const outcome = await this.#client.$transaction(async (transaction) => {
       const changedAt = new Date();
-      if (expectedRevision === undefined) {
-        const result = await transaction.project.updateMany({
-          where: { id, ownerId, deletedAt: null },
-          data,
-        });
-        if (result.count === 0) throw new ProjectNotFoundError();
-        const row = await transaction.project.findFirst({
-          where: { id, ownerId, deletedAt: null },
-          select: projectSelect,
-        });
-        if (row === null) throw new ProjectNotFoundError();
-        return { kind: 'updated' as const, record: toProjectRecord(row) };
-      }
-      const effectiveRevision = expectedRevision;
       const result = await transaction.project.updateMany({
-        where: { id, ownerId, deletedAt: null, revision: effectiveRevision },
+        where: { id, ownerId, deletedAt: null, revision: expectedRevision },
         data: {
           ...data,
           revision: { increment: 1 },
@@ -428,11 +410,7 @@ export class PrismaProjectRepository implements ProjectRepository {
     return outcome.record;
   }
 
-  async softDelete(
-    id: string,
-    ownerId: string,
-    expectedRevision?: number,
-  ): Promise<number | undefined> {
+  async softDelete(id: string, ownerId: string, expectedRevision: number): Promise<number> {
     const outcome = await this.#client.$transaction(async (transaction) => {
       const project = await transaction.project.findFirst({
         where: { id, ownerId },
@@ -460,23 +438,12 @@ export class PrismaProjectRepository implements ProjectRepository {
         throw new ProjectNotFoundError();
       }
 
-      if (project.revision === undefined) {
-        if (project.deletedAt !== null) return { kind: 'deleted' as const, revision: undefined };
-        const deletedAt = new Date();
-        await transaction.project.update({ where: { id }, data: { deletedAt } });
-        await transaction.projectAccess.updateMany({
-          where: { projectId: id, revokedAt: null },
-          data: { revokedAt: deletedAt },
-        });
-        return { kind: 'deleted' as const, revision: undefined };
-      }
-
       if (project.deletedAt !== null) {
         return { kind: 'deleted' as const, revision: project.revision };
       }
 
       const deletedAt = new Date();
-      if (expectedRevision !== undefined && project.revision !== expectedRevision) {
+      if (project.revision !== expectedRevision) {
         const refreshChangeId = await writeProjectUpsert(transaction, id, {
           targetUserId: ownerId,
           syncStatus: 'CONFLICT',
@@ -493,40 +460,33 @@ export class PrismaProjectRepository implements ProjectRepository {
         return { kind: 'conflict' as const, revision: project.revision };
       }
 
-      if (expectedRevision !== undefined) {
-        const claimed = await transaction.project.updateMany({
-          where: { id, ownerId, deletedAt: null, revision: expectedRevision },
-          data: { deletedAt, revision: { increment: 1 }, updatedAt: deletedAt },
+      const claimed = await transaction.project.updateMany({
+        where: { id, ownerId, deletedAt: null, revision: expectedRevision },
+        data: { deletedAt, revision: { increment: 1 }, updatedAt: deletedAt },
+      });
+      if (claimed.count === 0) {
+        const current = await transaction.project.findFirst({
+          where: { id, ownerId },
+          select: { revision: true, deletedAt: true },
         });
-        if (claimed.count === 0) {
-          const current = await transaction.project.findFirst({
-            where: { id, ownerId },
-            select: { revision: true, deletedAt: true },
-          });
-          if (current === null) throw new ProjectNotFoundError();
-          if (current.deletedAt !== null) {
-            return { kind: 'deleted' as const, revision: current.revision };
-          }
-          const refreshChangeId = await writeProjectUpsert(transaction, id, {
-            targetUserId: ownerId,
-            syncStatus: 'CONFLICT',
-            changedAt: deletedAt,
-          });
-          await upsertSyncConflict(transaction, {
-            userId: ownerId,
-            projectId: id,
-            resourceType: 'PROJECT',
-            resourceId: id,
-            serverRevision: current.revision,
-            refreshChangeId,
-          });
-          return { kind: 'conflict' as const, revision: current.revision };
+        if (current === null) throw new ProjectNotFoundError();
+        if (current.deletedAt !== null) {
+          return { kind: 'deleted' as const, revision: current.revision };
         }
-      } else {
-        await transaction.project.update({
-          where: { id },
-          data: { deletedAt, revision: { increment: 1 }, updatedAt: deletedAt },
+        const refreshChangeId = await writeProjectUpsert(transaction, id, {
+          targetUserId: ownerId,
+          syncStatus: 'CONFLICT',
+          changedAt: deletedAt,
         });
+        await upsertSyncConflict(transaction, {
+          userId: ownerId,
+          projectId: id,
+          resourceType: 'PROJECT',
+          resourceId: id,
+          serverRevision: current.revision,
+          refreshChangeId,
+        });
+        return { kind: 'conflict' as const, revision: current.revision };
       }
 
       const notes = (project.scans ?? []).flatMap((scan) => scan.notes ?? []);

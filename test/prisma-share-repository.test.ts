@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { Prisma, type PrismaClient } from '../src/generated/prisma/client.js';
 import { PrismaShareRepository } from '../src/infrastructure/database/prisma-share-repository.js';
+import type { PrismaIdempotencyExecutor } from '../src/infrastructure/database/prisma-idempotency.js';
 import {
   InvitationAlreadySentError,
   AccessAlreadyExistsError,
@@ -1043,5 +1044,244 @@ describe('PrismaShareRepository', () => {
       select: { id: true },
     });
     expect(scanAccess.upsert).not.toHaveBeenCalled();
+  });
+
+  it('createInvitationIdempotently stores the invitation and rolls up the project', async () => {
+    const { client, invitation } = createClient();
+    const execute = vi.fn(
+      async (_context: unknown, statusCode: number, work: (tx: unknown) => Promise<unknown>) => ({
+        body: await work({
+          invitation: { updateMany: invitation.updateMany, create: invitation.create },
+        }),
+        statusCode,
+        replayed: false,
+      }),
+    );
+    const repository = new PrismaShareRepository(client, {
+      execute,
+    } as unknown as PrismaIdempotencyExecutor);
+    const context = {
+      userId: OWNER_ID,
+      operation: 'CREATE_INVITATION' as const,
+      parentScope: `project:${PROJECT_ID}`,
+      keyHash: 'key-hash',
+      requestHash: 'request-hash',
+    };
+    const result = {
+      invitationId: INVITATION_ID,
+      invitationUrl: 'https://example.com/invite',
+      recipientEmail: RECIPIENT_EMAIL,
+      expiresAt: NOW.toISOString(),
+      status: 'PENDING' as const,
+      sentAt: NOW.toISOString(),
+    };
+
+    const outcome = await repository.createInvitationIdempotently(
+      {
+        id: INVITATION_ID,
+        projectId: PROJECT_ID,
+        createdById: OWNER_ID,
+        recipientEmail: RECIPIENT_EMAIL,
+        tokenHash: TOKEN_HASH,
+        expiresAt: NOW,
+        sentAt: NOW,
+      },
+      context,
+      result,
+    );
+
+    expect(execute).toHaveBeenCalledWith(context, 201, expect.any(Function));
+    expect(invitation.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ id: INVITATION_ID, projectId: PROJECT_ID }) as Record<
+          string,
+          unknown
+        >,
+      }),
+    );
+    expect(outcome.body.invitationId).toBe(INVITATION_ID);
+  });
+
+  it('createInvitationIdempotently maps a duplicate to InvitationAlreadySentError', async () => {
+    const { client, invitation } = createClient();
+    const conflict = new Prisma.PrismaClientKnownRequestError('unique constraint', {
+      code: 'P2002',
+      clientVersion: 'test',
+      meta: { target: ['projectId', 'recipientEmail'] },
+    });
+    invitation.create.mockRejectedValueOnce(conflict);
+    const execute = vi.fn(
+      async (_context: unknown, statusCode: number, work: (tx: unknown) => Promise<unknown>) => ({
+        body: await work({
+          invitation: { updateMany: invitation.updateMany, create: invitation.create },
+        }),
+        statusCode,
+        replayed: false,
+      }),
+    );
+    const repository = new PrismaShareRepository(client, {
+      execute,
+    } as unknown as PrismaIdempotencyExecutor);
+
+    await expect(
+      repository.createInvitationIdempotently(
+        {
+          id: INVITATION_ID,
+          projectId: PROJECT_ID,
+          createdById: OWNER_ID,
+          recipientEmail: RECIPIENT_EMAIL,
+          tokenHash: TOKEN_HASH,
+          expiresAt: NOW,
+          sentAt: NOW,
+        },
+        {
+          userId: OWNER_ID,
+          operation: 'CREATE_INVITATION',
+          parentScope: `project:${PROJECT_ID}`,
+          keyHash: 'key-hash',
+          requestHash: 'request-hash',
+        },
+        {
+          invitationId: INVITATION_ID,
+          invitationUrl: 'https://example.com/invite',
+          recipientEmail: RECIPIENT_EMAIL,
+          expiresAt: NOW.toISOString(),
+          status: 'PENDING',
+          sentAt: NOW.toISOString(),
+        },
+      ),
+    ).rejects.toBeInstanceOf(InvitationAlreadySentError);
+  });
+
+  it('createInvitationIdempotently throws when idempotency is not configured', async () => {
+    const { client } = createClient();
+
+    await expect(
+      new PrismaShareRepository(client).createInvitationIdempotently(
+        {
+          id: INVITATION_ID,
+          projectId: PROJECT_ID,
+          createdById: OWNER_ID,
+          recipientEmail: RECIPIENT_EMAIL,
+          tokenHash: TOKEN_HASH,
+          expiresAt: NOW,
+          sentAt: NOW,
+        },
+        {
+          userId: OWNER_ID,
+          operation: 'CREATE_INVITATION',
+          parentScope: `project:${PROJECT_ID}`,
+          keyHash: 'key-hash',
+          requestHash: 'request-hash',
+        },
+        {
+          invitationId: INVITATION_ID,
+          invitationUrl: 'https://example.com/invite',
+          recipientEmail: RECIPIENT_EMAIL,
+          expiresAt: NOW.toISOString(),
+          status: 'PENDING',
+          sentAt: NOW.toISOString(),
+        },
+      ),
+    ).rejects.toThrow('Invitation idempotency is not configured');
+  });
+
+  it('resendInvitation returns null when the invitation is no longer pending', async () => {
+    const { client, invitation } = createClient();
+    invitation.updateMany.mockResolvedValue({ count: 0 });
+
+    await expect(
+      new PrismaShareRepository(client).resendInvitation(INVITATION_ID, {
+        tokenHash: 'c'.repeat(64),
+        sentAt: NOW,
+        expiresAt: NOW,
+      }),
+    ).resolves.toBeNull();
+  });
+
+  it('revokeViewerAccess revokes an active access inside a transaction when idempotency is configured', async () => {
+    const { client, transaction } = createClient();
+    const findUnique = vi.fn().mockResolvedValue({
+      id: 'access-id',
+      revision: 1,
+      revokedAt: null,
+      project: { ownerId: OWNER_ID },
+    });
+    const update = vi.fn().mockResolvedValue({});
+    transaction.mockImplementationOnce(async (operation: unknown) => {
+      return (operation as (tx: unknown) => Promise<unknown>)({
+        projectAccess: { findUnique, update },
+      });
+    });
+    const repository = new PrismaShareRepository(client, {} as PrismaIdempotencyExecutor);
+
+    const result = await repository.revokeViewerAccess(PROJECT_ID, VIEWER_ID, NOW);
+
+    expect(result).toEqual({ revokedAt: NOW, revision: 2 });
+    expect(update).toHaveBeenCalledWith({
+      where: { id: 'access-id' },
+      data: { revokedAt: NOW, revision: { increment: 1 }, updatedAt: NOW },
+    });
+  });
+
+  it('revokeScanViewerAccess returns the existing revokedAt when already revoked', async () => {
+    const { client, scanAccess } = createClient();
+    scanAccess.findUnique.mockResolvedValue({ id: 'scan-access-id', revokedAt: NOW });
+
+    await expect(
+      new PrismaShareRepository(client).revokeScanViewerAccess(SCAN_ID, VIEWER_ID, NOW),
+    ).resolves.toEqual({ revokedAt: NOW });
+    expect(scanAccess.update).not.toHaveBeenCalled();
+  });
+
+  it('createShareLink stores a scan-scope link', async () => {
+    const { client, shareLink } = createClient();
+
+    const result = await new PrismaShareRepository(client).createShareLink({
+      scanId: SCAN_ID,
+      createdById: OWNER_ID,
+      tokenHash: TOKEN_HASH,
+      expiresAt: NOW,
+    });
+
+    expect(result.tokenHash).toBe(TOKEN_HASH);
+    expect(shareLink.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: {
+          createdById: OWNER_ID,
+          tokenHash: TOKEN_HASH,
+          expiresAt: NOW,
+          scanId: SCAN_ID,
+        },
+      }),
+    );
+  });
+
+  it('listShareLinksByResource returns only active links for a scan', async () => {
+    const { client, shareLink } = createClient();
+    shareLink.findMany.mockResolvedValue([
+      {
+        id: SHARE_LINK_ID,
+        projectId: null,
+        scanId: SCAN_ID,
+        createdById: OWNER_ID,
+        tokenHash: TOKEN_HASH,
+        expiresAt: NOW,
+        revokedAt: null,
+        createdAt: NOW,
+        updatedAt: NOW,
+      },
+    ]);
+
+    const result = await new PrismaShareRepository(client).listShareLinksByResource({
+      scanId: SCAN_ID,
+    });
+
+    expect(result).toHaveLength(1);
+    expect(shareLink.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { scanId: SCAN_ID, projectId: null, revokedAt: null },
+      }),
+    );
   });
 });

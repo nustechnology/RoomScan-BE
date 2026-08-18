@@ -123,7 +123,7 @@ function toOwnerResult(record: ScanRecord): ScanResult {
     assetStatus: record.assetStatus,
     syncStatus: record.syncStatus,
     modelVersion: record.modelVersion,
-    revision: record.revision ?? 1,
+    revision: record.revision,
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString(),
     permissions: { role: 'OWNER', canView: true, canEdit: true, canDelete: true },
@@ -452,33 +452,15 @@ export class PrismaScanRepository implements ScanRepository {
   async update(
     id: string,
     ownerId: string,
-    expectedRevisionOrData: number | ScanUpdateInput,
-    maybeData?: ScanUpdateInput,
+    expectedRevision: number,
+    data: ScanUpdateInput,
   ): Promise<ScanRecord> {
-    const expectedRevision =
-      typeof expectedRevisionOrData === 'number' ? expectedRevisionOrData : undefined;
-    const data =
-      typeof expectedRevisionOrData === 'number' ? (maybeData ?? {}) : expectedRevisionOrData;
     const outcome = await this.#client.$transaction(async (transaction) => {
       const changedAt = new Date();
-      if (expectedRevision === undefined) {
-        const result = await transaction.scan.updateMany({
-          where: { id, deletedAt: null, project: { ownerId, deletedAt: null } },
-          data,
-        });
-        if (result.count === 0) throw new ScanNotFoundError();
-        const row = await transaction.scan.findFirst({
-          where: { id, deletedAt: null, project: { ownerId, deletedAt: null } },
-          select: scanSelect,
-        });
-        if (row === null) throw new ScanNotFoundError();
-        return { kind: 'updated' as const, record: toScanRecord(row) };
-      }
-      const effectiveRevision = expectedRevision;
       const result = await transaction.scan.updateMany({
         where: {
           id,
-          revision: effectiveRevision,
+          revision: expectedRevision,
           deletedAt: null,
           project: { ownerId, deletedAt: null },
         },
@@ -548,11 +530,7 @@ export class PrismaScanRepository implements ScanRepository {
     return outcome.record;
   }
 
-  async softDelete(
-    id: string,
-    ownerId: string,
-    expectedRevision?: number,
-  ): Promise<number | undefined> {
+  async softDelete(id: string, ownerId: string, expectedRevision: number): Promise<number> {
     const outcome = await this.#client.$transaction(async (transaction) => {
       const scan = await transaction.scan.findFirst({
         where: { id, project: { ownerId } },
@@ -570,23 +548,12 @@ export class PrismaScanRepository implements ScanRepository {
         throw new ScanNotFoundError();
       }
 
-      if (scan.revision === undefined) {
-        if (scan.deletedAt !== null) return { kind: 'deleted' as const, revision: undefined };
-        const deletedAt = new Date();
-        await transaction.scan.update({ where: { id }, data: { deletedAt } });
-        await transaction.project.update({
-          where: { id: scan.projectId },
-          data: { updatedAt: deletedAt },
-        });
-        return { kind: 'deleted' as const, revision: undefined };
-      }
-
       if (scan.deletedAt !== null) {
         return { kind: 'deleted' as const, revision: scan.revision };
       }
 
       const deletedAt = new Date();
-      if (expectedRevision !== undefined && scan.revision !== expectedRevision) {
+      if (scan.revision !== expectedRevision) {
         const refreshChangeId = await writeScanUpsert(transaction, id, {
           targetUserId: ownerId,
           syncStatus: 'CONFLICT',
@@ -602,49 +569,42 @@ export class PrismaScanRepository implements ScanRepository {
         });
         return { kind: 'conflict' as const, revision: scan.revision, projectId: scan.projectId };
       }
-      if (expectedRevision !== undefined) {
-        const claimed = await transaction.scan.updateMany({
-          where: {
-            id,
-            revision: expectedRevision,
-            deletedAt: null,
-            project: { ownerId },
-          },
-          data: { deletedAt, revision: { increment: 1 }, updatedAt: deletedAt },
+      const claimed = await transaction.scan.updateMany({
+        where: {
+          id,
+          revision: expectedRevision,
+          deletedAt: null,
+          project: { ownerId },
+        },
+        data: { deletedAt, revision: { increment: 1 }, updatedAt: deletedAt },
+      });
+      if (claimed.count === 0) {
+        const current = await transaction.scan.findFirst({
+          where: { id, project: { ownerId } },
+          select: { projectId: true, revision: true, deletedAt: true },
         });
-        if (claimed.count === 0) {
-          const current = await transaction.scan.findFirst({
-            where: { id, project: { ownerId } },
-            select: { projectId: true, revision: true, deletedAt: true },
-          });
-          if (current === null) throw new ScanNotFoundError();
-          if (current.deletedAt !== null) {
-            return { kind: 'deleted' as const, revision: current.revision };
-          }
-          const refreshChangeId = await writeScanUpsert(transaction, id, {
-            targetUserId: ownerId,
-            syncStatus: 'CONFLICT',
-            changedAt: deletedAt,
-          });
-          await upsertSyncConflict(transaction, {
-            userId: ownerId,
-            projectId: current.projectId,
-            resourceType: 'SCAN',
-            resourceId: id,
-            serverRevision: current.revision,
-            refreshChangeId,
-          });
-          return {
-            kind: 'conflict' as const,
-            revision: current.revision,
-            projectId: current.projectId,
-          };
+        if (current === null) throw new ScanNotFoundError();
+        if (current.deletedAt !== null) {
+          return { kind: 'deleted' as const, revision: current.revision };
         }
-      } else {
-        await transaction.scan.update({
-          where: { id },
-          data: { deletedAt, revision: { increment: 1 }, updatedAt: deletedAt },
+        const refreshChangeId = await writeScanUpsert(transaction, id, {
+          targetUserId: ownerId,
+          syncStatus: 'CONFLICT',
+          changedAt: deletedAt,
         });
+        await upsertSyncConflict(transaction, {
+          userId: ownerId,
+          projectId: current.projectId,
+          resourceType: 'SCAN',
+          resourceId: id,
+          serverRevision: current.revision,
+          refreshChangeId,
+        });
+        return {
+          kind: 'conflict' as const,
+          revision: current.revision,
+          projectId: current.projectId,
+        };
       }
       const notes = scan.notes ?? [];
       if (notes.length > 0) {

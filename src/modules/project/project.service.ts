@@ -48,7 +48,7 @@ function toResult(record: ProjectRecord, role: ProjectRole): ProjectResult {
     sharedCount: record.sharedCount,
     thumbnail: record.thumbnail,
     syncStatus: record.syncStatus,
-    ...(record.revision === undefined ? {} : { revision: record.revision }),
+    revision: record.revision,
     ...(!Object.hasOwn(record, 'lastSyncedAt')
       ? {}
       : { lastSyncedAt: record.lastSyncedAt?.toISOString() ?? null }),
@@ -119,27 +119,14 @@ export class ProjectService {
   async update(
     ownerId: string,
     projectId: string,
-    expectedRevisionOrData: number | ProjectUpdateInput,
-    maybeData?: ProjectUpdateInput,
+    expectedRevision: number,
+    data: ProjectUpdateInput,
   ): Promise<ProjectResult> {
-    const expectedRevision =
-      typeof expectedRevisionOrData === 'number' ? expectedRevisionOrData : undefined;
-    const data =
-      typeof expectedRevisionOrData === 'number' ? (maybeData ?? {}) : expectedRevisionOrData;
-    const record =
-      expectedRevision === undefined
-        ? await this.#repository.update(projectId, ownerId, data)
-        : await this.#repository.update(projectId, ownerId, expectedRevision, data);
+    const record = await this.#repository.update(projectId, ownerId, expectedRevision, data);
     return toResult(record, 'OWNER');
   }
 
-  async delete(
-    ownerId: string,
-    projectId: string,
-    expectedRevision?: number,
-  ): Promise<number | undefined> {
-    return expectedRevision === undefined
-      ? await this.#repository.softDelete(projectId, ownerId)
-      : await this.#repository.softDelete(projectId, ownerId, expectedRevision);
+  async delete(ownerId: string, projectId: string, expectedRevision: number): Promise<number> {
+    return await this.#repository.softDelete(projectId, ownerId, expectedRevision);
   }
 }

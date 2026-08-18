@@ -236,7 +236,7 @@ export function createNoteRouter({
         );
         const revision = await noteService.delete(userId, params.noteId, expectedRevision);
 
-        if (revision !== undefined) setRevisionEtag(response, revision);
+        setRevisionEtag(response, revision);
         response.status(204).end();
       } catch (error) {
         next(mapError(error) ?? error);

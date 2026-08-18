@@ -223,7 +223,13 @@ reuse with another validated payload returns
 and presign `503` failures do not claim the key. `clientMutationId` on Create
 Scan and body `idempotencyKey` on Create Upload Session remain deprecated
 aliases; when the header is also present the values must match. A legacy scan
-key collision never restores a deleted scan.
+key collision never restores a deleted scan. A missing key on Project, Scan,
+Note, and Invitation creates returns `400 IDEMPOTENCY_KEY_REQUIRED`; a
+malformed key (empty after trim, over 128 characters, or containing control
+characters) returns `400 VALIDATION_ERROR`. Create Upload Session validates the
+header through the `validateRequest` middleware with `IdempotencyKeyHeaderSchema`,
+so a missing or malformed key returns `400 VALIDATION_ERROR` before the
+deprecated body alias is reconciled.
 
 Project, Scan, and Note single-resource responses include `revision` and return
 the strong `ETag: "N"` header. Project PATCH/DELETE, Scan PATCH/DELETE, and Note
@@ -650,8 +656,8 @@ Behavior and rules:
 
 Error behavior:
 
-- `400 VALIDATION_ERROR`: invalid assetType, content type, size, checksum, or
-  model version.
+- `400 VALIDATION_ERROR`: invalid assetType, content type, size, checksum,
+  model version, or a missing/malformed `Idempotency-Key` header.
 - `401 UNAUTHORIZED`: missing/invalid access token or missing current user.
 - `404 SCAN_NOT_FOUND`: parent scan/project missing, deleted, or inaccessible.
 - `404 ASSET_NOT_FOUND`: asset record missing or inaccessible.

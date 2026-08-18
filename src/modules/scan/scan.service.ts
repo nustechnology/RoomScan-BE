@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import { ProjectNotFoundError } from '../project/project.errors.js';
 import type {
   IdempotencyGateway,
@@ -54,7 +56,7 @@ function toResult(record: ScanRecord, role: ScanRole): ScanResult {
     assetStatus: record.assetStatus,
     syncStatus: record.syncStatus,
     modelVersion: record.modelVersion,
-    revision: record.revision ?? 1,
+    revision: record.revision,
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString(),
     permissions: permissionsFor(role),
@@ -203,28 +205,14 @@ export class ScanService {
   async update(
     userId: string,
     scanId: string,
-    expectedRevisionOrData: number | ScanUpdateInput,
-    maybeData?: ScanUpdateInput,
+    expectedRevision: number,
+    data: ScanUpdateInput,
   ): Promise<ScanResult> {
-    const expectedRevision =
-      typeof expectedRevisionOrData === 'number' ? expectedRevisionOrData : undefined;
-    const data =
-      typeof expectedRevisionOrData === 'number' ? (maybeData ?? {}) : expectedRevisionOrData;
-    const record =
-      expectedRevision === undefined
-        ? await this.#repository.update(scanId, userId, data)
-        : await this.#repository.update(scanId, userId, expectedRevision, data);
+    const record = await this.#repository.update(scanId, userId, expectedRevision, data);
     return toResult(record, 'OWNER');
   }
 
-  async delete(
-    userId: string,
-    scanId: string,
-    expectedRevision?: number,
-  ): Promise<number | undefined> {
-    return expectedRevision === undefined
-      ? await this.#repository.softDelete(scanId, userId)
-      : await this.#repository.softDelete(scanId, userId, expectedRevision);
+  async delete(userId: string, scanId: string, expectedRevision: number): Promise<number> {
+    return await this.#repository.softDelete(scanId, userId, expectedRevision);
   }
 }
-import { randomUUID } from 'node:crypto';

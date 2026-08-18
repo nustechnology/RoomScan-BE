@@ -47,7 +47,7 @@ function toResult(record: NoteRecord, role: NoteRole): NoteResult {
     position: record.position,
     orientation: record.orientation,
     modelVersion: record.modelVersion,
-    revision: record.revision ?? 1,
+    revision: record.revision,
     creator: record.creator,
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString(),
@@ -181,54 +181,32 @@ export class NoteService {
   async update(
     userId: string,
     noteId: string,
-    expectedRevisionOrData: number | NoteUpdateInput,
-    maybeData?: NoteUpdateInput,
+    expectedRevision: number,
+    data: NoteUpdateInput,
   ): Promise<NoteResult> {
-    const expectedRevision =
-      typeof expectedRevisionOrData === 'number' ? expectedRevisionOrData : undefined;
-    const data =
-      typeof expectedRevisionOrData === 'number' ? (maybeData ?? {}) : expectedRevisionOrData;
     await this.#requireNoteOwner(noteId, userId);
-    const record =
-      expectedRevision === undefined
-        ? await this.#repository.update(noteId, userId, data)
-        : await this.#repository.update(noteId, userId, expectedRevision, data);
+    const record = await this.#repository.update(noteId, userId, expectedRevision, data);
     return toResult(record, 'OWNER');
   }
 
   async move(
     userId: string,
     noteId: string,
-    expectedRevisionOrData: number | NotePositionUpdateInput,
-    maybeData?: NotePositionUpdateInput,
+    expectedRevision: number,
+    data: NotePositionUpdateInput,
   ): Promise<NoteResult> {
-    const expectedRevision =
-      typeof expectedRevisionOrData === 'number' ? expectedRevisionOrData : undefined;
-    const data =
-      typeof expectedRevisionOrData === 'number'
-        ? (maybeData as NotePositionUpdateInput)
-        : expectedRevisionOrData;
     const scanModelVersion = await this.#requireNoteOwner(noteId, userId);
 
     if (data.modelVersion !== scanModelVersion) {
       throw new ModelVersionMismatchError();
     }
 
-    const record =
-      expectedRevision === undefined
-        ? await this.#repository.updatePosition(noteId, userId, data)
-        : await this.#repository.updatePosition(noteId, userId, expectedRevision, data);
+    const record = await this.#repository.updatePosition(noteId, userId, expectedRevision, data);
     return toResult(record, 'OWNER');
   }
 
-  async delete(
-    userId: string,
-    noteId: string,
-    expectedRevision?: number,
-  ): Promise<number | undefined> {
+  async delete(userId: string, noteId: string, expectedRevision: number): Promise<number> {
     await this.#requireNoteOwner(noteId, userId);
-    return expectedRevision === undefined
-      ? await this.#repository.delete(noteId, userId)
-      : await this.#repository.delete(noteId, userId, expectedRevision);
+    return await this.#repository.delete(noteId, userId, expectedRevision);
   }
 }

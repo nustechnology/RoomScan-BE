@@ -122,7 +122,7 @@ function toOwnerResult(record: NoteRecord): NoteResult {
     position: record.position,
     orientation: record.orientation,
     modelVersion: record.modelVersion,
-    revision: record.revision ?? 1,
+    revision: record.revision,
     creator: record.creator,
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString(),
@@ -363,43 +363,29 @@ export class PrismaNoteRepository implements NoteRepository {
   async update(
     noteId: string,
     ownerId: string,
-    expectedRevisionOrData: number | NoteUpdateInput,
-    maybeData?: NoteUpdateInput,
+    expectedRevision: number,
+    data: NoteUpdateInput,
   ): Promise<NoteRecord> {
-    const expected =
-      typeof expectedRevisionOrData === 'number' ? expectedRevisionOrData : undefined;
-    const data =
-      typeof expectedRevisionOrData === 'number' ? (maybeData ?? {}) : expectedRevisionOrData;
-    return await this.#updateOwned(noteId, ownerId, expected, data);
+    return await this.#updateOwned(noteId, ownerId, expectedRevision, data);
   }
 
   async updatePosition(
     noteId: string,
     ownerId: string,
-    expectedRevisionOrData: number | NotePositionUpdateInput,
-    maybeData?: NotePositionUpdateInput,
+    expectedRevision: number,
+    data: NotePositionUpdateInput,
   ): Promise<NoteRecord> {
-    const expected =
-      typeof expectedRevisionOrData === 'number' ? expectedRevisionOrData : undefined;
-    const input =
-      typeof expectedRevisionOrData === 'number'
-        ? (maybeData as NotePositionUpdateInput)
-        : expectedRevisionOrData;
-    return await this.#updateOwned(noteId, ownerId, expected, {
-      position: input.position as unknown as Prisma.InputJsonValue,
+    return await this.#updateOwned(noteId, ownerId, expectedRevision, {
+      position: data.position as unknown as Prisma.InputJsonValue,
       orientation:
-        input.orientation === null
+        data.orientation === null
           ? Prisma.JsonNull
-          : (input.orientation as unknown as Prisma.InputJsonValue),
-      modelVersion: input.modelVersion,
+          : (data.orientation as unknown as Prisma.InputJsonValue),
+      modelVersion: data.modelVersion,
     });
   }
 
-  async delete(
-    noteId: string,
-    ownerId: string,
-    expectedRevision?: number,
-  ): Promise<number | undefined> {
+  async delete(noteId: string, ownerId: string, expectedRevision: number): Promise<number> {
     const outcome = await this.#client.$transaction(async (transaction) => {
       const note = await this.#findOwnedNote(transaction, noteId, ownerId);
 
@@ -426,7 +412,7 @@ export class PrismaNoteRepository implements NoteRepository {
         await refreshScanRollup(transaction, note.scanId, deletedAt);
         return { kind: 'deleted' as const, revision: note.revision + 1 };
       }
-      if (expectedRevision !== undefined && expectedRevision !== note.revision) {
+      if (expectedRevision !== note.revision) {
         const refreshChangeId = await writeNoteUpsert(transaction, noteId, {
           targetUserId: ownerId,
           syncStatus: 'CONFLICT',
@@ -442,46 +428,39 @@ export class PrismaNoteRepository implements NoteRepository {
         });
         return { kind: 'conflict' as const, revision: note.revision, projectId: note.projectId };
       }
-      if (expectedRevision !== undefined) {
-        const claimed = await transaction.note.updateMany({
-          where: {
-            id: noteId,
-            revision: expectedRevision,
-            deletedAt: null,
-            scan: { project: { ownerId } },
-          },
-          data: { deletedAt, revision: { increment: 1 }, updatedAt: deletedAt },
-        });
-        if (claimed.count === 0) {
-          const current = await this.#findOwnedNote(transaction, noteId, ownerId);
-          if (current === null) throw new NoteNotFoundError();
-          if (current.deletedAt !== null) {
-            return { kind: 'deleted' as const, revision: current.revision };
-          }
-          const refreshChangeId = await writeNoteUpsert(transaction, noteId, {
-            targetUserId: ownerId,
-            syncStatus: 'CONFLICT',
-            changedAt: deletedAt,
-          });
-          await upsertSyncConflict(transaction, {
-            userId: ownerId,
-            projectId: current.projectId,
-            resourceType: 'NOTE',
-            resourceId: noteId,
-            serverRevision: current.revision,
-            refreshChangeId,
-          });
-          return {
-            kind: 'conflict' as const,
-            revision: current.revision,
-            projectId: current.projectId,
-          };
+      const claimed = await transaction.note.updateMany({
+        where: {
+          id: noteId,
+          revision: expectedRevision,
+          deletedAt: null,
+          scan: { project: { ownerId } },
+        },
+        data: { deletedAt, revision: { increment: 1 }, updatedAt: deletedAt },
+      });
+      if (claimed.count === 0) {
+        const current = await this.#findOwnedNote(transaction, noteId, ownerId);
+        if (current === null) throw new NoteNotFoundError();
+        if (current.deletedAt !== null) {
+          return { kind: 'deleted' as const, revision: current.revision };
         }
-      } else {
-        await transaction.note.update({
-          where: { id: noteId },
-          data: { deletedAt, revision: { increment: 1 }, updatedAt: deletedAt },
+        const refreshChangeId = await writeNoteUpsert(transaction, noteId, {
+          targetUserId: ownerId,
+          syncStatus: 'CONFLICT',
+          changedAt: deletedAt,
         });
+        await upsertSyncConflict(transaction, {
+          userId: ownerId,
+          projectId: current.projectId,
+          resourceType: 'NOTE',
+          resourceId: noteId,
+          serverRevision: current.revision,
+          refreshChangeId,
+        });
+        return {
+          kind: 'conflict' as const,
+          revision: current.revision,
+          projectId: current.projectId,
+        };
       }
       await writeDeleteChange(transaction, {
         projectId: note.projectId,
@@ -510,27 +489,17 @@ export class PrismaNoteRepository implements NoteRepository {
   async #updateOwned(
     noteId: string,
     ownerId: string,
-    expectedRevision: number | undefined,
+    expectedRevision: number,
     data: Prisma.NoteUpdateManyMutationInput,
   ): Promise<NoteRecord> {
     const outcome = await this.#client.$transaction(async (transaction) => {
       const changedAt = new Date();
       const current = await this.#findOwnedNote(transaction, noteId, ownerId);
       if (current === null) throw new NoteNotFoundError();
-      if (expectedRevision === undefined && this.#idempotency === undefined) {
-        const row = await transaction.note.update({
-          where: { id: noteId },
-          data,
-          select: noteSelect,
-        });
-        await refreshScanRollup(transaction, row.scanId, changedAt);
-        return { kind: 'updated' as const, record: toNoteRecord(row) };
-      }
-      const effectiveRevision = expectedRevision ?? current.revision;
       const result = await transaction.note.updateMany({
         where: {
           id: noteId,
-          revision: effectiveRevision,
+          revision: expectedRevision,
           deletedAt: null,
           scan: { deletedAt: null, project: { ownerId, deletedAt: null } },
         },
@@ -613,17 +582,11 @@ export class PrismaNoteRepository implements NoteRepository {
       },
     });
     if (row === null) return null;
-    const legacy = row as unknown as {
-      scanId: string;
-      revision?: number;
-      deletedAt?: Date | null;
-      scan?: { projectId: string };
-    };
     return {
-      scanId: legacy.scanId,
-      projectId: legacy.scan?.projectId ?? '',
-      revision: legacy.revision ?? 1,
-      deletedAt: legacy.deletedAt ?? null,
+      scanId: row.scanId,
+      projectId: row.scan.projectId,
+      revision: row.revision,
+      deletedAt: row.deletedAt,
     };
   }
 }

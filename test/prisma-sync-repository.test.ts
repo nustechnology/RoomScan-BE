@@ -188,4 +188,46 @@ describe('PrismaSyncRepository', () => {
     await repository.acknowledge(USER_ID, 5n, NOW);
     expect(transaction).not.toHaveBeenCalled();
   });
+
+  it('lists a snapshot without a cursor and reports when no further page exists', async () => {
+    const queryRaw = vi.fn().mockResolvedValue([rawChange(1n)]);
+    const repository = new PrismaSyncRepository({ $queryRaw: queryRaw } as unknown as PrismaClient);
+
+    const result = await repository.listSnapshot(USER_ID, 100n, null, 5);
+
+    expect(result.hasMore).toBe(false);
+    expect(result.items).toEqual([expect.objectContaining({ sequence: 1n })]);
+    expect(queryRaw).toHaveBeenCalledOnce();
+  });
+
+  it('reports no further page when the lookahead row fits exactly within the limit', async () => {
+    const queryRaw = vi.fn().mockResolvedValue([rawChange(1n)]);
+    const repository = new PrismaSyncRepository({ $queryRaw: queryRaw } as unknown as PrismaClient);
+
+    const result = await repository.listSnapshot(USER_ID, 100n, null, 1);
+
+    expect(result.hasMore).toBe(false);
+    expect(result.items).toHaveLength(1);
+  });
+
+  it('lists incremental changes without a since filter', async () => {
+    const queryRaw = vi.fn().mockResolvedValue([rawChange(5n)]);
+    const repository = new PrismaSyncRepository({ $queryRaw: queryRaw } as unknown as PrismaClient);
+
+    const result = await repository.listIncremental(USER_ID, 4n, 10n, null, 10);
+
+    expect(result.items).toEqual([expect.objectContaining({ sequence: 5n })]);
+    expect(queryRaw).toHaveBeenCalledOnce();
+  });
+
+  it('redacts null snapshot data to null in the record mapping', async () => {
+    const queryRaw = vi
+      .fn()
+      .mockResolvedValue([{ ...rawChange(7n), operation: 'DELETE' as const, data: null }]);
+    const repository = new PrismaSyncRepository({ $queryRaw: queryRaw } as unknown as PrismaClient);
+
+    const result = await repository.listIncremental(USER_ID, 6n, 8n, null, 10);
+
+    expect(result.items).toEqual([expect.objectContaining({ sequence: 7n, data: null })]);
+  });
 });

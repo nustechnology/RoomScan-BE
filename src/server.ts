@@ -45,9 +45,6 @@ const config = loadConfig();
 const logger = createLogger(config);
 const prismaClient = createPrismaClient(config.databaseUrl);
 const database = new PrismaDatabase(prismaClient);
-if (config.syncCryptoKey === undefined) {
-  throw new Error('SYNC_CRYPTO_KEY is required');
-}
 const syncCrypto = new SyncCrypto(config.syncCryptoKey);
 const idempotency = new PrismaIdempotencyExecutor(prismaClient, syncCrypto);
 const userRepository = new PrismaAppleUserRepository(prismaClient);

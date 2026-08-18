@@ -31,6 +31,7 @@ function createRecord(overrides: Partial<NoteRecord> = {}): NoteRecord {
     position: { x: 1.5, y: -2, z: 3.25 },
     orientation: { x: 0, y: 0, z: 1 },
     modelVersion: '1',
+    revision: 1,
     createdAt: NOW,
     updatedAt: NOW,
     ...overrides,
@@ -54,7 +55,7 @@ function createHarness() {
       .mockResolvedValue({ record: createRecord(), role: 'OWNER' }),
     update: vi.fn<NoteRepository['update']>().mockResolvedValue(createRecord()),
     updatePosition: vi.fn<NoteRepository['updatePosition']>().mockResolvedValue(createRecord()),
-    delete: vi.fn<NoteRepository['delete']>().mockResolvedValue(undefined),
+    delete: vi.fn<NoteRepository['delete']>().mockResolvedValue(2),
   };
   const repository: NoteRepository = mocks;
   const findAccessRole = vi
@@ -75,7 +76,15 @@ function createHarness() {
   } as unknown as ScanRepository);
   const service = new NoteService({ repository, permissions, scanPermissions });
 
-  return { mocks, repository, permissions, service, findAccessRole, scanFindAccessRole };
+  return {
+    mocks,
+    repository,
+    permissions,
+    scanPermissions,
+    service,
+    findAccessRole,
+    scanFindAccessRole,
+  };
 }
 
 describe('NoteService', () => {
@@ -227,17 +236,17 @@ describe('NoteService', () => {
     const { mocks, service } = createHarness();
     mocks.update.mockResolvedValueOnce(createRecord({ content: 'Updated content' }));
 
-    const result = await service.update(OWNER_ID, NOTE_ID, { content: 'Updated content' });
+    const result = await service.update(OWNER_ID, NOTE_ID, 1, { content: 'Updated content' });
 
     expect(mocks.findNoteContext).toHaveBeenCalledWith(NOTE_ID);
-    expect(mocks.update).toHaveBeenCalledWith(NOTE_ID, OWNER_ID, { content: 'Updated content' });
+    expect(mocks.update).toHaveBeenCalledWith(NOTE_ID, OWNER_ID, 1, { content: 'Updated content' });
     expect(result.content).toBe('Updated content');
   });
 
   it('rejects update from a Viewer', async () => {
     const { service } = createHarness();
 
-    await expect(service.update(VIEWER_ID, NOTE_ID, { color: 'RED' })).rejects.toBeInstanceOf(
+    await expect(service.update(VIEWER_ID, NOTE_ID, 1, { color: 'RED' })).rejects.toBeInstanceOf(
       NoteNotFoundError,
     );
   });
@@ -246,7 +255,7 @@ describe('NoteService', () => {
     const { mocks, service } = createHarness();
     mocks.findNoteContext.mockResolvedValueOnce(null);
 
-    await expect(service.update(OWNER_ID, NOTE_ID, { color: 'RED' })).rejects.toBeInstanceOf(
+    await expect(service.update(OWNER_ID, NOTE_ID, 1, { color: 'RED' })).rejects.toBeInstanceOf(
       NoteNotFoundError,
     );
   });
@@ -255,13 +264,13 @@ describe('NoteService', () => {
     const { mocks, service } = createHarness();
     mocks.updatePosition.mockResolvedValueOnce(createRecord({ position: { x: 9, y: 8, z: 7 } }));
 
-    const result = await service.move(OWNER_ID, NOTE_ID, {
+    const result = await service.move(OWNER_ID, NOTE_ID, 1, {
       position: { x: 9, y: 8, z: 7 },
       orientation: null,
       modelVersion: '1',
     });
 
-    expect(mocks.updatePosition).toHaveBeenCalledWith(NOTE_ID, OWNER_ID, {
+    expect(mocks.updatePosition).toHaveBeenCalledWith(NOTE_ID, OWNER_ID, 1, {
       position: { x: 9, y: 8, z: 7 },
       orientation: null,
       modelVersion: '1',
@@ -274,7 +283,7 @@ describe('NoteService', () => {
     mocks.findNoteContext.mockResolvedValueOnce({ projectId: PROJECT_ID, modelVersion: 2 });
 
     await expect(
-      service.move(OWNER_ID, NOTE_ID, {
+      service.move(OWNER_ID, NOTE_ID, 1, {
         position: { x: 9, y: 8, z: 7 },
         orientation: null,
         modelVersion: '1',
@@ -287,7 +296,7 @@ describe('NoteService', () => {
     const { service } = createHarness();
 
     await expect(
-      service.move(VIEWER_ID, NOTE_ID, {
+      service.move(VIEWER_ID, NOTE_ID, 1, {
         position: { x: 9, y: 8, z: 7 },
         orientation: null,
         modelVersion: '1',
@@ -298,22 +307,155 @@ describe('NoteService', () => {
   it('deletes a note as the Owner', async () => {
     const { mocks, service } = createHarness();
 
-    await service.delete(OWNER_ID, NOTE_ID);
+    await service.delete(OWNER_ID, NOTE_ID, 1);
 
     expect(mocks.findNoteContext).toHaveBeenCalledWith(NOTE_ID);
-    expect(mocks.delete).toHaveBeenCalledWith(NOTE_ID, OWNER_ID);
+    expect(mocks.delete).toHaveBeenCalledWith(NOTE_ID, OWNER_ID, 1);
   });
 
   it('rejects delete from a Viewer', async () => {
     const { service } = createHarness();
 
-    await expect(service.delete(VIEWER_ID, NOTE_ID)).rejects.toBeInstanceOf(NoteNotFoundError);
+    await expect(service.delete(VIEWER_ID, NOTE_ID, 1)).rejects.toBeInstanceOf(NoteNotFoundError);
   });
 
   it('throws hidden not-found when deleting a missing note', async () => {
     const { mocks, service } = createHarness();
     mocks.findNoteContext.mockResolvedValueOnce(null);
 
-    await expect(service.delete(OWNER_ID, NOTE_ID)).rejects.toBeInstanceOf(NoteNotFoundError);
+    await expect(service.delete(OWNER_ID, NOTE_ID, 1)).rejects.toBeInstanceOf(NoteNotFoundError);
+  });
+
+  it('rejects an idempotent create when idempotency is not configured', async () => {
+    const { service } = createHarness();
+
+    await expect(
+      service.createIdempotently(
+        OWNER_ID,
+        SCAN_ID,
+        {
+          title: 'Note',
+          content: 'Note',
+          color: 'YELLOW',
+          position: { x: 1, y: 2, z: 3 },
+          orientation: null,
+          modelVersion: '1',
+        },
+        'k',
+      ),
+    ).rejects.toThrow('Note idempotency is not configured');
+  });
+
+  it('replays a stored idempotent create', async () => {
+    const { repository, permissions, scanPermissions } = createHarness();
+    const context = {
+      userId: OWNER_ID,
+      operation: 'CREATE_NOTE' as const,
+      parentScope: `scan:${SCAN_ID}`,
+      keyHash: 'key-hash',
+      requestHash: 'request-hash',
+    };
+    const idempotency = {
+      createContext: vi.fn().mockReturnValue(context),
+      lookup: vi.fn().mockResolvedValue({ body: { id: NOTE_ID }, statusCode: 201, replayed: true }),
+    };
+    const createIdempotently = vi.fn();
+    repository.createIdempotently = createIdempotently;
+    const service = new NoteService({ repository, permissions, scanPermissions, idempotency });
+
+    const result = await service.createIdempotently(
+      OWNER_ID,
+      SCAN_ID,
+      {
+        title: 'Note',
+        content: 'Note',
+        color: 'YELLOW',
+        position: { x: 1, y: 2, z: 3 },
+        orientation: null,
+        modelVersion: '1',
+      },
+      'k',
+    );
+
+    expect(idempotency.lookup).toHaveBeenCalledWith(context);
+    expect(createIdempotently).not.toHaveBeenCalled();
+    expect(result.replayed).toBe(true);
+  });
+
+  it('rejects an idempotent create with a stale model version', async () => {
+    const { repository, permissions, scanPermissions, mocks } = createHarness();
+    mocks.findScanContext.mockResolvedValueOnce({ projectId: PROJECT_ID, modelVersion: 1 });
+    const context = {
+      userId: OWNER_ID,
+      operation: 'CREATE_NOTE' as const,
+      parentScope: `scan:${SCAN_ID}`,
+      keyHash: 'key-hash',
+      requestHash: 'request-hash',
+    };
+    const idempotency = {
+      createContext: vi.fn().mockReturnValue(context),
+      lookup: vi.fn().mockResolvedValue(null),
+    };
+    const createIdempotently = vi.fn();
+    repository.createIdempotently = createIdempotently;
+    const service = new NoteService({ repository, permissions, scanPermissions, idempotency });
+
+    await expect(
+      service.createIdempotently(
+        OWNER_ID,
+        SCAN_ID,
+        {
+          title: 'Note',
+          content: 'Note',
+          color: 'YELLOW',
+          position: { x: 1, y: 2, z: 3 },
+          orientation: null,
+          modelVersion: '2',
+        },
+        'k',
+      ),
+    ).rejects.toBeInstanceOf(ModelVersionMismatchError);
+    expect(createIdempotently).not.toHaveBeenCalled();
+  });
+
+  it('resolves note ownership through the mutation context when available', async () => {
+    const { repository, permissions, scanPermissions } = createHarness();
+    const findOwnedMutationContext = vi
+      .fn<NonNullable<NoteRepository['findOwnedMutationContext']>>()
+      .mockResolvedValue({ projectId: PROJECT_ID, modelVersion: 1 });
+    repository.findOwnedMutationContext = findOwnedMutationContext;
+    const service = new NoteService({ repository, permissions, scanPermissions });
+
+    await expect(service.getById(OWNER_ID, NOTE_ID)).resolves.toBeDefined();
+  });
+
+  it('hides a note whose owned mutation context is missing', async () => {
+    const { repository, permissions, scanPermissions, mocks } = createHarness();
+    const findOwnedMutationContext = vi
+      .fn<NonNullable<NoteRepository['findOwnedMutationContext']>>()
+      .mockResolvedValue(null);
+    repository.findOwnedMutationContext = findOwnedMutationContext;
+    mocks.update.mockResolvedValue(createRecord());
+    const service = new NoteService({ repository, permissions, scanPermissions });
+
+    await expect(
+      service.update(OWNER_ID, NOTE_ID, 1, { content: 'Updated' }),
+    ).rejects.toBeInstanceOf(NoteNotFoundError);
+  });
+
+  it('rethrows a non-not-found permission error from create', async () => {
+    const { service, findAccessRole } = createHarness();
+    findAccessRole.mockRejectedValueOnce(new Error('boom'));
+
+    await expect(
+      service.create(OWNER_ID, SCAN_ID, {
+        title: 'Note',
+        content: 'Note',
+        color: 'YELLOW',
+        position: { x: 1, y: 2, z: 3 },
+        orientation: null,
+        modelVersion: '1',
+      }),
+    ).rejects.toThrow('boom');
   });
 });

@@ -248,4 +248,358 @@ describe('PrismaScanAssetRepository', () => {
     });
     expect(result).toHaveLength(1);
   });
+
+  it('creates an asset and rolls up the scan in a transaction when idempotency is configured', async () => {
+    const scanAssetCreate = vi
+      .fn()
+      .mockResolvedValue(createAssetRow({ revision: 1, deletedAt: null }));
+    const scan = {
+      findFirst: vi.fn().mockResolvedValue({ projectId: 'project-id' }),
+      update: vi.fn().mockResolvedValue({}),
+    };
+    const project = { update: vi.fn().mockResolvedValue({}) };
+    const $transaction = vi.fn(async (operation: unknown) => {
+      return (operation as (tx: unknown) => Promise<unknown>)({
+        scanAsset: { create: scanAssetCreate },
+        scan,
+        project,
+      });
+    });
+    const client = {
+      scanAsset: { create: scanAssetCreate },
+      $transaction,
+    } as unknown as Pick<PrismaClient, 'scanAsset' | '$transaction'>;
+    const repository = new PrismaScanAssetRepository(client, {} as PrismaIdempotencyExecutor);
+
+    const result = await repository.create({
+      scanId: SCAN_ID,
+      assetType: 'MODEL',
+      contentType: 'model/gltf-binary',
+      sizeBytes: 1024,
+      checksum: 'abc123',
+      modelVersion: '1',
+      storageKey: `scans/${SCAN_ID}/model`,
+      idempotencyKey: null,
+      uploadUrlExpiresAt: NOW,
+    });
+
+    expect(scanAssetCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ select: activeScanAssetSelect }),
+    );
+    expect(result.created).toBe(true);
+    expect(result.record.id).toBe(ASSET_ID);
+  });
+
+  it('resolves a concurrent duplicate insert during idempotent create to the existing row', async () => {
+    const conflict = new Prisma.PrismaClientKnownRequestError('unique constraint', {
+      code: 'P2002',
+      clientVersion: 'test',
+      meta: { target: ['scanId', 'assetType'] },
+    });
+    const $transaction = vi.fn().mockRejectedValue(conflict);
+    const findUnique = vi.fn().mockResolvedValue(createAssetRow({ revision: 1, deletedAt: null }));
+    const client = {
+      scanAsset: { findUnique },
+      $transaction,
+    } as unknown as Pick<PrismaClient, 'scanAsset' | '$transaction'>;
+    const repository = new PrismaScanAssetRepository(client, {} as PrismaIdempotencyExecutor);
+
+    const result = await repository.create({
+      scanId: SCAN_ID,
+      assetType: 'MODEL',
+      contentType: 'model/gltf-binary',
+      sizeBytes: 1024,
+      checksum: 'abc123',
+      modelVersion: '1',
+      storageKey: `scans/${SCAN_ID}/model`,
+      idempotencyKey: null,
+      uploadUrlExpiresAt: NOW,
+    });
+
+    expect(findUnique).toHaveBeenCalledWith({
+      where: { scanId_assetType: { scanId: SCAN_ID, assetType: 'MODEL' } },
+      select: activeScanAssetSelect,
+    });
+    expect(result.created).toBe(false);
+    expect(result.record.id).toBe(ASSET_ID);
+  });
+
+  it('creates a new asset session inside an idempotent save', async () => {
+    const scanAssetCreate = vi.fn().mockResolvedValue({ id: ASSET_ID });
+    const tx = {
+      scanAsset: { create: scanAssetCreate },
+      scan: {
+        findFirst: vi.fn().mockResolvedValue({ projectId: 'project-id' }),
+        update: vi.fn().mockResolvedValue({}),
+      },
+      project: { update: vi.fn().mockResolvedValue({}) },
+    };
+    const execute = vi.fn(
+      async (_context: unknown, statusCode: number, work: (t: unknown) => Promise<unknown>) => ({
+        body: await work(tx),
+        statusCode,
+        replayed: false,
+      }),
+    );
+    const repository = new PrismaScanAssetRepository(
+      {} as Pick<PrismaClient, 'scanAsset' | '$transaction'>,
+      { execute } as unknown as PrismaIdempotencyExecutor,
+    );
+    const context = {
+      userId: 'user-id',
+      operation: 'CREATE_UPLOAD_SESSION' as const,
+      parentScope: `scan:${SCAN_ID}`,
+      keyHash: 'key-hash',
+      requestHash: 'request-hash',
+    };
+    const result = {
+      uploadSessionId: ASSET_ID,
+      assetId: ASSET_ID,
+      assetType: 'MODEL' as const,
+      status: 'PENDING' as const,
+      uploadUrl: 'https://storage/upload',
+      uploadUrlExpiresAt: NOW.toISOString(),
+      created: true,
+    };
+
+    const outcome = await repository.saveUploadSessionIdempotently(
+      null,
+      {
+        scanId: SCAN_ID,
+        assetType: 'MODEL',
+        contentType: 'model/gltf-binary',
+        sizeBytes: 1024,
+        checksum: 'abc123',
+        modelVersion: '1',
+        storageKey: `scans/${SCAN_ID}/model`,
+        idempotencyKey: null,
+        uploadUrlExpiresAt: NOW,
+      },
+      context,
+      result,
+      false,
+    );
+
+    expect(execute).toHaveBeenCalledWith(context, 201, expect.any(Function));
+    expect(scanAssetCreate).toHaveBeenCalledWith(expect.objectContaining({ select: { id: true } }));
+    expect(outcome.body.assetId).toBe(ASSET_ID);
+  });
+
+  it('updates an existing asset session inside an idempotent save', async () => {
+    const scanAssetUpdate = vi.fn().mockResolvedValue({ id: ASSET_ID });
+    const tx = {
+      scanAsset: { update: scanAssetUpdate },
+      scan: {
+        findFirst: vi.fn().mockResolvedValue({ projectId: 'project-id' }),
+        update: vi.fn().mockResolvedValue({}),
+      },
+      project: { update: vi.fn().mockResolvedValue({}) },
+    };
+    const execute = vi.fn(
+      async (_context: unknown, statusCode: number, work: (t: unknown) => Promise<unknown>) => ({
+        body: await work(tx),
+        statusCode,
+        replayed: false,
+      }),
+    );
+    const repository = new PrismaScanAssetRepository(
+      {} as Pick<PrismaClient, 'scanAsset' | '$transaction'>,
+      { execute } as unknown as PrismaIdempotencyExecutor,
+    );
+    const context = {
+      userId: 'user-id',
+      operation: 'CREATE_UPLOAD_SESSION' as const,
+      parentScope: `scan:${SCAN_ID}`,
+      keyHash: 'key-hash',
+      requestHash: 'request-hash',
+    };
+    const result = {
+      uploadSessionId: ASSET_ID,
+      assetId: ASSET_ID,
+      assetType: 'MODEL' as const,
+      status: 'PENDING' as const,
+      uploadUrl: 'https://storage/upload',
+      uploadUrlExpiresAt: NOW.toISOString(),
+      created: false,
+    };
+
+    const outcome = await repository.saveUploadSessionIdempotently(
+      ASSET_ID,
+      {
+        scanId: SCAN_ID,
+        assetType: 'MODEL',
+        contentType: 'model/gltf-binary',
+        sizeBytes: 1024,
+        checksum: 'abc123',
+        modelVersion: '1',
+        storageKey: `scans/${SCAN_ID}/model`,
+        idempotencyKey: null,
+        uploadUrlExpiresAt: NOW,
+      },
+      context,
+      result,
+      false,
+    );
+
+    expect(execute).toHaveBeenCalledWith(context, 200, expect.any(Function));
+    expect(scanAssetUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: ASSET_ID } }),
+    );
+    expect(outcome.body.assetId).toBe(ASSET_ID);
+  });
+
+  it('returns the result untouched when reuseWithoutMutation is true', async () => {
+    const execute = vi.fn(
+      async (_context: unknown, statusCode: number, work: (t: unknown) => Promise<unknown>) => ({
+        body: await work({}),
+        statusCode,
+        replayed: false,
+      }),
+    );
+    const repository = new PrismaScanAssetRepository(
+      {} as Pick<PrismaClient, 'scanAsset' | '$transaction'>,
+      { execute } as unknown as PrismaIdempotencyExecutor,
+    );
+    const context = {
+      userId: 'user-id',
+      operation: 'CREATE_UPLOAD_SESSION' as const,
+      parentScope: `scan:${SCAN_ID}`,
+      keyHash: 'key-hash',
+      requestHash: 'request-hash',
+    };
+    const result = {
+      uploadSessionId: ASSET_ID,
+      assetId: ASSET_ID,
+      assetType: 'MODEL' as const,
+      status: 'PENDING' as const,
+      uploadUrl: 'https://storage/upload',
+      uploadUrlExpiresAt: NOW.toISOString(),
+      created: true,
+    };
+
+    const outcome = await repository.saveUploadSessionIdempotently(
+      null,
+      {
+        scanId: SCAN_ID,
+        assetType: 'MODEL',
+        contentType: 'model/gltf-binary',
+        sizeBytes: 1024,
+        checksum: 'abc123',
+        modelVersion: '1',
+        storageKey: `scans/${SCAN_ID}/model`,
+        idempotencyKey: null,
+        uploadUrlExpiresAt: NOW,
+      },
+      context,
+      result,
+      true,
+    );
+
+    expect(outcome.body).toBe(result);
+  });
+
+  it('rejects an idempotent save when idempotency is not configured', async () => {
+    const repository = new PrismaScanAssetRepository(
+      {} as Pick<PrismaClient, 'scanAsset' | '$transaction'>,
+    );
+
+    await expect(
+      repository.saveUploadSessionIdempotently(
+        null,
+        {
+          scanId: SCAN_ID,
+          assetType: 'MODEL',
+          contentType: 'model/gltf-binary',
+          sizeBytes: 1024,
+          checksum: 'abc123',
+          modelVersion: '1',
+          storageKey: `scans/${SCAN_ID}/model`,
+          idempotencyKey: null,
+          uploadUrlExpiresAt: NOW,
+        },
+        {
+          userId: 'user-id',
+          operation: 'CREATE_UPLOAD_SESSION',
+          parentScope: `scan:${SCAN_ID}`,
+          keyHash: 'key-hash',
+          requestHash: 'request-hash',
+        },
+        {
+          uploadSessionId: ASSET_ID,
+          assetId: ASSET_ID,
+          assetType: 'MODEL',
+          status: 'PENDING',
+          uploadUrl: 'https://storage/upload',
+          uploadUrlExpiresAt: NOW.toISOString(),
+          created: true,
+        },
+        false,
+      ),
+    ).rejects.toThrow('Scan asset idempotency is not configured');
+  });
+
+  it('updates an asset in a transaction without setting a thumbnail when none is provided', async () => {
+    const scanAssetUpdate = vi
+      .fn()
+      .mockResolvedValue(createAssetRow({ revision: 1, deletedAt: null }));
+    const scanUpdate = vi.fn().mockResolvedValue({});
+    const tx = {
+      scanAsset: { update: scanAssetUpdate },
+      scan: {
+        findFirst: vi.fn().mockResolvedValue({ projectId: 'project-id' }),
+        update: scanUpdate,
+      },
+      project: { update: vi.fn().mockResolvedValue({}) },
+    };
+    const $transaction = vi.fn(async (operation: unknown) => {
+      return (operation as (t: unknown) => Promise<unknown>)(tx);
+    });
+    const client = {
+      scanAsset: { update: scanAssetUpdate },
+      $transaction,
+    } as unknown as Pick<PrismaClient, 'scanAsset' | '$transaction'>;
+    const repository = new PrismaScanAssetRepository(client, {} as PrismaIdempotencyExecutor);
+
+    const result = await repository.update(ASSET_ID, { status: 'UPLOADED', uploadedAt: NOW });
+
+    expect(scanAssetUpdate).toHaveBeenCalledWith({
+      where: { id: ASSET_ID },
+      data: {
+        status: 'UPLOADED',
+        uploadedAt: NOW,
+        revision: { increment: 1 },
+        updatedAt: expect.any(Date) as Date,
+      },
+      select: activeScanAssetSelect,
+    });
+    expect(scanUpdate).toHaveBeenCalledWith({
+      where: { id: SCAN_ID },
+      data: { updatedAt: expect.any(Date) as Date },
+    });
+    const scanUpdateData = (
+      scanUpdate.mock.calls[0]?.[0] as { data: { thumbnail?: unknown } } | undefined
+    )?.data;
+    expect(scanUpdateData?.thumbnail).toBeUndefined();
+    expect(result.status).toBe('PENDING');
+  });
+
+  it('lists only active assets when idempotency is configured', async () => {
+    const scanAsset = {
+      findMany: vi.fn().mockResolvedValue([createAssetRow({ revision: 1, deletedAt: null })]),
+    };
+    const client = {
+      scanAsset,
+      $transaction: vi.fn(),
+    } as unknown as Pick<PrismaClient, 'scanAsset' | '$transaction'>;
+    const repository = new PrismaScanAssetRepository(client, {} as PrismaIdempotencyExecutor);
+
+    const result = await repository.listByScan(SCAN_ID);
+
+    expect(scanAsset.findMany).toHaveBeenCalledWith({
+      where: { scanId: SCAN_ID, deletedAt: null },
+      orderBy: [{ assetType: 'asc' }, { id: 'asc' }],
+      select: activeScanAssetSelect,
+    });
+    expect(result).toHaveLength(1);
+  });
 });

@@ -44,7 +44,7 @@ export interface ProjectRecord {
   sharedCount: number;
   thumbnail: string | null;
   syncStatus: ProjectSyncStatus | null;
-  revision?: number;
+  revision: number;
   lastSyncedAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
@@ -69,7 +69,7 @@ export interface ProjectResult {
   sharedCount: number;
   thumbnail: string | null;
   syncStatus: ProjectSyncStatus | null;
-  revision?: number;
+  revision: number;
   lastSyncedAt?: string | null;
   createdAt: string;
   updatedAt: string;
@@ -125,8 +125,8 @@ export interface ProjectRepository {
   update(
     id: string,
     ownerId: string,
-    expectedRevisionOrData: number | ProjectUpdateInput,
-    data?: ProjectUpdateInput,
+    expectedRevision: number,
+    data: ProjectUpdateInput,
   ): Promise<ProjectRecord>;
-  softDelete(id: string, ownerId: string, expectedRevision?: number): Promise<number | undefined>;
+  softDelete(id: string, ownerId: string, expectedRevision: number): Promise<number>;
 }
