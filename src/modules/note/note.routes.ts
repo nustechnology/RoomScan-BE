@@ -78,6 +78,7 @@ export function createNoteRouter({
           params: ScanIdParam;
         };
         const result = await noteService.create(userId, params.scanId, {
+          title: body.title,
           content: body.content,
           color: body.color,
           position: body.position,
@@ -148,6 +149,9 @@ export function createNoteRouter({
           params: NoteIdParam;
         };
         const data: NoteUpdateInput = {};
+        if (body.title !== undefined) {
+          data.title = body.title;
+        }
         if (body.content !== undefined) {
           data.content = body.content;
         }

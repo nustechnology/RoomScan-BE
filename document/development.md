@@ -205,7 +205,11 @@ with exactly one of `projectId`/`scanId`) and the `scan_accesses` table
 (scan-level Viewer access). It also adds `shareLinkId` to `project_accesses` so
 link-granted project access is traceable. The raw partial unique index and CHECK
 constraints are expressed in the migration SQL, matching how the earlier
-`(projectId, recipientEmail)` `PENDING` partial index is handled.
+`(projectId, recipientEmail)` `PENDING` partial index is handled. The
+`add_note_title_and_note_colors` migration extends the `NoteColor` enum with
+`CYAN` and `GRAY` and adds a required `title` column (`VARCHAR(50)`) to the
+`notes` table with a placeholder backfill so it applies even when the table
+already contains rows.
 Tests use Prisma delegate doubles; native migration and endpoint verification
 use the PostgreSQL `db` container.
 

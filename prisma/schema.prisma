@@ -45,6 +45,8 @@ enum NoteColor {
   GREEN
   ORANGE
   PURPLE
+  CYAN
+  GRAY
 }
 
 enum InvitationStatus {
@@ -263,6 +265,7 @@ model Note {
   id           String    @id @default(uuid()) @db.Uuid
   scanId       String    @db.Uuid
   createdById  String    @db.Uuid
+  title        String    @db.VarChar(50)
   content      String    @db.VarChar(2000)
   color        NoteColor
   position     Json

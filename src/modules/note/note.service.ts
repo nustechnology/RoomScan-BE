@@ -36,6 +36,7 @@ function toResult(record: NoteRecord, role: NoteRole): NoteResult {
   return {
     id: record.id,
     scanId: record.scanId,
+    title: record.title,
     content: record.content,
     color: record.color,
     position: record.position,

@@ -47,6 +47,7 @@ const noteSelect = {
       email: true,
     },
   },
+  title: true,
   content: true,
   color: true,
   position: true,
@@ -64,6 +65,7 @@ type NoteRow = {
     id: string;
     email: string | null;
   };
+  title: string;
   content: string;
   color: NoteRecord['color'];
   position: Prisma.JsonValue;
@@ -79,6 +81,7 @@ function toNoteRecord(row: NoteRow): NoteRecord {
     scanId: row.scanId,
     createdById: row.createdById,
     creator: row.creator,
+    title: row.title,
     content: row.content,
     color: row.color,
     position: parseVector3(row.position),
@@ -190,6 +193,7 @@ export class PrismaNoteRepository implements NoteRepository {
         data: {
           scanId,
           createdById,
+          title: data.title,
           content: data.content,
           color: data.color,
           position: data.position as unknown as Prisma.InputJsonValue,
