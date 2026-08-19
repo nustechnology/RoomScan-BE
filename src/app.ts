@@ -5,31 +5,31 @@ import cors from 'cors';
 import express, { type Express } from 'express';
 import helmet from 'helmet';
 import type { Logger } from 'pino';
-import { pinoHttp } from 'pino-http';
 import type { StdSerializedResults } from 'pino-http';
+import { pinoHttp } from 'pino-http';
 import swaggerUi from 'swagger-ui-express';
 
-import { errorHandler } from './common/middleware/error-handler.js';
-import { notFoundHandler } from './common/middleware/not-found.js';
-import type { RateLimiters } from './common/middleware/rate-limit.js';
 import type {
   AccessTokenVerifier,
   CurrentUserRepository,
 } from './common/middleware/authenticate.js';
+import { errorHandler } from './common/middleware/error-handler.js';
+import { notFoundHandler } from './common/middleware/not-found.js';
+import type { RateLimiters } from './common/middleware/rate-limit.js';
 import { API_DOC_PATH, API_PREFIX } from './config/constants.js';
 import type { AppConfig } from './config/env.js';
 import type { DatabaseHealth } from './infrastructure/database/database.js';
 import { createAuthRouter } from './modules/auth/auth.routes.js';
 import type { AppleAuthService, TokenRefreshService } from './modules/auth/auth.types.js';
 import { createHealthRouter } from './modules/health/health.routes.js';
-import { createProjectRouter } from './modules/project/project.routes.js';
-import type { ProjectService } from './modules/project/project.service.js';
-import { createScanRouter } from './modules/scan/scan.routes.js';
-import type { ScanService } from './modules/scan/scan.service.js';
-import { createScanAssetRouter } from './modules/scan-asset/scan-asset.routes.js';
-import type { ScanAssetService } from './modules/scan-asset/scan-asset.service.js';
 import { createNoteRouter } from './modules/note/note.routes.js';
 import type { NoteService } from './modules/note/note.service.js';
+import { createProjectRouter } from './modules/project/project.routes.js';
+import type { ProjectService } from './modules/project/project.service.js';
+import { createScanAssetRouter } from './modules/scan-asset/scan-asset.routes.js';
+import type { ScanAssetService } from './modules/scan-asset/scan-asset.service.js';
+import { createScanRouter } from './modules/scan/scan.routes.js';
+import type { ScanService } from './modules/scan/scan.service.js';
 import { createShareRouter } from './modules/share/share.routes.js';
 import type { ShareLinkService } from './modules/share/share-link.service.js';
 import type { ShareService } from './modules/share/share.service.js';
@@ -37,6 +37,8 @@ import { createSharedProjectsRouter } from './modules/shared-projects/shared-pro
 import type { SharedProjectsService } from './modules/shared-projects/shared-projects.service.js';
 import { createSharedScansRouter } from './modules/shared-scans/shared-scans.routes.js';
 import type { SharedScansService } from './modules/shared-scans/shared-scans.service.js';
+import { createSyncRouter } from './modules/sync/sync.routes.js';
+import type { SyncService } from './modules/sync/sync.service.js';
 import { createWellKnownRouter } from './modules/well-known/well-known.routes.js';
 import { createOpenApiDocument } from './openapi/document.js';
 
@@ -54,6 +56,7 @@ export interface AppDependencies {
   shareLinkService: ShareLinkService;
   sharedProjectsService: SharedProjectsService;
   sharedScansService: SharedScansService;
+  syncService: SyncService;
   accessTokenVerifier: AccessTokenVerifier;
   currentUserRepository: CurrentUserRepository;
   rateLimiters: RateLimiters;
@@ -89,6 +92,7 @@ export function createApp({
   shareLinkService,
   sharedProjectsService,
   sharedScansService,
+  syncService,
   accessTokenVerifier,
   currentUserRepository,
   rateLimiters,
@@ -141,7 +145,7 @@ export function createApp({
     cors({
       origin: config.corsOrigins,
       credentials: config.corsOrigins !== '*',
-      exposedHeaders: ['RateLimit', 'RateLimit-Policy', 'Retry-After'],
+      exposedHeaders: ['ETag', 'RateLimit', 'RateLimit-Policy', 'Retry-After'],
     }),
   );
   app.use(compression());
@@ -174,6 +178,10 @@ export function createApp({
   );
   app.use(
     API_PREFIX,
+    createSyncRouter({ syncService, accessTokenVerifier, currentUserRepository }),
+  );
+  app.use(
+    API_PREFIX,
     createProjectRouter({
       projectService,
       accessTokenVerifier,
@@ -184,7 +192,6 @@ export function createApp({
     API_PREFIX,
     createScanRouter({
       scanService,
-      scanAssetService,
       accessTokenVerifier,
       currentUserRepository,
     }),

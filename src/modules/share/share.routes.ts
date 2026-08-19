@@ -1,16 +1,22 @@
 import { Router } from 'express';
 
 import { AppError } from '../../common/errors/app-error.js';
-import { authenticate, getUserId } from '../../common/middleware/authenticate.js';
+import {
+  idempotencyErrorToAppError,
+  resolveIdempotencyKey,
+} from '../../common/idempotency/idempotency.js';
 import type {
   AccessTokenVerifier,
   CurrentUserRepository,
 } from '../../common/middleware/authenticate.js';
+import { authenticate, getUserId } from '../../common/middleware/authenticate.js';
 import { validateRequest } from '../../common/middleware/validate-request.js';
+import { IdempotencyKeyHeaderSchema } from '../../common/schemas/sync-headers.js';
 import { ProjectNotFoundError } from '../project/project.errors.js';
 import { ProjectIdParamSchema, type ProjectIdParam } from '../project/project.schemas.js';
 import { ScanNotFoundError } from '../scan/scan.errors.js';
 import { ScanIdParamSchema, type ScanIdParam } from '../scan/scan.schemas.js';
+import type { ShareLinkService } from './share-link.service.js';
 import {
   AccessAlreadyExistsError,
   CannotAcceptOwnInvitationError,
@@ -18,8 +24,8 @@ import {
   InvitationAlreadySentError,
   InvitationDeclinedError,
   InvitationExpiredError,
-  InvitationNotFoundError,
   InvitationNotForUserError,
+  InvitationNotFoundError,
   InvitationRevokedError,
   NotOwnerError,
   ProjectNotShareableError,
@@ -29,7 +35,6 @@ import {
   ShareNoLongerAvailableError,
   ViewerAccessNotFoundError,
 } from './share.errors.js';
-import type { ShareLinkService } from './share-link.service.js';
 import {
   InvitationAcceptResponseSchema,
   InvitationCreateBodySchema,
@@ -40,23 +45,23 @@ import {
   InvitationResendResponseSchema,
   InvitationRevokeResponseSchema,
   InvitationTokenParamSchema,
+  ProjectShareLinkIdParamSchema,
+  ScanShareLinkIdParamSchema,
   ScanShareRevokeParamsSchema,
   ScanSharesListResponseSchema,
   ScanViewerRevokeResponseSchema,
-  ProjectShareLinkIdParamSchema,
-  ScanShareLinkIdParamSchema,
   ShareLinkCreateResponseSchema,
   ShareLinkListResponseSchema,
   ShareLinkRevokeResponseSchema,
-  SharesListResponseSchema,
   ShareRevokeParamsSchema,
+  SharesListResponseSchema,
   ViewerRevokeResponseSchema,
   type InvitationCreateBody,
   type InvitationIdParam,
   type InvitationTokenParam,
   type ProjectShareLinkIdParam,
-  type ScanShareRevokeParams,
   type ScanShareLinkIdParam,
+  type ScanShareRevokeParams,
   type ShareRevokeParams,
 } from './share.schemas.js';
 import type { ShareService } from './share.service.js';
@@ -69,6 +74,8 @@ export interface ShareRouterDependencies {
 }
 
 function mapError(error: unknown): AppError | undefined {
+  const idempotencyError = idempotencyErrorToAppError(error);
+  if (idempotencyError !== undefined) return idempotencyError;
   if (error instanceof ProjectNotFoundError) {
     return new AppError({
       statusCode: 404,
@@ -210,23 +217,36 @@ export function createShareRouter({
   router.post(
     '/projects/:projectId/invitations',
     requireAuth,
-    validateRequest({ body: InvitationCreateBodySchema, params: ProjectIdParamSchema }),
+    validateRequest({
+      body: InvitationCreateBodySchema,
+      params: ProjectIdParamSchema,
+      headers: IdempotencyKeyHeaderSchema,
+    }),
     async (request, response, next) => {
       try {
         const userId = getUserId(request);
-        const { body, params } = response.locals.validated as {
+        const { body, params, headers } = response.locals.validated as {
           body: InvitationCreateBody;
           params: ProjectIdParam;
+          headers: { 'Idempotency-Key': string };
         };
-        const result = await shareService.createInvitation(userId, params.projectId, {
+        const key = resolveIdempotencyKey(headers['Idempotency-Key']);
+        const input = {
           recipientEmail: body.recipientEmail,
           ...(body.expiresInSeconds === undefined
             ? {}
             : { expiresInSeconds: body.expiresInSeconds }),
-        });
-        const responseBody = InvitationCreateResponseSchema.parse(result);
+        };
+        const result =
+          typeof shareService.createInvitationIdempotently === 'function'
+            ? await shareService.createInvitationIdempotently(userId, params.projectId, input, key)
+            : {
+                body: await shareService.createInvitation(userId, params.projectId, input),
+                statusCode: 201,
+              };
+        const responseBody = InvitationCreateResponseSchema.parse(result.body);
 
-        response.status(201).json(responseBody);
+        response.status(result.statusCode).json(responseBody);
       } catch (error) {
         next(mapError(error) ?? error);
       }

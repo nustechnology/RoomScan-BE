@@ -1,8 +1,12 @@
 import { z } from '../../openapi/zod.js';
 
-export const ProjectSyncStatusSchema = z
-  .enum(['PENDING', 'SYNCING', 'SYNCED', 'FAILED', 'CONFLICT'])
-  .nullable();
+export const ProjectSyncStatusSchema = z.enum([
+  'PENDING',
+  'SYNCING',
+  'SYNCED',
+  'FAILED',
+  'CONFLICT',
+]);
 
 export const ProjectPermissionsSchema = z.object({
   role: z.enum(['OWNER', 'VIEWER']),
@@ -36,7 +40,9 @@ export const ProjectResponseSchema = z.object({
   scans: z.array(ProjectScanSummarySchema),
   sharedCount: z.number().int().nonnegative(),
   thumbnail: z.url().nullable(),
-  syncStatus: ProjectSyncStatusSchema,
+  syncStatus: ProjectSyncStatusSchema.nullable(),
+  revision: z.number().int().positive().default(1),
+  lastSyncedAt: z.iso.datetime().nullable().default(null),
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
   permissions: ProjectPermissionsSchema,

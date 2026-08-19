@@ -51,6 +51,7 @@ import type { ShareService } from '../src/modules/share/share.service.js';
 import type { ShareLinkService } from '../src/modules/share/share-link.service.js';
 import type { SharedProjectsService } from '../src/modules/shared-projects/shared-projects.service.js';
 import type { SharedScansService } from '../src/modules/shared-scans/shared-scans.service.js';
+import type { SyncService } from '../src/modules/sync/sync.service.js';
 import type { NoteService } from '../src/modules/note/note.service.js';
 import type { ProjectService } from '../src/modules/project/project.service.js';
 import type { ScanService } from '../src/modules/scan/scan.service.js';
@@ -83,6 +84,7 @@ const config: AppConfig = {
   appleClientId: 'com.example.roomscan',
   accessTokenSecret: ACCESS_SECRET,
   refreshTokenSecret: 'refresh-secret-that-is-at-least-32-characters',
+  syncCryptoKey: 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=',
   accessTokenTtlSeconds: 3600,
   refreshTokenTtlSeconds: 2_592_000,
   localTestAuthEnabled: false,
@@ -222,6 +224,10 @@ describe('Share HTTP endpoints', () => {
     detail: vi.fn(),
     remove: vi.fn(),
   } as unknown as SharedScansService;
+  const syncService = {
+    getChanges: vi.fn(),
+    getStatus: vi.fn(),
+  } as unknown as SyncService;
   const app = createApp({
     config,
     database,
@@ -236,6 +242,7 @@ describe('Share HTTP endpoints', () => {
     shareLinkService,
     sharedProjectsService,
     sharedScansService,
+    syncService,
     accessTokenVerifier,
     currentUserRepository,
     rateLimiters,
@@ -319,6 +326,7 @@ describe('Share HTTP endpoints', () => {
       viewers: [
         {
           userId: USER_RECIPIENT,
+          revision: 1,
           recipientUser: { id: USER_RECIPIENT, email: 'recipient@example.com' },
           grantedAt: NOW.toISOString(),
         },
@@ -327,6 +335,7 @@ describe('Share HTTP endpoints', () => {
     revokeViewer.mockResolvedValue({
       projectId: PROJECT_ID,
       userId: USER_RECIPIENT,
+      revision: 2,
       revokedAt: NOW.toISOString(),
     });
     createScanInvitation.mockResolvedValue({
@@ -386,6 +395,7 @@ describe('Share HTTP endpoints', () => {
       const response = await request(app)
         .post(`/api/v1/projects/${PROJECT_ID}/invitations`)
         .set('Authorization', `Bearer ${ownerToken}`)
+        .set('Idempotency-Key', 'invitation-create-1')
         .send({ recipientEmail: RECIPIENT_EMAIL, expiresInSeconds: 3600 })
         .expect(201);
 
@@ -408,6 +418,7 @@ describe('Share HTTP endpoints', () => {
       await request(app)
         .post(`/api/v1/projects/${PROJECT_ID}/invitations`)
         .set('Authorization', `Bearer ${ownerToken}`)
+        .set('Idempotency-Key', 'invitation-create-default-expiry')
         .send({ recipientEmail: RECIPIENT_EMAIL })
         .expect(201);
 
@@ -422,6 +433,7 @@ describe('Share HTTP endpoints', () => {
       const response = await request(app)
         .post(`/api/v1/projects/${PROJECT_ID}/invitations`)
         .set('Authorization', `Bearer ${ownerToken}`)
+        .set('Idempotency-Key', 'invitation-create-duplicate')
         .send({ recipientEmail: RECIPIENT_EMAIL })
         .expect(409);
 
@@ -436,6 +448,7 @@ describe('Share HTTP endpoints', () => {
       const response = await request(app)
         .post(`/api/v1/projects/${PROJECT_ID}/invitations`)
         .set('Authorization', `Bearer ${recipientToken}`)
+        .set('Idempotency-Key', 'invitation-create-non-owner')
         .send({ recipientEmail: RECIPIENT_EMAIL })
         .expect(403);
 
@@ -448,6 +461,7 @@ describe('Share HTTP endpoints', () => {
       const response = await request(app)
         .post(`/api/v1/projects/${PROJECT_ID}/invitations`)
         .set('Authorization', `Bearer ${ownerToken}`)
+        .set('Idempotency-Key', 'invitation-create-missing-project')
         .send({ recipientEmail: RECIPIENT_EMAIL })
         .expect(404);
 
@@ -462,6 +476,7 @@ describe('Share HTTP endpoints', () => {
       const response = await request(app)
         .post(`/api/v1/projects/${PROJECT_ID}/invitations`)
         .set('Authorization', `Bearer ${ownerToken}`)
+        .set('Idempotency-Key', 'invitation-create-not-ready')
         .send({ recipientEmail: RECIPIENT_EMAIL })
         .expect(409);
 
@@ -840,6 +855,7 @@ describe('Share HTTP endpoints', () => {
         viewers: [
           {
             userId: USER_RECIPIENT,
+            revision: 1,
             recipientUser: { id: USER_RECIPIENT, email: 'recipient@example.com' },
             grantedAt: NOW.toISOString(),
           },
@@ -871,6 +887,7 @@ describe('Share HTTP endpoints', () => {
       expect(body).toEqual({
         projectId: PROJECT_ID,
         userId: USER_RECIPIENT,
+        revision: 2,
         revokedAt: NOW.toISOString(),
       });
       expect(revokeViewer).toHaveBeenCalledWith(USER_OWNER, PROJECT_ID, USER_RECIPIENT);

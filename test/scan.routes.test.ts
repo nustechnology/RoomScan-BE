@@ -28,6 +28,7 @@ import type { ShareService } from '../src/modules/share/share.service.js';
 import type { ShareLinkService } from '../src/modules/share/share-link.service.js';
 import type { SharedProjectsService } from '../src/modules/shared-projects/shared-projects.service.js';
 import type { SharedScansService } from '../src/modules/shared-scans/shared-scans.service.js';
+import type { SyncService } from '../src/modules/sync/sync.service.js';
 import type { ProjectService } from '../src/modules/project/project.service.js';
 
 const ACCESS_SECRET = 'access-secret-that-is-at-least-32-characters';
@@ -53,6 +54,7 @@ const config: AppConfig = {
   appleClientId: 'com.example.roomscan',
   accessTokenSecret: ACCESS_SECRET,
   refreshTokenSecret: 'refresh-secret-that-is-at-least-32-characters',
+  syncCryptoKey: 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=',
   accessTokenTtlSeconds: 3600,
   refreshTokenTtlSeconds: 2_592_000,
   localTestAuthEnabled: false,
@@ -94,6 +96,7 @@ function scanResult(overrides: Partial<ScanResult> = {}): ScanResult {
     assetStatus: 'NONE',
     syncStatus: 'PENDING',
     modelVersion: 1,
+    revision: 1,
     createdAt: NOW.toISOString(),
     updatedAt: NOW.toISOString(),
     permissions: {
@@ -154,12 +157,14 @@ describe('Scan HTTP endpoints', () => {
     delete: vi.fn(),
   } as unknown as ProjectService;
   const create = vi.fn<ScanService['create']>();
+  const createWithUploadsIdempotently = vi.fn<ScanService['createWithUploadsIdempotently']>();
   const list = vi.fn<ScanService['list']>();
   const getById = vi.fn<ScanService['getById']>();
   const update = vi.fn<ScanService['update']>();
   const remove = vi.fn<ScanService['delete']>();
   const scanService = {
     create,
+    createWithUploadsIdempotently,
     list,
     getById,
     update,
@@ -204,6 +209,10 @@ describe('Scan HTTP endpoints', () => {
     detail: vi.fn(),
     remove: vi.fn(),
   } as unknown as SharedScansService;
+  const syncService = {
+    getChanges: vi.fn(),
+    getStatus: vi.fn(),
+  } as unknown as SyncService;
   const app = createApp({
     config,
     database,
@@ -218,6 +227,7 @@ describe('Scan HTTP endpoints', () => {
     shareLinkService,
     sharedProjectsService,
     sharedScansService,
+    syncService,
     accessTokenVerifier,
     currentUserRepository,
     rateLimiters,
@@ -232,13 +242,47 @@ describe('Scan HTTP endpoints', () => {
     tokenA = await signAccessToken(USER_A);
     tokenB = await signAccessToken(USER_B);
     create.mockResolvedValue({ scan: scanResult(), created: true });
+    createWithUploadsIdempotently.mockImplementation(
+      (
+        _userId: string,
+        _projectId: string,
+        _data: { name: string; description: string | null; clientMutationId?: string },
+        uploads: { assetType: 'THUMBNAIL' | 'MODEL' }[],
+      ) => {
+        const scan = scanResult();
+        const uploadResponse = {
+          uploadSessionId: 'c0ffee00-0000-4000-8000-000000000099',
+          assetId: 'c0ffee00-0000-4000-8000-000000000099',
+          uploadUrl: 'http://storage/upload/url',
+          uploadUrlExpiresAt: NOW.toISOString(),
+        };
+        const uploadsMap: { thumbnail?: typeof uploadResponse; scanFile?: typeof uploadResponse } =
+          {};
+        for (const upload of uploads) {
+          if (upload.assetType === 'THUMBNAIL') {
+            uploadsMap.thumbnail = uploadResponse;
+          } else {
+            uploadsMap.scanFile = uploadResponse;
+          }
+        }
+        const result: Record<string, unknown> = {
+          ...scan,
+          ...(uploads.length > 0 ? { uploads: uploadsMap } : {}),
+        };
+        return Promise.resolve({
+          body: result as never,
+          statusCode: 201,
+          replayed: false,
+        });
+      },
+    );
     list.mockResolvedValue({
       items: [scanResult()],
       pagination: { page: 1, limit: 20, total: 1, totalPages: 1 },
     });
     getById.mockResolvedValue(scanResult());
     update.mockResolvedValue(scanResult({ name: 'Updated Room' }));
-    remove.mockResolvedValue(undefined);
+    remove.mockResolvedValue(1);
   });
 
   describe('POST /api/v1/projects/:projectId/scans', () => {
@@ -246,32 +290,27 @@ describe('Scan HTTP endpoints', () => {
       const response = await request(app)
         .post(`/api/v1/projects/${PROJECT_ID}/scans`)
         .set('Authorization', `Bearer ${tokenA}`)
+        .set('Idempotency-Key', 'scan-create-1')
         .send({ name: 'Living Room' })
         .expect(201);
       const body = ScanResponseSchema.parse(response.body as unknown);
 
       expect(body).toMatchObject(scanResult());
-      expect(create).toHaveBeenCalledWith(USER_A, PROJECT_ID, {
-        name: 'Living Room',
-        description: null,
-      });
+      expect(createWithUploadsIdempotently).toHaveBeenCalledWith(
+        USER_A,
+        PROJECT_ID,
+        { name: 'Living Room', description: null },
+        [],
+        'scan-create-1',
+        { name: 'Living Room', description: null },
+      );
     });
 
     it('mints thumbnail and scan-file upload URLs from the create payload', async () => {
-      const createUploadSession = vi.fn().mockResolvedValue({
-        uploadSessionId: 'c0ffee00-0000-4000-8000-000000000099',
-        assetId: 'c0ffee00-0000-4000-8000-000000000099',
-        status: 'PENDING',
-        uploadUrl: 'http://storage/upload/url',
-        uploadUrlExpiresAt: NOW.toISOString(),
-        created: false,
-      });
-      (scanAssetService as { createUploadSession: unknown }).createUploadSession =
-        createUploadSession;
-
       const response = await request(app)
         .post(`/api/v1/projects/${PROJECT_ID}/scans`)
         .set('Authorization', `Bearer ${tokenA}`)
+        .set('Idempotency-Key', 'scan-create-with-assets')
         .send({
           name: 'Living Room',
           thumbnail: { contentType: 'image/png', sizeBytes: 2048 },
@@ -287,19 +326,37 @@ describe('Scan HTTP endpoints', () => {
       const body = CreateScanResponseSchema.parse(response.body as unknown);
       expect(body.uploads?.thumbnail?.uploadUrl).toBe('http://storage/upload/url');
       expect(body.uploads?.scanFile?.uploadUrl).toBe('http://storage/upload/url');
-      expect(createUploadSession).toHaveBeenCalledTimes(2);
-      expect(createUploadSession).toHaveBeenCalledWith(USER_A, SCAN_ID, {
-        assetType: 'THUMBNAIL',
-        contentType: 'image/png',
-        sizeBytes: 2048,
-      });
-      expect(createUploadSession).toHaveBeenCalledWith(USER_A, SCAN_ID, {
-        assetType: 'MODEL',
-        contentType: 'model/usdz',
-        sizeBytes: 20_000_000,
-        checksum: 'abc-checksum',
-        modelVersion: '1',
-      });
+      expect(createWithUploadsIdempotently).toHaveBeenCalledWith(
+        USER_A,
+        PROJECT_ID,
+        { name: 'Living Room', description: null },
+        [
+          {
+            assetType: 'THUMBNAIL',
+            contentType: 'image/png',
+            sizeBytes: 2048,
+          },
+          {
+            assetType: 'MODEL',
+            contentType: 'model/usdz',
+            sizeBytes: 20_000_000,
+            checksum: 'abc-checksum',
+            modelVersion: '1',
+          },
+        ],
+        'scan-create-with-assets',
+        {
+          name: 'Living Room',
+          description: null,
+          thumbnail: { contentType: 'image/png', sizeBytes: 2048 },
+          scanFile: {
+            contentType: 'model/usdz',
+            sizeBytes: 20_000_000,
+            checksum: 'abc-checksum',
+            modelVersion: '1',
+          },
+        },
+      );
     });
 
     it('rejects an invalid upload descriptor in the create payload', async () => {
@@ -314,11 +371,16 @@ describe('Scan HTTP endpoints', () => {
     });
 
     it('returns 200 for an idempotent repeat create', async () => {
-      create.mockResolvedValue({ scan: scanResult(), created: false });
+      createWithUploadsIdempotently.mockResolvedValueOnce({
+        body: scanResult(),
+        statusCode: 200,
+        replayed: true,
+      });
 
       const response = await request(app)
         .post(`/api/v1/projects/${PROJECT_ID}/scans`)
         .set('Authorization', `Bearer ${tokenA}`)
+        .set('Idempotency-Key', 'mutation-abc')
         .send({ name: 'Living Room', clientMutationId: 'mutation-abc' })
         .expect(200);
       const body = ScanResponseSchema.parse(response.body as unknown);
@@ -381,11 +443,12 @@ describe('Scan HTTP endpoints', () => {
     });
 
     it('hides create from a Viewer', async () => {
-      create.mockRejectedValueOnce(new ScanNotFoundError());
+      createWithUploadsIdempotently.mockRejectedValueOnce(new ScanNotFoundError());
 
       const response = await request(app)
         .post(`/api/v1/projects/${PROJECT_ID}/scans`)
         .set('Authorization', `Bearer ${tokenB}`)
+        .set('Idempotency-Key', 'scan-create-viewer')
         .send({ name: 'Living Room' })
         .expect(404);
       const body = ErrorResponseSchema.parse(response.body as unknown);
@@ -394,11 +457,12 @@ describe('Scan HTTP endpoints', () => {
     });
 
     it('returns a safe 500 for unexpected errors', async () => {
-      create.mockRejectedValueOnce(new Error('secret=do-not-expose'));
+      createWithUploadsIdempotently.mockRejectedValueOnce(new Error('secret=do-not-expose'));
 
       const response = await request(app)
         .post(`/api/v1/projects/${PROJECT_ID}/scans`)
         .set('Authorization', `Bearer ${tokenA}`)
+        .set('Idempotency-Key', 'scan-create-error')
         .send({ name: 'Living Room' })
         .expect(500);
       const body = ErrorResponseSchema.parse(response.body as unknown);
@@ -531,18 +595,20 @@ describe('Scan HTTP endpoints', () => {
       const response = await request(app)
         .patch(`/api/v1/scans/${SCAN_ID}`)
         .set('Authorization', `Bearer ${tokenA}`)
+        .set('If-Match', '"1"')
         .send({ name: 'Updated Room' })
         .expect(200);
       const body = ScanResponseSchema.parse(response.body as unknown);
 
       expect(body.name).toBe('Updated Room');
-      expect(update).toHaveBeenCalledWith(USER_A, SCAN_ID, { name: 'Updated Room' });
+      expect(update).toHaveBeenCalledWith(USER_A, SCAN_ID, 1, { name: 'Updated Room' });
     });
 
     it('clears description with null', async () => {
       await request(app)
         .patch(`/api/v1/scans/${SCAN_ID}`)
         .set('Authorization', `Bearer ${tokenA}`)
+        .set('If-Match', '"1"')
         .send({ description: null })
         .expect(200);
     });
@@ -593,6 +659,7 @@ describe('Scan HTTP endpoints', () => {
       const response = await request(app)
         .patch(`/api/v1/scans/${SCAN_ID}`)
         .set('Authorization', `Bearer ${tokenB}`)
+        .set('If-Match', '"1"')
         .send({ name: 'Forbidden' })
         .expect(404);
       const body = ErrorResponseSchema.parse(response.body as unknown);
@@ -606,6 +673,7 @@ describe('Scan HTTP endpoints', () => {
       const response = await request(app)
         .patch(`/api/v1/scans/${SCAN_ID}`)
         .set('Authorization', `Bearer ${tokenA}`)
+        .set('If-Match', '"1"')
         .send({ name: 'Updated' })
         .expect(500);
       const body = ErrorResponseSchema.parse(response.body as unknown);
@@ -620,14 +688,16 @@ describe('Scan HTTP endpoints', () => {
       await request(app)
         .delete(`/api/v1/scans/${SCAN_ID}`)
         .set('Authorization', `Bearer ${tokenA}`)
+        .set('If-Match', '"1"')
         .expect(204);
       await request(app)
         .delete(`/api/v1/scans/${SCAN_ID}`)
         .set('Authorization', `Bearer ${tokenA}`)
+        .set('If-Match', '"1"')
         .expect(204);
 
       expect(remove).toHaveBeenCalledTimes(2);
-      expect(remove).toHaveBeenLastCalledWith(USER_A, SCAN_ID);
+      expect(remove).toHaveBeenLastCalledWith(USER_A, SCAN_ID, 1);
     });
 
     it('hides deletion from a Viewer or unrelated user', async () => {
@@ -636,6 +706,7 @@ describe('Scan HTTP endpoints', () => {
       const response = await request(app)
         .delete(`/api/v1/scans/${SCAN_ID}`)
         .set('Authorization', `Bearer ${tokenB}`)
+        .set('If-Match', '"1"')
         .expect(404);
       const body = ErrorResponseSchema.parse(response.body as unknown);
 

@@ -9,6 +9,7 @@ import {
   AssetNotReadyError,
   AssetUploadFailedError,
   InvalidAssetRequestError,
+  ModelAlreadyCompletedError,
   ScanAssetNotFoundError,
   StorageUnavailableError,
   UploadSessionExpiredError,
@@ -47,7 +48,7 @@ function createAssetRecord(overrides: Partial<ScanAssetRecord> = {}): ScanAssetR
   };
 }
 
-function createHarness() {
+function createHarness(options: { managesSyncRollups?: boolean; minModelSizeBytes?: number } = {}) {
   const findProjectId = vi.fn<ScanRepository['findProjectId']>().mockResolvedValue(PROJECT_ID);
   const updateAssetStatus = vi
     .fn<ScanRepository['updateAssetStatus']>()
@@ -74,6 +75,7 @@ function createHarness() {
     create,
     update,
     listByScan,
+    ...(options.managesSyncRollups === undefined ? {} : { managesSyncRollups: true }),
   };
 
   const findAccessRole = vi
@@ -124,7 +126,7 @@ function createHarness() {
     clock: () => NOW,
     uploadUrlTtlSeconds: 900,
     downloadUrlTtlSeconds: 60,
-    minModelSizeBytes: 0,
+    minModelSizeBytes: options.minModelSizeBytes ?? 0,
     maxModelSizeBytes: 500_000_000,
     maxThumbnailSizeBytes: 10_000_000,
   });
@@ -149,6 +151,31 @@ function createHarness() {
 }
 
 describe('ScanAssetService', () => {
+  it('presigns scan-create uploads without persisting a raw idempotency key', async () => {
+    const { service, createUploadUrl } = createHarness();
+
+    const [prepared] = await service.prepareScanCreateUploads(SCAN_ID, [
+      {
+        assetType: 'MODEL',
+        contentType: 'model/gltf-binary',
+        sizeBytes: 20_000_000,
+        checksum: 'abc',
+        modelVersion: '1',
+      },
+    ]);
+
+    expect(createUploadUrl).toHaveBeenCalledOnce();
+    expect(prepared).toMatchObject({
+      data: {
+        scanId: SCAN_ID,
+        assetType: 'MODEL',
+        idempotencyKey: null,
+        storageKey: `scans/${SCAN_ID}/model`,
+      },
+      response: { uploadUrl: 'http://storage/upload' },
+    });
+  });
+
   it('creates an upload session as the Owner', async () => {
     const { service, createUploadUrl } = createHarness();
 
@@ -315,6 +342,36 @@ describe('ScanAssetService', () => {
     expect(updateThumbnail).toHaveBeenCalledWith(SCAN_ID, 'http://storage/display/thumbnail');
   });
 
+  it('persists the thumbnail display URL inside the asset update transaction', async () => {
+    const { service, findById, update, updateThumbnail, createDisplayUrl } = createHarness({
+      managesSyncRollups: true,
+    });
+    findById.mockResolvedValueOnce(
+      createAssetRecord({ assetType: 'THUMBNAIL', storageKey: `scans/${SCAN_ID}/thumbnail` }),
+    );
+    update.mockResolvedValueOnce(
+      createAssetRecord({
+        assetType: 'THUMBNAIL',
+        status: 'UPLOADED',
+        uploadedAt: NOW,
+      }),
+    );
+    createDisplayUrl.mockResolvedValueOnce('http://storage/display/thumbnail');
+
+    const result = await service.completeUpload(OWNER_ID, ASSET_ID, {});
+
+    expect(result.status).toBe('UPLOADED');
+    expect(createDisplayUrl).toHaveBeenCalledWith(`scans/${SCAN_ID}/thumbnail`);
+    expect(update).toHaveBeenCalledWith(
+      ASSET_ID,
+      expect.objectContaining({
+        status: 'UPLOADED',
+        thumbnailUrl: 'http://storage/display/thumbnail',
+      }),
+    );
+    expect(updateThumbnail).not.toHaveBeenCalled();
+  });
+
   it('completes an upload and marks the model synced', async () => {
     const { service, update, updateAssetStatus, verifyObject } = createHarness();
     update.mockResolvedValueOnce(createAssetRecord({ status: 'UPLOADED', uploadedAt: NOW }));
@@ -464,5 +521,221 @@ describe('ScanAssetService', () => {
     await expect(service.failUpload(OWNER_ID, ASSET_ID, {})).rejects.toBeInstanceOf(
       ScanAssetNotFoundError,
     );
+  });
+
+  it('rejects a new upload session for a completed model asset', async () => {
+    const { service, findByScanAndType, create } = createHarness();
+    findByScanAndType.mockResolvedValueOnce(
+      createAssetRecord({ status: 'UPLOADED', uploadedAt: NOW }),
+    );
+
+    await expect(
+      service.createUploadSession(OWNER_ID, SCAN_ID, {
+        assetType: 'MODEL',
+        contentType: 'model/gltf-binary',
+        sizeBytes: 20_000_000,
+      }),
+    ).rejects.toBeInstanceOf(ModelAlreadyCompletedError);
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('allows a thumbnail to be replaced even when already uploaded', async () => {
+    const { service, findByScanAndType, update } = createHarness();
+    findByScanAndType.mockResolvedValueOnce(
+      createAssetRecord({
+        assetType: 'THUMBNAIL',
+        contentType: 'image/png',
+        status: 'UPLOADED',
+        storageKey: `scans/${SCAN_ID}/thumbnail`,
+      }),
+    );
+    update.mockResolvedValueOnce(
+      createAssetRecord({ assetType: 'THUMBNAIL', contentType: 'image/png' }),
+    );
+
+    const result = await service.createUploadSession(OWNER_ID, SCAN_ID, {
+      assetType: 'THUMBNAIL',
+      contentType: 'image/png',
+      sizeBytes: 1_000_000,
+    });
+
+    expect(result.created).toBe(false);
+    expect(update).toHaveBeenCalled();
+  });
+
+  it('throws not-found when completing an unknown upload session', async () => {
+    const { service, findById } = createHarness();
+    findById.mockResolvedValueOnce(null);
+
+    await expect(service.completeUpload(OWNER_ID, ASSET_ID, {})).rejects.toBeInstanceOf(
+      ScanAssetNotFoundError,
+    );
+  });
+
+  it('skips the scan status update for a model when sync rollups are managed', async () => {
+    const { service, update, updateAssetStatus } = createHarness({ managesSyncRollups: true });
+    update.mockResolvedValueOnce(createAssetRecord({ status: 'UPLOADED', uploadedAt: NOW }));
+
+    const result = await service.completeUpload(OWNER_ID, ASSET_ID, {});
+
+    expect(result.status).toBe('UPLOADED');
+    expect(updateAssetStatus).not.toHaveBeenCalled();
+  });
+
+  it('persists the display URL when completing an already-uploaded thumbnail', async () => {
+    const { service, findById, updateThumbnail } = createHarness();
+    findById.mockResolvedValueOnce(
+      createAssetRecord({
+        assetType: 'THUMBNAIL',
+        status: 'UPLOADED',
+        uploadedAt: NOW,
+        storageKey: `scans/${SCAN_ID}/thumbnail`,
+      }),
+    );
+
+    const result = await service.completeUpload(OWNER_ID, ASSET_ID, {});
+
+    expect(result.status).toBe('UPLOADED');
+    expect(updateThumbnail).toHaveBeenCalled();
+  });
+
+  it('marks a thumbnail failed when verification fails', async () => {
+    const { service, findById, update, verifyObject } = createHarness();
+    findById.mockResolvedValueOnce(
+      createAssetRecord({ assetType: 'THUMBNAIL', storageKey: `scans/${SCAN_ID}/thumbnail` }),
+    );
+    verifyObject.mockResolvedValueOnce(false);
+
+    await expect(service.completeUpload(OWNER_ID, ASSET_ID, {})).rejects.toBeInstanceOf(
+      AssetUploadFailedError,
+    );
+    expect(update).toHaveBeenCalledWith(ASSET_ID, { status: 'FAILED' });
+  });
+
+  it('rejects a thumbnail upload exceeding the thumbnail size limit', async () => {
+    const { service, findById } = createHarness();
+    findById.mockResolvedValueOnce(createAssetRecord({ assetType: 'THUMBNAIL' }));
+
+    await expect(
+      service.completeUpload(OWNER_ID, ASSET_ID, { sizeBytes: 20_000_000 }),
+    ).rejects.toBeInstanceOf(InvalidAssetRequestError);
+  });
+
+  it('rejects a model upload below the minimum model size', async () => {
+    const { service } = createHarness({ minModelSizeBytes: 1_000_000 });
+
+    await expect(
+      service.completeUpload(OWNER_ID, ASSET_ID, { sizeBytes: 100 }),
+    ).rejects.toBeInstanceOf(InvalidAssetRequestError);
+  });
+
+  it('records a client-supplied checksum when completing an upload', async () => {
+    const { service, update } = createHarness();
+    update.mockResolvedValueOnce(createAssetRecord({ status: 'UPLOADED', uploadedAt: NOW }));
+
+    await service.completeUpload(OWNER_ID, ASSET_ID, { checksum: 'new-checksum' });
+
+    expect(update).toHaveBeenCalledWith(
+      ASSET_ID,
+      expect.objectContaining({ checksum: 'new-checksum' }),
+    );
+  });
+
+  it('returns a failed thumbnail without touching the scan', async () => {
+    const { service, findById, update, updateAssetStatus } = createHarness();
+    findById.mockResolvedValueOnce(createAssetRecord({ assetType: 'THUMBNAIL' }));
+    update.mockResolvedValueOnce(createAssetRecord({ assetType: 'THUMBNAIL', status: 'FAILED' }));
+
+    const result = await service.failUpload(OWNER_ID, ASSET_ID, { reason: 'timeout' });
+
+    expect(result.status).toBe('FAILED');
+    expect(updateAssetStatus).not.toHaveBeenCalled();
+  });
+
+  it('returns the metadata when failing an already-uploaded asset', async () => {
+    const { service, findById, update } = createHarness();
+    findById.mockResolvedValueOnce(createAssetRecord({ status: 'UPLOADED', uploadedAt: NOW }));
+
+    const result = await service.failUpload(OWNER_ID, ASSET_ID, { reason: 'timeout' });
+
+    expect(result.status).toBe('UPLOADED');
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('returns a download URL for an uploaded thumbnail', async () => {
+    const { service, findByScanAndType, createDownloadUrl } = createHarness();
+    findByScanAndType.mockResolvedValueOnce(
+      createAssetRecord({
+        assetType: 'THUMBNAIL',
+        status: 'UPLOADED',
+        uploadedAt: NOW,
+        storageKey: `scans/${SCAN_ID}/thumbnail`,
+      }),
+    );
+
+    const result = await service.getDownloadUrl(VIEWER_ID, SCAN_ID, 'THUMBNAIL');
+
+    expect(result.asset.assetType).toBe('THUMBNAIL');
+    expect(createDownloadUrl).toHaveBeenCalled();
+  });
+
+  it('lists assets for an Owner', async () => {
+    const { service, listByScan } = createHarness();
+    listByScan.mockResolvedValueOnce([createAssetRecord()]);
+
+    const result = await service.listAssets(OWNER_ID, SCAN_ID);
+
+    expect(result.items).toHaveLength(1);
+  });
+
+  it('prepares a thumbnail upload descriptor', async () => {
+    const { service } = createHarness();
+
+    const [prepared] = await service.prepareScanCreateUploads(SCAN_ID, [
+      { assetType: 'THUMBNAIL', contentType: 'image/png', sizeBytes: 1_000_000 },
+    ]);
+
+    expect(prepared).toMatchObject({
+      data: {
+        assetType: 'THUMBNAIL',
+        contentType: 'image/png',
+        checksum: null,
+        modelVersion: null,
+        idempotencyKey: null,
+      },
+    });
+  });
+
+  it('rejects a disallowed thumbnail content type when preparing uploads', async () => {
+    const { service } = createHarness();
+
+    await expect(
+      service.prepareScanCreateUploads(SCAN_ID, [
+        { assetType: 'THUMBNAIL', contentType: 'image/gif', sizeBytes: 1_000_000 },
+      ]),
+    ).rejects.toBeInstanceOf(InvalidAssetRequestError);
+  });
+
+  it('rejects an oversized thumbnail when preparing uploads', async () => {
+    const { service } = createHarness();
+
+    await expect(
+      service.prepareScanCreateUploads(SCAN_ID, [
+        { assetType: 'THUMBNAIL', contentType: 'image/png', sizeBytes: 20_000_000 },
+      ]),
+    ).rejects.toBeInstanceOf(InvalidAssetRequestError);
+  });
+
+  it('throws ScanNotFoundError when the owning project is missing', async () => {
+    const { service, findProjectId } = createHarness();
+    findProjectId.mockResolvedValueOnce(null);
+
+    await expect(
+      service.createUploadSession(OWNER_ID, SCAN_ID, {
+        assetType: 'MODEL',
+        contentType: 'model/gltf-binary',
+        sizeBytes: 20_000_000,
+      }),
+    ).rejects.toBeInstanceOf(ScanNotFoundError);
   });
 });

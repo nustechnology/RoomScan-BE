@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { Prisma, type PrismaClient } from '../src/generated/prisma/client.js';
 import { PrismaNoteRepository } from '../src/infrastructure/database/prisma-note-repository.js';
+import type { PrismaIdempotencyExecutor } from '../src/infrastructure/database/prisma-idempotency.js';
+import { RevisionConflictError } from '../src/common/revision/revision.errors.js';
 import { NoteNotFoundError } from '../src/modules/note/note.errors.js';
 
 const OWNER_ID = 'eb5d278f-c857-45c7-887d-7be65288cb75';
@@ -27,6 +29,8 @@ const noteSelect = {
   position: true,
   orientation: true,
   modelVersion: true,
+  revision: true,
+  deletedAt: true,
   createdAt: true,
   updatedAt: true,
 };
@@ -46,6 +50,8 @@ function createNoteRow(overrides: Record<string, unknown> = {}) {
     position: { x: 1.5, y: -2, z: 3.25 },
     orientation: { x: 0, y: 0, z: 1 },
     modelVersion: '1',
+    revision: 1,
+    deletedAt: null,
     createdAt: NOW,
     updatedAt: NOW,
     scan: {
@@ -61,9 +67,11 @@ function createClient() {
   const note = {
     create: vi.fn().mockResolvedValue(createNoteRow()),
     findFirst: vi.fn().mockResolvedValue(createNoteRow()),
+    findUniqueOrThrow: vi.fn().mockResolvedValue(createNoteRow()),
     findMany: vi.fn().mockResolvedValue([createNoteRow()]),
     count: vi.fn().mockResolvedValue(1),
     update: vi.fn().mockResolvedValue(createNoteRow()),
+    updateMany: vi.fn().mockResolvedValue({ count: 1 }),
     delete: vi.fn().mockResolvedValue({}),
   };
   const scan = {
@@ -158,20 +166,19 @@ describe('PrismaNoteRepository', () => {
       modelVersion: '1',
     });
 
-    expect(note.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: {
-          scanId: SCAN_ID,
-          createdById: OWNER_ID,
-          title: 'Cabinet hinge',
-          content: 'Cabinet hinge is loose',
-          color: 'YELLOW',
-          position: { x: 1.5, y: -2, z: 3.25 },
-          orientation: Prisma.JsonNull,
-          modelVersion: '1',
-        },
-      }),
-    );
+    const [createArguments] = note.create.mock.calls[0] as unknown as [
+      { data: Record<string, unknown> },
+    ];
+    expect(createArguments.data).toMatchObject({
+      scanId: SCAN_ID,
+      createdById: OWNER_ID,
+      title: 'Cabinet hinge',
+      content: 'Cabinet hinge is loose',
+      color: 'YELLOW',
+      position: { x: 1.5, y: -2, z: 3.25 },
+      orientation: Prisma.JsonNull,
+      modelVersion: '1',
+    });
     expect(scan.update).toHaveBeenCalledOnce();
     expect(project.update).toHaveBeenCalledOnce();
     expect(result.id).toBe(NOTE_ID);
@@ -211,14 +218,14 @@ describe('PrismaNoteRepository', () => {
 
     expect(note.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { scanId: SCAN_ID, scan: { deletedAt: null } },
+        where: { scanId: SCAN_ID, deletedAt: null, scan: { deletedAt: null } },
         orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
         skip: 0,
         take: 20,
       }),
     );
     expect(note.count).toHaveBeenCalledWith({
-      where: { scanId: SCAN_ID, scan: { deletedAt: null } },
+      where: { scanId: SCAN_ID, deletedAt: null, scan: { deletedAt: null } },
     });
     expect(result.total).toBe(3);
     expect(result.items).toHaveLength(1);
@@ -248,6 +255,7 @@ describe('PrismaNoteRepository', () => {
     expect(note.findFirst).toHaveBeenCalledWith({
       where: {
         id: NOTE_ID,
+        deletedAt: null,
         scan: {
           deletedAt: null,
           OR: [
@@ -310,21 +318,30 @@ describe('PrismaNoteRepository', () => {
 
   it('updates title and content as the Owner and touches activity', async () => {
     const { client, note, scan, project } = createClient();
-    note.findFirst.mockResolvedValueOnce({ scanId: SCAN_ID });
-    note.update.mockResolvedValueOnce(
+    note.findFirst.mockResolvedValueOnce(createNoteRow());
+    note.findUniqueOrThrow.mockResolvedValueOnce(
       createNoteRow({ title: 'Updated title', content: 'Updated content' }),
     );
     const repository = new PrismaNoteRepository(client);
 
-    const result = await repository.update(NOTE_ID, OWNER_ID, {
+    const result = await repository.update(NOTE_ID, OWNER_ID, 1, {
       title: 'Updated title',
       content: 'Updated content',
     });
 
-    expect(note.update).toHaveBeenCalledWith({
-      where: { id: NOTE_ID },
-      data: { title: 'Updated title', content: 'Updated content' },
-      select: noteSelect,
+    expect(note.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: NOTE_ID,
+        revision: 1,
+        deletedAt: null,
+        scan: { deletedAt: null, project: { ownerId: OWNER_ID, deletedAt: null } },
+      },
+      data: {
+        title: 'Updated title',
+        content: 'Updated content',
+        revision: { increment: 1 },
+        updatedAt: expect.any(Date) as Date,
+      },
     });
     expect(scan.update).toHaveBeenCalledOnce();
     expect(project.update).toHaveBeenCalledOnce();
@@ -336,48 +353,77 @@ describe('PrismaNoteRepository', () => {
     note.findFirst.mockResolvedValueOnce(null);
     const repository = new PrismaNoteRepository(client);
 
-    await expect(repository.update(NOTE_ID, VIEWER_ID, { color: 'RED' })).rejects.toBeInstanceOf(
+    await expect(repository.update(NOTE_ID, VIEWER_ID, 1, { color: 'RED' })).rejects.toBeInstanceOf(
       NoteNotFoundError,
     );
-    expect(note.update).not.toHaveBeenCalled();
+    expect(note.updateMany).not.toHaveBeenCalled();
   });
 
   it('moves a note to a new position as the Owner', async () => {
     const { client, note } = createClient();
-    note.findFirst.mockResolvedValueOnce({ scanId: SCAN_ID });
-    note.update.mockResolvedValueOnce(
+    note.findFirst.mockResolvedValueOnce(createNoteRow());
+    note.findUniqueOrThrow.mockResolvedValueOnce(
       createNoteRow({ position: { x: 9, y: 8, z: 7 }, orientation: null }),
     );
     const repository = new PrismaNoteRepository(client);
 
-    const result = await repository.updatePosition(NOTE_ID, OWNER_ID, {
+    const result = await repository.updatePosition(NOTE_ID, OWNER_ID, 1, {
       position: { x: 9, y: 8, z: 7 },
       orientation: null,
       modelVersion: '1',
     });
 
-    expect(note.update).toHaveBeenCalledWith(
+    expect(note.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: {
           position: { x: 9, y: 8, z: 7 },
           orientation: Prisma.JsonNull,
           modelVersion: '1',
+          revision: { increment: 1 },
+          updatedAt: expect.any(Date) as Date,
         },
       }),
     );
     expect(result.position).toEqual({ x: 9, y: 8, z: 7 });
   });
 
-  it('deletes a note as the Owner and touches activity', async () => {
+  it('soft-deletes a note as the Owner and touches activity', async () => {
     const { client, note, scan, project } = createClient();
-    note.findFirst.mockResolvedValueOnce({ scanId: SCAN_ID });
+    note.findFirst.mockResolvedValueOnce(createNoteRow());
     const repository = new PrismaNoteRepository(client);
 
-    await repository.delete(NOTE_ID, OWNER_ID);
+    await expect(repository.delete(NOTE_ID, OWNER_ID, 1)).resolves.toBe(2);
 
-    expect(note.delete).toHaveBeenCalledWith({ where: { id: NOTE_ID } });
+    expect(note.update).toHaveBeenCalledOnce();
+    const [updateArguments] = note.update.mock.calls[0] as unknown as [
+      { where: { id: string }; data: Record<string, unknown> },
+    ];
+    expect(updateArguments.where).toEqual({ id: NOTE_ID });
+    expect(updateArguments.data).toMatchObject({ revision: { increment: 1 } });
+    expect(updateArguments.data.deletedAt).toBeInstanceOf(Date);
+    expect(updateArguments.data.updatedAt).toBeInstanceOf(Date);
+    expect(note.delete).not.toHaveBeenCalled();
     expect(scan.update).toHaveBeenCalledOnce();
     expect(project.update).toHaveBeenCalledOnce();
+  });
+
+  it('soft-deletes a note with an atomic revision predicate', async () => {
+    const { client, note } = createClient();
+    note.findFirst.mockResolvedValueOnce(createNoteRow({ revision: 3, deletedAt: null }));
+    const repository = new PrismaNoteRepository(client, {} as unknown as PrismaIdempotencyExecutor);
+
+    await expect(repository.delete(NOTE_ID, OWNER_ID, 3)).resolves.toBe(4);
+
+    expect(note.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: NOTE_ID,
+          revision: 3,
+          deletedAt: null,
+          scan: { project: { ownerId: OWNER_ID } },
+        },
+      }),
+    );
   });
 
   it('hides deletion from a Viewer or unrelated user', async () => {
@@ -385,7 +431,77 @@ describe('PrismaNoteRepository', () => {
     note.findFirst.mockResolvedValueOnce(null);
     const repository = new PrismaNoteRepository(client);
 
-    await expect(repository.delete(NOTE_ID, VIEWER_ID)).rejects.toBeInstanceOf(NoteNotFoundError);
-    expect(note.delete).not.toHaveBeenCalled();
+    await expect(repository.delete(NOTE_ID, VIEWER_ID, 1)).rejects.toBeInstanceOf(
+      NoteNotFoundError,
+    );
+    expect(note.update).not.toHaveBeenCalled();
+  });
+
+  it('returns a revision conflict when an update loses to a newer revision', async () => {
+    const { client, note } = createClient();
+    note.updateMany.mockResolvedValue({ count: 0 });
+    note.findFirst.mockResolvedValueOnce(createNoteRow({ revision: 2 }));
+    const repository = new PrismaNoteRepository(client);
+
+    await expect(
+      repository.update(NOTE_ID, OWNER_ID, 1, { content: 'Updated content' }),
+    ).rejects.toMatchObject({
+      name: RevisionConflictError.name,
+      currentRevision: 2,
+      deleted: false,
+    });
+  });
+
+  it('returns a tombstone conflict when an update targets an already-deleted note', async () => {
+    const { client, note } = createClient();
+    note.updateMany.mockResolvedValue({ count: 0 });
+    note.findFirst.mockResolvedValueOnce(createNoteRow({ revision: 2, deletedAt: NOW }));
+    const repository = new PrismaNoteRepository(client);
+
+    await expect(
+      repository.update(NOTE_ID, OWNER_ID, 1, { content: 'Updated content' }),
+    ).rejects.toMatchObject({
+      name: RevisionConflictError.name,
+      currentRevision: 2,
+      deleted: true,
+    });
+  });
+
+  it('returns a revision conflict when an idempotent delete targets a stale revision', async () => {
+    const { client, note } = createClient();
+    note.findFirst.mockResolvedValueOnce(createNoteRow({ revision: 3, deletedAt: null }));
+    const repository = new PrismaNoteRepository(client, {} as unknown as PrismaIdempotencyExecutor);
+
+    await expect(repository.delete(NOTE_ID, OWNER_ID, 2)).rejects.toMatchObject({
+      name: RevisionConflictError.name,
+      currentRevision: 3,
+      deleted: false,
+    });
+  });
+
+  it('keeps an idempotent delete idempotent when a concurrent delete wins the claim', async () => {
+    const { client, note } = createClient();
+    note.findFirst
+      .mockResolvedValueOnce(createNoteRow({ revision: 1, deletedAt: null }))
+      .mockResolvedValueOnce(createNoteRow({ revision: 2, deletedAt: NOW }));
+    note.updateMany.mockResolvedValue({ count: 0 });
+    const repository = new PrismaNoteRepository(client, {} as unknown as PrismaIdempotencyExecutor);
+
+    await expect(repository.delete(NOTE_ID, OWNER_ID, 1)).resolves.toBe(2);
+  });
+
+  it('returns a revision conflict when a concurrent live write wins the delete claim', async () => {
+    const { client, note } = createClient();
+    note.findFirst
+      .mockResolvedValueOnce(createNoteRow({ revision: 1, deletedAt: null }))
+      .mockResolvedValueOnce(createNoteRow({ revision: 2, deletedAt: null }));
+    note.updateMany.mockResolvedValue({ count: 0 });
+    const repository = new PrismaNoteRepository(client, {} as unknown as PrismaIdempotencyExecutor);
+
+    await expect(repository.delete(NOTE_ID, OWNER_ID, 1)).rejects.toMatchObject({
+      name: RevisionConflictError.name,
+      currentRevision: 2,
+      deleted: false,
+    });
   });
 });

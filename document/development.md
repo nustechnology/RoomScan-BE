@@ -27,7 +27,9 @@ the new contract merely to make code and documentation agree.
 1. Use Node 24 and the Yarn version in `packageManager`.
 2. Copy `.env.example` to `.env`.
 3. Replace the Apple client ID and authentication-secret placeholders. Each
-   token secret must contain at least 32 characters.
+   token secret must contain at least 32 characters. Set `SYNC_CRYPTO_KEY` to a
+   base64 encoding of exactly 32 random bytes and keep it stable for stored
+   idempotency receipts and cursors.
 4. Run `yarn install --immutable` and `yarn prisma:generate`.
 5. Start PostgreSQL with `docker compose up db -d` when it is not already
    running and healthy; leave an existing healthy container running.
@@ -75,9 +77,11 @@ remain reachable.
 The local seed is idempotent and refuses to run unless
 `NODE_ENV=development`. It creates (or refreshes) the fixed local Apple user,
 then seeds three demo projects owned by that user, each with room scans that
-exercise a range of asset and sync states, plus text notes anchored to the
+exercise a range of persisted MODEL asset and sync states, plus text notes anchored to the
 primary project's scans, so the list, pagination, sort, and detail screens can
-be tried without manual setup. It also seeds four shared projects
+be tried without manual setup. The seed also emits initial sync bootstrap
+changes, so `/sync/changes` and `/sync/status` are immediately demoable. It
+also seeds four shared projects
 the local user accepted (or was granted) as a Viewer — "Garden House"
 (`ACTIVE`), "Maple Cottage" (`REVOKED`), "Willow Townhouse"
 (`PROJECT_DELETED`), and "Cedar Bungalow" (`TEMPORARILY_UNAVAILABLE`) — so the
@@ -118,6 +122,8 @@ and the Shared With Me endpoints. The _Sharing & Invitations_ folder is split
 into _Projects_, _Scans_, and _General_ subfolders, as is the dedicated
 _Share Links_ folder (scan/project links plus the shared token preview/accept
 requests). The Shared With Me surface covers both projects and scans.
+Keep its idempotency headers, `If-Match` examples, and Sync folder aligned with
+the generated OpenAPI contract.
 
 ## Before handoff
 
@@ -162,6 +168,8 @@ The handoff must state:
 - Commit schema and migration files together.
 - Production/container startup applies existing migrations with
   `yarn prisma:migrate:deploy`; it never creates migrations.
+- `yarn prisma:migrate:reset` drops and re-creates the database from migrations; it is
+  guarded by `NODE_ENV=development` and refuses to run in any other environment.
 - Never edit `src/generated/prisma` manually.
 
 The committed `add_apple_auth` migration creates the Apple auth provider enum,
@@ -210,6 +218,22 @@ constraints are expressed in the migration SQL, matching how the earlier
 `CYAN` and `GRAY` and adds a required `title` column (`VARCHAR(50)`) to the
 `notes` table with a placeholder backfill so it applies even when the table
 already contains rows.
+
+The `add_sync_idempotency_conflicts` migration adds integer revisions to
+Project, Scan, Note, ScanAsset, and ProjectAccess; Note/ScanAsset tombstones;
+project readiness timestamps; scoped asset legacy-key uniqueness; encrypted
+idempotency receipts; the append-only `sync_changes` feed; and per-user
+`sync_conflicts`. Its reviewed SQL backfills readiness and initial UPSERT
+snapshots for existing active resources/access. The follow-up
+`backfill_note_title_in_sync_changes` migration adds the note `title` field
+to existing NOTE UPSERT rows in `sync_changes` that were created without it.
+Deploy migrations with `yarn prisma:migrate:deploy`; never rewrite older
+migrations or generated Prisma Client.
+
+`SYNC_CRYPTO_KEY` must be configured before the migrated application starts and
+must remain unchanged. V1 ciphertext/cursor formats are versioned but do not
+implement key rotation. `sync_changes` and `idempotency_receipts` have no V1
+expiry or compaction job; retention is an operations follow-up.
 Tests use Prisma delegate doubles; native migration and endpoint verification
 use the PostgreSQL `db` container.
 

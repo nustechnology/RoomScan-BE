@@ -1,6 +1,7 @@
 import { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
 
 import { ErrorResponseSchema } from '../../common/schemas/error.js';
+import { IdempotencyKeyHeaderSchema } from '../../common/schemas/sync-headers.js';
 import { ScanIdParamSchema } from '../scan/scan.schemas.js';
 import {
   AssetMetadataResponseSchema,
@@ -179,9 +180,12 @@ scanAssetOpenApiRegistry.registerPath({
   path: '/api/v1/scans/{scanId}/assets/upload-sessions',
   tags: ['Scan Assets'],
   summary: 'Create an upload session for a model or thumbnail asset',
+  description:
+    'Requires Idempotency-Key. The deprecated body idempotencyKey alias must match the header. Completed MODEL assets cannot be replaced.',
   security: [{ [bearerAuth]: [] }],
   request: {
     params: ScanIdParamSchema,
+    headers: IdempotencyKeyHeaderSchema,
     body: {
       required: true,
       content: {
@@ -212,6 +216,13 @@ scanAssetOpenApiRegistry.registerPath({
     },
     ...commonErrorResponses,
     404: scanNotFoundResponse,
+    409: {
+      description:
+        'The idempotency payload differs or the scan already has a completed MODEL asset',
+      headers: rateLimitHeaders,
+      content: { 'application/json': { schema: errorResponse } },
+    },
+    503: storageUnavailableResponse,
   },
 });
 

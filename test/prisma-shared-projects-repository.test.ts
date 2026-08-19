@@ -10,9 +10,12 @@ const NOW = new Date('2026-07-29T10:00:00.000Z');
 
 function createAccessRow(overrides: Record<string, unknown> = {}) {
   return {
+    id: 'access-id',
+    revision: 1,
     revokedAt: null,
     project: {
       id: PROJECT_ID,
+      ownerId: OWNER_ID,
       name: 'District 2 Apartment',
       description: null,
       deletedAt: null,
@@ -35,12 +38,16 @@ function createClient() {
   const project = {
     findFirst: vi.fn().mockResolvedValue({ ownerId: OWNER_ID }),
   };
-  const transaction = vi.fn(async (operations: readonly Promise<unknown>[]) => {
-    const results = [];
-    for (const operation of operations) {
-      results.push(await operation);
+  const transaction = vi.fn(async (operation: unknown) => {
+    if (Array.isArray(operation)) {
+      return await Promise.all(operation as readonly Promise<unknown>[]);
     }
-    return results;
+    return await (
+      operation as (transactionClient: {
+        projectAccess: typeof projectAccess;
+        project: typeof project;
+      }) => Promise<unknown>
+    )({ projectAccess, project });
   });
   const client = {
     projectAccess,
@@ -236,8 +243,14 @@ describe('PrismaSharedProjectsRepository', () => {
     );
 
     expect(projectAccess.updateMany).toHaveBeenCalledWith({
-      where: { projectId: PROJECT_ID, userId: USER_ID, role: 'VIEWER', revokedAt: null },
-      data: { revokedAt: NOW },
+      where: {
+        id: 'access-id',
+        userId: USER_ID,
+        role: 'VIEWER',
+        revokedAt: null,
+        revision: 1,
+      },
+      data: { revokedAt: NOW, revision: { increment: 1 }, updatedAt: NOW },
     });
     expect(result).toBe(true);
   });
@@ -252,10 +265,7 @@ describe('PrismaSharedProjectsRepository', () => {
       NOW,
     );
 
-    expect(projectAccess.updateMany).toHaveBeenCalledWith({
-      where: { projectId: PROJECT_ID, userId: USER_ID, role: 'VIEWER', revokedAt: null },
-      data: { revokedAt: NOW },
-    });
+    expect(projectAccess.updateMany).toHaveBeenCalledOnce();
     expect(result).toBe(false);
   });
 

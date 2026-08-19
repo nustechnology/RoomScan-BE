@@ -21,6 +21,7 @@ import type { ShareService } from '../src/modules/share/share.service.js';
 import type { ShareLinkService } from '../src/modules/share/share-link.service.js';
 import type { SharedProjectsService } from '../src/modules/shared-projects/shared-projects.service.js';
 import type { SharedScansService } from '../src/modules/shared-scans/shared-scans.service.js';
+import type { SyncService } from '../src/modules/sync/sync.service.js';
 import type { NoteResult } from '../src/modules/note/note.types.js';
 import type { ProjectService } from '../src/modules/project/project.service.js';
 import type { ScanService } from '../src/modules/scan/scan.service.js';
@@ -50,6 +51,7 @@ const config: AppConfig = {
   appleClientId: 'com.example.roomscan',
   accessTokenSecret: ACCESS_SECRET,
   refreshTokenSecret: 'refresh-secret-that-is-at-least-32-characters',
+  syncCryptoKey: 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=',
   accessTokenTtlSeconds: 3600,
   refreshTokenTtlSeconds: 2_592_000,
   localTestAuthEnabled: false,
@@ -86,6 +88,7 @@ function noteResult(overrides: Partial<NoteResult> = {}): NoteResult {
     position: { x: 1.5, y: -2, z: 3.25 },
     orientation: { x: 0, y: 0, z: 1 },
     modelVersion: '1',
+    revision: 1,
     creator: {
       id: USER_A,
       email: 'owner@example.com',
@@ -200,6 +203,10 @@ describe('Note HTTP endpoints', () => {
     detail: vi.fn(),
     remove: vi.fn(),
   } as unknown as SharedScansService;
+  const syncService = {
+    getChanges: vi.fn(),
+    getStatus: vi.fn(),
+  } as unknown as SyncService;
   const app = createApp({
     config,
     database,
@@ -214,6 +221,7 @@ describe('Note HTTP endpoints', () => {
     shareLinkService,
     sharedProjectsService,
     sharedScansService,
+    syncService,
     accessTokenVerifier,
     currentUserRepository,
     rateLimiters,
@@ -235,7 +243,7 @@ describe('Note HTTP endpoints', () => {
     getById.mockResolvedValue(noteResult());
     update.mockResolvedValue(noteResult({ title: 'Updated title', content: 'Updated content' }));
     move.mockResolvedValue(noteResult({ position: { x: 9, y: 8, z: 7 } }));
-    remove.mockResolvedValue(undefined);
+    remove.mockResolvedValue(1);
   });
 
   describe('POST /api/v1/scans/:scanId/notes', () => {
@@ -243,6 +251,7 @@ describe('Note HTTP endpoints', () => {
       const response = await request(app)
         .post(`/api/v1/scans/${SCAN_ID}/notes`)
         .set('Authorization', `Bearer ${tokenA}`)
+        .set('Idempotency-Key', 'note-create-1')
         .send({
           title: 'Cabinet hinge',
           content: 'Cabinet hinge is loose',
@@ -269,6 +278,7 @@ describe('Note HTTP endpoints', () => {
       await request(app)
         .post(`/api/v1/scans/${SCAN_ID}/notes`)
         .set('Authorization', `Bearer ${tokenA}`)
+        .set('Idempotency-Key', 'note-create-cyan')
         .send({
           title: 'Cyan note',
           content: 'Cyan content',
@@ -280,6 +290,7 @@ describe('Note HTTP endpoints', () => {
       await request(app)
         .post(`/api/v1/scans/${SCAN_ID}/notes`)
         .set('Authorization', `Bearer ${tokenA}`)
+        .set('Idempotency-Key', 'note-create-gray')
         .send({
           title: 'Gray note',
           content: 'Gray content',
@@ -335,6 +346,7 @@ describe('Note HTTP endpoints', () => {
       await request(app)
         .post(`/api/v1/scans/${SCAN_ID}/notes`)
         .set('Authorization', `Bearer ${tokenA}`)
+        .set('Idempotency-Key', 'note-create-no-orientation')
         .send({
           title: 'Plain note',
           content: 'Plain note',
@@ -467,6 +479,7 @@ describe('Note HTTP endpoints', () => {
       const response = await request(app)
         .post(`/api/v1/scans/${SCAN_ID}/notes`)
         .set('Authorization', `Bearer ${tokenB}`)
+        .set('Idempotency-Key', 'note-create-viewer')
         .send({
           title: 'Title',
           content: 'Note',
@@ -486,6 +499,7 @@ describe('Note HTTP endpoints', () => {
       const response = await request(app)
         .post(`/api/v1/scans/${SCAN_ID}/notes`)
         .set('Authorization', `Bearer ${tokenA}`)
+        .set('Idempotency-Key', 'note-create-stale-model')
         .send({
           title: 'Title',
           content: 'Stale note',
@@ -505,6 +519,7 @@ describe('Note HTTP endpoints', () => {
       const response = await request(app)
         .post(`/api/v1/scans/${SCAN_ID}/notes`)
         .set('Authorization', `Bearer ${tokenA}`)
+        .set('Idempotency-Key', 'note-create-error')
         .send({
           title: 'Title',
           content: 'Note',
@@ -638,13 +653,14 @@ describe('Note HTTP endpoints', () => {
       const response = await request(app)
         .patch(`/api/v1/notes/${NOTE_ID}`)
         .set('Authorization', `Bearer ${tokenA}`)
+        .set('If-Match', '"1"')
         .send({ title: 'Updated title', content: 'Updated content', color: 'RED' })
         .expect(200);
       const body = NoteResponseSchema.parse(response.body as unknown);
 
       expect(body.title).toBe('Updated title');
       expect(body.content).toBe('Updated content');
-      expect(update).toHaveBeenCalledWith(USER_A, NOTE_ID, {
+      expect(update).toHaveBeenCalledWith(USER_A, NOTE_ID, 1, {
         title: 'Updated title',
         content: 'Updated content',
         color: 'RED',
@@ -689,6 +705,7 @@ describe('Note HTTP endpoints', () => {
       const response = await request(app)
         .patch(`/api/v1/notes/${NOTE_ID}`)
         .set('Authorization', `Bearer ${tokenB}`)
+        .set('If-Match', '"1"')
         .send({ content: 'Forbidden' })
         .expect(404);
       const body = ErrorResponseSchema.parse(response.body as unknown);
@@ -702,6 +719,7 @@ describe('Note HTTP endpoints', () => {
       const response = await request(app)
         .patch(`/api/v1/notes/${NOTE_ID}/position`)
         .set('Authorization', `Bearer ${tokenA}`)
+        .set('If-Match', '"1"')
         .send({
           position: { x: 9, y: 8, z: 7 },
           orientation: { x: 0, y: 0, z: 1 },
@@ -711,7 +729,7 @@ describe('Note HTTP endpoints', () => {
       const body = NoteResponseSchema.parse(response.body as unknown);
 
       expect(body.position).toEqual({ x: 9, y: 8, z: 7 });
-      expect(move).toHaveBeenCalledWith(USER_A, NOTE_ID, {
+      expect(move).toHaveBeenCalledWith(USER_A, NOTE_ID, 1, {
         position: { x: 9, y: 8, z: 7 },
         orientation: { x: 0, y: 0, z: 1 },
         modelVersion: '1',
@@ -752,6 +770,7 @@ describe('Note HTTP endpoints', () => {
       const response = await request(app)
         .patch(`/api/v1/notes/${NOTE_ID}/position`)
         .set('Authorization', `Bearer ${tokenB}`)
+        .set('If-Match', '"1"')
         .send({ position: { x: 1, y: 2, z: 3 }, modelVersion: '1' })
         .expect(404);
       const body = ErrorResponseSchema.parse(response.body as unknown);
@@ -765,6 +784,7 @@ describe('Note HTTP endpoints', () => {
       const response = await request(app)
         .patch(`/api/v1/notes/${NOTE_ID}/position`)
         .set('Authorization', `Bearer ${tokenA}`)
+        .set('If-Match', '"1"')
         .send({ position: { x: 1, y: 2, z: 3 }, modelVersion: '2' })
         .expect(409);
       const body = ErrorResponseSchema.parse(response.body as unknown);
@@ -778,9 +798,10 @@ describe('Note HTTP endpoints', () => {
       await request(app)
         .delete(`/api/v1/notes/${NOTE_ID}`)
         .set('Authorization', `Bearer ${tokenA}`)
+        .set('If-Match', '"1"')
         .expect(204);
 
-      expect(remove).toHaveBeenCalledWith(USER_A, NOTE_ID);
+      expect(remove).toHaveBeenCalledWith(USER_A, NOTE_ID, 1);
     });
 
     it('hides deletion from a Viewer or unrelated user', async () => {
@@ -789,6 +810,7 @@ describe('Note HTTP endpoints', () => {
       const response = await request(app)
         .delete(`/api/v1/notes/${NOTE_ID}`)
         .set('Authorization', `Bearer ${tokenB}`)
+        .set('If-Match', '"1"')
         .expect(404);
       const body = ErrorResponseSchema.parse(response.body as unknown);
 

@@ -1,3 +1,8 @@
+import type {
+  IdempotencyContext,
+  IdempotencyResult,
+} from '../../common/idempotency/idempotency.types.js';
+
 export type ProjectRole = 'OWNER' | 'VIEWER';
 export type ProjectSyncStatus = 'PENDING' | 'SYNCING' | 'SYNCED' | 'FAILED' | 'CONFLICT';
 export type ProjectSort =
@@ -39,6 +44,8 @@ export interface ProjectRecord {
   sharedCount: number;
   thumbnail: string | null;
   syncStatus: ProjectSyncStatus | null;
+  revision: number;
+  lastSyncedAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -62,6 +69,8 @@ export interface ProjectResult {
   sharedCount: number;
   thumbnail: string | null;
   syncStatus: ProjectSyncStatus | null;
+  revision: number;
+  lastSyncedAt?: string | null;
   createdAt: string;
   updatedAt: string;
   permissions: ProjectPermissions;
@@ -96,6 +105,11 @@ export interface ProjectListResult {
 
 export interface ProjectRepository {
   create(ownerId: string, data: ProjectCreateInput): Promise<ProjectRecord>;
+  createIdempotently?(
+    ownerId: string,
+    data: ProjectCreateInput,
+    context: IdempotencyContext,
+  ): Promise<IdempotencyResult<ProjectResult>>;
   list(
     ownerId: string,
     options: ProjectListOptions,
@@ -108,6 +122,11 @@ export interface ProjectRepository {
     userId: string,
   ): Promise<{ record: ProjectRecord; role: ProjectRole } | null>;
   findAccessRole(id: string, userId: string): Promise<ProjectRole | null>;
-  update(id: string, ownerId: string, data: ProjectUpdateInput): Promise<ProjectRecord>;
-  softDelete(id: string, ownerId: string): Promise<void>;
+  update(
+    id: string,
+    ownerId: string,
+    expectedRevision: number,
+    data: ProjectUpdateInput,
+  ): Promise<ProjectRecord>;
+  softDelete(id: string, ownerId: string, expectedRevision: number): Promise<number>;
 }
