@@ -23,13 +23,13 @@ import {
   InvitationDeclinedError,
   InvitationExpiredError,
   InvitationNotFoundError,
-  InvitationRevokedError,
+  InvitationNotForUserError,
   NotOwnerError,
   ProjectNotShareableError,
   ScanNotShareableError,
   ShareLinkExpiredError,
   ShareLinkNotFoundError,
-  ShareLinkRevokedError,
+  ShareNoLongerAvailableError,
   ViewerAccessNotFoundError,
 } from '../src/modules/share/share.errors.js';
 import {
@@ -51,6 +51,7 @@ import type { ShareService } from '../src/modules/share/share.service.js';
 import type { ShareLinkService } from '../src/modules/share/share-link.service.js';
 import type { SharedProjectsService } from '../src/modules/shared-projects/shared-projects.service.js';
 import type { SharedScansService } from '../src/modules/shared-scans/shared-scans.service.js';
+import type { SyncService } from '../src/modules/sync/sync.service.js';
 import type { NoteService } from '../src/modules/note/note.service.js';
 import type { ProjectService } from '../src/modules/project/project.service.js';
 import type { ScanService } from '../src/modules/scan/scan.service.js';
@@ -83,6 +84,7 @@ const config: AppConfig = {
   appleClientId: 'com.example.roomscan',
   accessTokenSecret: ACCESS_SECRET,
   refreshTokenSecret: 'refresh-secret-that-is-at-least-32-characters',
+  syncCryptoKey: 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=',
   accessTokenTtlSeconds: 3600,
   refreshTokenTtlSeconds: 2_592_000,
   localTestAuthEnabled: false,
@@ -109,7 +111,7 @@ const config: AppConfig = {
   mailFrom: 'RoomScan App <notifications@roomscan.app>',
 };
 
-const invitationUrl = `https://invite.roomscan.dev/invitations/${TOKEN}`;
+const invitationUrl = `https://invite.roomscan.dev/invitations/${TOKEN}?scope=project`;
 const expiresAt = new Date(NOW.getTime() + 604_800 * 1000).toISOString();
 
 async function signAccessToken(userId: string): Promise<string> {
@@ -222,6 +224,10 @@ describe('Share HTTP endpoints', () => {
     detail: vi.fn(),
     remove: vi.fn(),
   } as unknown as SharedScansService;
+  const syncService = {
+    getChanges: vi.fn(),
+    getStatus: vi.fn(),
+  } as unknown as SyncService;
   const app = createApp({
     config,
     database,
@@ -236,6 +242,7 @@ describe('Share HTTP endpoints', () => {
     shareLinkService,
     sharedProjectsService,
     sharedScansService,
+    syncService,
     accessTokenVerifier,
     currentUserRepository,
     rateLimiters,
@@ -265,6 +272,8 @@ describe('Share HTTP endpoints', () => {
         name: 'District 2 Apartment',
         description: null,
         thumbnail: null,
+        owner: { id: USER_OWNER, email: 'owner@example.com' },
+        scanCount: 2,
       },
       scan: null,
       status: 'PENDING',
@@ -281,6 +290,7 @@ describe('Share HTTP endpoints', () => {
         description: null,
         thumbnail: null,
         owner: { id: USER_OWNER, email: 'owner@example.com' },
+        scanCount: 2,
       },
       scan: null,
       access: { role: 'VIEWER', status: 'ACTIVE', grantedAt: NOW.toISOString() },
@@ -316,6 +326,7 @@ describe('Share HTTP endpoints', () => {
       viewers: [
         {
           userId: USER_RECIPIENT,
+          revision: 1,
           recipientUser: { id: USER_RECIPIENT, email: 'recipient@example.com' },
           grantedAt: NOW.toISOString(),
         },
@@ -324,6 +335,7 @@ describe('Share HTTP endpoints', () => {
     revokeViewer.mockResolvedValue({
       projectId: PROJECT_ID,
       userId: USER_RECIPIENT,
+      revision: 2,
       revokedAt: NOW.toISOString(),
     });
     createScanInvitation.mockResolvedValue({
@@ -359,7 +371,7 @@ describe('Share HTTP endpoints', () => {
     });
     createShareLink.mockResolvedValue({
       shareLinkId: SHARE_LINK_ID,
-      shareLinkUrl: `https://invite.roomscan.dev/invitations/${TOKEN}`,
+      shareLinkUrl: `https://invite.roomscan.dev/invitations/${TOKEN}?scope=project`,
       scope: 'project',
       expiresAt,
     });
@@ -383,6 +395,7 @@ describe('Share HTTP endpoints', () => {
       const response = await request(app)
         .post(`/api/v1/projects/${PROJECT_ID}/invitations`)
         .set('Authorization', `Bearer ${ownerToken}`)
+        .set('Idempotency-Key', 'invitation-create-1')
         .send({ recipientEmail: RECIPIENT_EMAIL, expiresInSeconds: 3600 })
         .expect(201);
 
@@ -405,6 +418,7 @@ describe('Share HTTP endpoints', () => {
       await request(app)
         .post(`/api/v1/projects/${PROJECT_ID}/invitations`)
         .set('Authorization', `Bearer ${ownerToken}`)
+        .set('Idempotency-Key', 'invitation-create-default-expiry')
         .send({ recipientEmail: RECIPIENT_EMAIL })
         .expect(201);
 
@@ -419,6 +433,7 @@ describe('Share HTTP endpoints', () => {
       const response = await request(app)
         .post(`/api/v1/projects/${PROJECT_ID}/invitations`)
         .set('Authorization', `Bearer ${ownerToken}`)
+        .set('Idempotency-Key', 'invitation-create-duplicate')
         .send({ recipientEmail: RECIPIENT_EMAIL })
         .expect(409);
 
@@ -433,6 +448,7 @@ describe('Share HTTP endpoints', () => {
       const response = await request(app)
         .post(`/api/v1/projects/${PROJECT_ID}/invitations`)
         .set('Authorization', `Bearer ${recipientToken}`)
+        .set('Idempotency-Key', 'invitation-create-non-owner')
         .send({ recipientEmail: RECIPIENT_EMAIL })
         .expect(403);
 
@@ -445,6 +461,7 @@ describe('Share HTTP endpoints', () => {
       const response = await request(app)
         .post(`/api/v1/projects/${PROJECT_ID}/invitations`)
         .set('Authorization', `Bearer ${ownerToken}`)
+        .set('Idempotency-Key', 'invitation-create-missing-project')
         .send({ recipientEmail: RECIPIENT_EMAIL })
         .expect(404);
 
@@ -459,6 +476,7 @@ describe('Share HTTP endpoints', () => {
       const response = await request(app)
         .post(`/api/v1/projects/${PROJECT_ID}/invitations`)
         .set('Authorization', `Bearer ${ownerToken}`)
+        .set('Idempotency-Key', 'invitation-create-not-ready')
         .send({ recipientEmail: RECIPIENT_EMAIL })
         .expect(409);
 
@@ -551,8 +569,11 @@ describe('Share HTTP endpoints', () => {
   });
 
   describe('GET /api/v1/invitations/:token', () => {
-    it('previews a valid invitation anonymously', async () => {
-      const response = await request(app).get(`/api/v1/invitations/${TOKEN}`).expect(200);
+    it('previews a valid invitation when authenticated', async () => {
+      const response = await request(app)
+        .get(`/api/v1/invitations/${TOKEN}`)
+        .set('Authorization', `Bearer ${recipientToken}`)
+        .expect(200);
 
       const body = InvitationPreviewResponseSchema.parse(response.body as unknown);
       expect(body).toEqual({
@@ -563,13 +584,25 @@ describe('Share HTTP endpoints', () => {
           name: 'District 2 Apartment',
           description: null,
           thumbnail: null,
+          owner: { id: USER_OWNER, email: 'owner@example.com' },
+          scanCount: 2,
         },
         scan: null,
         status: 'PENDING',
         sentAt: NOW.toISOString(),
         expiresAt,
       });
-      expect(previewInvitation).toHaveBeenCalledWith(TOKEN, undefined);
+      expect(previewInvitation).toHaveBeenCalledWith(TOKEN, {
+        id: USER_RECIPIENT,
+        email: RECIPIENT_EMAIL,
+      });
+    });
+
+    it('rejects an unauthenticated preview with 401', async () => {
+      const response = await request(app).get(`/api/v1/invitations/${TOKEN}`).expect(401);
+
+      expect(ErrorResponseSchema.parse(response.body as unknown).error.code).toBe('UNAUTHORIZED');
+      expect(previewInvitation).not.toHaveBeenCalled();
     });
 
     it('reports hasAccess when a valid token is supplied', async () => {
@@ -581,6 +614,8 @@ describe('Share HTTP endpoints', () => {
           name: 'District 2 Apartment',
           description: null,
           thumbnail: null,
+          owner: { id: USER_OWNER, email: 'owner@example.com' },
+          scanCount: 2,
         },
         scan: null,
         status: 'PENDING',
@@ -596,21 +631,56 @@ describe('Share HTTP endpoints', () => {
         .expect(200);
 
       expect((response.body as Record<string, unknown>).hasAccess).toBe(true);
-      expect(previewInvitation).toHaveBeenCalledWith(TOKEN, USER_RECIPIENT);
+      expect(previewInvitation).toHaveBeenCalledWith(TOKEN, {
+        id: USER_RECIPIENT,
+        email: RECIPIENT_EMAIL,
+      });
     });
 
     it('returns 404 for an unknown token', async () => {
       previewInvitation.mockRejectedValue(new InvitationNotFoundError());
 
-      const response = await request(app).get(`/api/v1/invitations/${TOKEN}`).expect(404);
+      const response = await request(app)
+        .get(`/api/v1/invitations/${TOKEN}`)
+        .set('Authorization', `Bearer ${recipientToken}`)
+        .expect(404);
 
       expect(ErrorResponseSchema.parse(response.body as unknown).error.code).toBe(
         'INVITATION_NOT_FOUND',
       );
     });
 
+    it('returns 404 SHARE_NO_LONGER_AVAILABLE for a revoked or deleted source', async () => {
+      previewInvitation.mockRejectedValue(new ShareNoLongerAvailableError());
+
+      const response = await request(app)
+        .get(`/api/v1/invitations/${TOKEN}`)
+        .set('Authorization', `Bearer ${recipientToken}`)
+        .expect(404);
+
+      const body = ErrorResponseSchema.parse(response.body as unknown);
+      expect(body.error.code).toBe('SHARE_NO_LONGER_AVAILABLE');
+      expect(body.error.message).toBe('This project/scan is no longer available.');
+    });
+
+    it('returns 403 with a no-permission code when the email does not match the invite', async () => {
+      previewInvitation.mockRejectedValue(new InvitationNotForUserError());
+
+      const response = await request(app)
+        .get(`/api/v1/invitations/${TOKEN}`)
+        .set('Authorization', `Bearer ${recipientToken}`)
+        .expect(403);
+
+      const body = ErrorResponseSchema.parse(response.body as unknown);
+      expect(body.error.code).toBe('INVITATION_NOT_FOR_USER');
+      expect(body.error.message).toBe('You do not have permission to access this item');
+    });
+
     it('returns 400 for a malformed token', async () => {
-      const response = await request(app).get('/api/v1/invitations/not-a-valid-token').expect(400);
+      const response = await request(app)
+        .get('/api/v1/invitations/not-a-valid-token')
+        .set('Authorization', `Bearer ${recipientToken}`)
+        .expect(400);
 
       expect(ErrorResponseSchema.parse(response.body as unknown).error.code).toBe(
         'VALIDATION_ERROR',
@@ -641,7 +711,10 @@ describe('Share HTTP endpoints', () => {
         scan: null,
         access: { role: 'VIEWER', status: 'ACTIVE', grantedAt: NOW.toISOString() },
       });
-      expect(acceptInvitation).toHaveBeenCalledWith(USER_RECIPIENT, TOKEN);
+      expect(acceptInvitation).toHaveBeenCalledWith(
+        { id: USER_RECIPIENT, email: RECIPIENT_EMAIL },
+        TOKEN,
+      );
     });
 
     it('rejects an unauthenticated accept with 401', async () => {
@@ -654,7 +727,7 @@ describe('Share HTTP endpoints', () => {
     it.each([
       ['unknown token', new InvitationNotFoundError(), 404, 'INVITATION_NOT_FOUND'],
       ['expired invitation', new InvitationExpiredError(), 409, 'INVITATION_EXPIRED'],
-      ['revoked invitation', new InvitationRevokedError(), 409, 'INVITATION_REVOKED'],
+      ['revoked invitation', new ShareNoLongerAvailableError(), 404, 'SHARE_NO_LONGER_AVAILABLE'],
       ['already declined invitation', new InvitationDeclinedError(), 409, 'INVITATION_DECLINED'],
       [
         'already accepted invitation',
@@ -669,7 +742,7 @@ describe('Share HTTP endpoints', () => {
         409,
         'CANNOT_ACCEPT_OWN_INVITATION',
       ],
-      ['revoked share link', new ShareLinkRevokedError(), 409, 'SHARE_LINK_REVOKED'],
+      ['revoked share link', new ShareNoLongerAvailableError(), 404, 'SHARE_NO_LONGER_AVAILABLE'],
       ['expired share link', new ShareLinkExpiredError(), 409, 'SHARE_LINK_EXPIRED'],
     ])('rejects an %s with %i %s', async (_label, error, status, code) => {
       acceptInvitation.mockRejectedValue(error);
@@ -707,7 +780,10 @@ describe('Share HTTP endpoints', () => {
         status: 'DECLINED',
         declinedAt: NOW.toISOString(),
       });
-      expect(declineInvitation).toHaveBeenCalledWith(USER_RECIPIENT, TOKEN);
+      expect(declineInvitation).toHaveBeenCalledWith(
+        { id: USER_RECIPIENT, email: RECIPIENT_EMAIL },
+        TOKEN,
+      );
     });
 
     it('rejects an unauthenticated decline with 401', async () => {
@@ -779,6 +855,7 @@ describe('Share HTTP endpoints', () => {
         viewers: [
           {
             userId: USER_RECIPIENT,
+            revision: 1,
             recipientUser: { id: USER_RECIPIENT, email: 'recipient@example.com' },
             grantedAt: NOW.toISOString(),
           },
@@ -810,6 +887,7 @@ describe('Share HTTP endpoints', () => {
       expect(body).toEqual({
         projectId: PROJECT_ID,
         userId: USER_RECIPIENT,
+        revision: 2,
         revokedAt: NOW.toISOString(),
       });
       expect(revokeViewer).toHaveBeenCalledWith(USER_OWNER, PROJECT_ID, USER_RECIPIENT);
@@ -842,7 +920,7 @@ describe('Share HTTP endpoints', () => {
 
   describe('error envelope', () => {
     it('returns a request ID with share errors', async () => {
-      acceptInvitation.mockRejectedValue(new InvitationRevokedError());
+      acceptInvitation.mockRejectedValue(new InvitationExpiredError());
 
       const response = await request(app)
         .post(`/api/v1/invitations/${TOKEN}/accept`)
@@ -1032,7 +1110,7 @@ describe('Share HTTP endpoints', () => {
       const body = ShareLinkCreateResponseSchema.parse(response.body as unknown);
       expect(body).toEqual({
         shareLinkId: SHARE_LINK_ID,
-        shareLinkUrl: `https://invite.roomscan.dev/invitations/${TOKEN}`,
+        shareLinkUrl: `https://invite.roomscan.dev/invitations/${TOKEN}?scope=project`,
         scope: 'project',
         expiresAt,
       });
@@ -1090,7 +1168,7 @@ describe('Share HTTP endpoints', () => {
     it('creates a generic scan share link for the owner', async () => {
       createShareLink.mockResolvedValue({
         shareLinkId: SHARE_LINK_ID,
-        shareLinkUrl: `https://invite.roomscan.dev/invitations/${TOKEN}`,
+        shareLinkUrl: `https://invite.roomscan.dev/invitations/${TOKEN}?scope=scan`,
         scope: 'scan',
         expiresAt,
       });

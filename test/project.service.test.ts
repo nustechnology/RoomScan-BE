@@ -25,6 +25,7 @@ function createRecord(overrides: Partial<ProjectRecord> = {}): ProjectRecord {
     sharedCount: 1,
     thumbnail: null,
     syncStatus: null,
+    revision: 1,
     createdAt: NOW,
     updatedAt: NOW,
     ...overrides,
@@ -46,13 +47,13 @@ function createRepository() {
         Promise.resolve(userId === OWNER_ID ? 'OWNER' : userId === VIEWER_ID ? 'VIEWER' : null),
       ),
     update: vi.fn<ProjectRepository['update']>().mockResolvedValue(createRecord()),
-    softDelete: vi.fn<ProjectRepository['softDelete']>().mockResolvedValue(undefined),
+    softDelete: vi.fn<ProjectRepository['softDelete']>().mockResolvedValue(1),
   };
   const repository: ProjectRepository = mocks;
   const permissions = new ProjectPermissionService(repository);
   const service = new ProjectService({ repository, permissions });
 
-  return { mocks, repository, service };
+  return { mocks, repository, permissions, service };
 }
 
 describe('ProjectService', () => {
@@ -74,6 +75,7 @@ describe('ProjectService', () => {
       sharedCount: 1,
       thumbnail: null,
       syncStatus: null,
+      revision: 1,
       createdAt: NOW.toISOString(),
       updatedAt: NOW.toISOString(),
       permissions: {
@@ -184,13 +186,12 @@ describe('ProjectService', () => {
   it('updates a project as its Owner', async () => {
     const { mocks, service } = createRepository();
 
-    const result = await service.update(OWNER_ID, PROJECT_ID, {
+    const result = await service.update(OWNER_ID, PROJECT_ID, 1, {
       name: 'Updated name',
       description: null,
     });
 
-    expect(mocks.findAccessRole).toHaveBeenCalledWith(PROJECT_ID, OWNER_ID);
-    expect(mocks.update).toHaveBeenCalledWith(PROJECT_ID, OWNER_ID, {
+    expect(mocks.update).toHaveBeenCalledWith(PROJECT_ID, OWNER_ID, 1, {
       name: 'Updated name',
       description: null,
     });
@@ -199,27 +200,94 @@ describe('ProjectService', () => {
 
   it('hides update from a Viewer', async () => {
     const { mocks, service } = createRepository();
+    mocks.update.mockRejectedValueOnce(new ProjectNotFoundError());
 
     await expect(
-      service.update(VIEWER_ID, PROJECT_ID, { name: 'Forbidden change' }),
+      service.update(VIEWER_ID, PROJECT_ID, 1, { name: 'Forbidden change' }),
     ).rejects.toBeInstanceOf(ProjectNotFoundError);
-    expect(mocks.update).not.toHaveBeenCalled();
+    expect(mocks.update).toHaveBeenCalledWith(PROJECT_ID, VIEWER_ID, 1, {
+      name: 'Forbidden change',
+    });
   });
 
   it('soft-deletes a project and preserves repository idempotency', async () => {
     const { mocks, service } = createRepository();
 
-    await service.delete(OWNER_ID, PROJECT_ID);
+    await service.delete(OWNER_ID, PROJECT_ID, 1);
 
-    expect(mocks.softDelete).toHaveBeenCalledWith(PROJECT_ID, OWNER_ID);
+    expect(mocks.softDelete).toHaveBeenCalledWith(PROJECT_ID, OWNER_ID, 1);
   });
 
   it('propagates the hidden not-found error for unauthorized deletion', async () => {
     const { mocks, service } = createRepository();
     mocks.softDelete.mockRejectedValue(new ProjectNotFoundError());
 
-    await expect(service.delete(VIEWER_ID, PROJECT_ID)).rejects.toBeInstanceOf(
+    await expect(service.delete(VIEWER_ID, PROJECT_ID, 1)).rejects.toBeInstanceOf(
       ProjectNotFoundError,
     );
+  });
+
+  it('serializes a present lastSyncedAt timestamp', async () => {
+    const { mocks, service } = createRepository();
+    mocks.findByIdForUser.mockResolvedValueOnce({
+      record: createRecord({ lastSyncedAt: NOW }),
+      role: 'OWNER',
+    });
+
+    const result = await service.getById(OWNER_ID, PROJECT_ID);
+
+    expect(result.lastSyncedAt).toBe(NOW.toISOString());
+  });
+
+  it('serializes a null lastSyncedAt timestamp', async () => {
+    const { mocks, service } = createRepository();
+    mocks.findByIdForUser.mockResolvedValueOnce({
+      record: createRecord({ lastSyncedAt: null }),
+      role: 'OWNER',
+    });
+
+    const result = await service.getById(OWNER_ID, PROJECT_ID);
+
+    expect(result.lastSyncedAt).toBeNull();
+  });
+
+  it('rejects an idempotent create when idempotency is not configured', async () => {
+    const { service } = createRepository();
+
+    await expect(
+      service.createIdempotently(OWNER_ID, { name: 'Apartment', description: null }, 'key-1'),
+    ).rejects.toThrow('Project idempotency is not configured');
+  });
+
+  it('replays a stored idempotent create without invoking the repository', async () => {
+    const { repository, permissions } = createRepository();
+    const context = {
+      userId: OWNER_ID,
+      operation: 'CREATE_PROJECT' as const,
+      parentScope: `owner:${OWNER_ID}`,
+      keyHash: 'key-hash',
+      requestHash: 'request-hash',
+    };
+    const idempotency = {
+      createContext: vi.fn().mockReturnValue(context),
+      lookup: vi.fn().mockResolvedValue({
+        body: { id: PROJECT_ID },
+        statusCode: 201,
+        replayed: true,
+      }),
+    };
+    const createIdempotently = vi.fn();
+    repository.createIdempotently = createIdempotently;
+    const service = new ProjectService({ repository, permissions, idempotency });
+
+    const result = await service.createIdempotently(
+      OWNER_ID,
+      { name: 'Apartment', description: null },
+      'key-1',
+    );
+
+    expect(idempotency.lookup).toHaveBeenCalledWith(context);
+    expect(createIdempotently).not.toHaveBeenCalled();
+    expect(result.replayed).toBe(true);
   });
 });

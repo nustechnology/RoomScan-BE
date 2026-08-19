@@ -1,11 +1,13 @@
 import type { PrismaClient } from '../../generated/prisma/client.js';
 import { ProjectRole as PrismaProjectRole } from '../../generated/prisma/enums.js';
 import type {
+  SharedProjectDetailRecord,
   SharedProjectRecord,
   SharedProjectsListOptions,
   SharedProjectsRepository,
 } from '../../modules/shared-projects/shared-projects.types.js';
 import type { ProjectSort } from '../../modules/project/project.types.js';
+import { refreshProjectRollup, writeDeleteChange } from './prisma-sync-writer.js';
 
 const sharedProjectSelect = {
   revokedAt: true,
@@ -53,6 +55,23 @@ interface SharedProjectRow {
   };
 }
 
+interface SharedProjectDetailRow extends SharedProjectRow {
+  project: SharedProjectRow['project'] & {
+    scans: {
+      id: string;
+      name: string;
+      description: string | null;
+      thumbnail: string | null;
+      assetStatus: 'NONE' | 'PENDING' | 'UPLOADING' | 'UPLOADED' | 'FAILED';
+      syncStatus: 'PENDING' | 'SYNCING' | 'SYNCED' | 'FAILED' | 'CONFLICT';
+      createdAt: Date;
+      _count: {
+        notes: number;
+      };
+    }[];
+  };
+}
+
 type SortDirection = 'asc' | 'desc';
 
 function toSharedProjectRecord(row: SharedProjectRow): SharedProjectRecord {
@@ -68,6 +87,54 @@ function toSharedProjectRecord(row: SharedProjectRow): SharedProjectRecord {
     accessRevokedAt: row.revokedAt,
   };
 }
+
+function toSharedProjectDetailRecord(row: SharedProjectDetailRow): SharedProjectDetailRecord {
+  return {
+    ...toSharedProjectRecord(row),
+    scans: row.project.scans.map((scan) => ({
+      id: scan.id,
+      name: scan.name,
+      description: scan.description,
+      thumbnail: scan.thumbnail,
+      noteCount: scan._count.notes,
+      assetStatus: scan.assetStatus,
+      syncStatus: scan.syncStatus,
+      createdAt: scan.createdAt,
+    })),
+  };
+}
+
+const sharedProjectDetailSelect = {
+  ...sharedProjectSelect,
+  project: {
+    ...sharedProjectSelect.project,
+    select: {
+      ...sharedProjectSelect.project.select,
+      scans: {
+        where: {
+          deletedAt: null,
+        },
+        orderBy: {
+          createdAt: 'desc',
+        },
+        select: {
+          id: true,
+          name: true,
+          description: true,
+          thumbnail: true,
+          assetStatus: true,
+          syncStatus: true,
+          createdAt: true,
+          _count: {
+            select: {
+              notes: true,
+            },
+          },
+        },
+      },
+    },
+  },
+} as const;
 
 function orderByFor(sort: ProjectSort): Array<{ project: Record<string, SortDirection> }> {
   const [field, direction] = sort.split(':') as ['updatedAt' | 'createdAt' | 'name', SortDirection];
@@ -119,13 +186,16 @@ export class PrismaSharedProjectsRepository implements SharedProjectsRepository 
     };
   }
 
-  async findSharedForUser(projectId: string, userId: string): Promise<SharedProjectRecord | null> {
+  async findSharedForUser(
+    projectId: string,
+    userId: string,
+  ): Promise<SharedProjectDetailRecord | null> {
     const row = await this.#client.projectAccess.findFirst({
       where: { projectId, userId, role: PrismaProjectRole.VIEWER },
-      select: sharedProjectSelect,
+      select: sharedProjectDetailSelect,
     });
 
-    return row === null ? null : toSharedProjectRecord(row);
+    return row === null ? null : toSharedProjectDetailRecord(row);
   }
 
   async findAccessStatus(
@@ -150,11 +220,42 @@ export class PrismaSharedProjectsRepository implements SharedProjectsRepository 
   }
 
   async removeFromShared(projectId: string, userId: string, removedAt: Date): Promise<boolean> {
-    const updated = await this.#client.projectAccess.updateMany({
-      where: { projectId, userId, role: PrismaProjectRole.VIEWER, revokedAt: null },
-      data: { revokedAt: removedAt },
-    });
+    return await this.#client.$transaction(async (transaction) => {
+      const access = await transaction.projectAccess.findFirst({
+        where: { projectId, userId, role: PrismaProjectRole.VIEWER },
+        select: {
+          id: true,
+          revision: true,
+          revokedAt: true,
+          project: { select: { ownerId: true } },
+        },
+      });
+      if (access === null || access.revokedAt !== null) return false;
 
-    return updated.count > 0;
+      const updated = await transaction.projectAccess.updateMany({
+        where: {
+          id: access.id,
+          userId,
+          role: PrismaProjectRole.VIEWER,
+          revokedAt: null,
+          revision: access.revision,
+        },
+        data: { revokedAt: removedAt, revision: { increment: 1 }, updatedAt: removedAt },
+      });
+      if (updated.count === 0) return false;
+
+      const change = {
+        projectId,
+        ownerId: access.project.ownerId,
+        resourceType: 'PROJECT_ACCESS' as const,
+        resourceId: access.id,
+        revision: access.revision + 1,
+        deletedAt: removedAt,
+      };
+      await writeDeleteChange(transaction, change);
+      await writeDeleteChange(transaction, { ...change, targetUserId: userId });
+      await refreshProjectRollup(transaction, projectId, removedAt);
+      return true;
+    });
   }
 }

@@ -34,6 +34,7 @@ import type { ShareService } from '../src/modules/share/share.service.js';
 import type { ShareLinkService } from '../src/modules/share/share-link.service.js';
 import type { SharedProjectsService } from '../src/modules/shared-projects/shared-projects.service.js';
 import type { SharedScansService } from '../src/modules/shared-scans/shared-scans.service.js';
+import type { SyncService } from '../src/modules/sync/sync.service.js';
 
 const config: AppConfig = {
   nodeEnv: 'test',
@@ -51,6 +52,7 @@ const config: AppConfig = {
   appleClientId: 'com.example.roomscan',
   accessTokenSecret: 'access-secret-that-is-at-least-32-characters',
   refreshTokenSecret: 'refresh-secret-that-is-at-least-32-characters',
+  syncCryptoKey: 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=',
   accessTokenTtlSeconds: 3600,
   refreshTokenTtlSeconds: 2_592_000,
   localTestAuthEnabled: false,
@@ -159,6 +161,10 @@ describe('RoomScan HTTP application', () => {
     detail: vi.fn(),
     remove: vi.fn(),
   } as unknown as SharedScansService;
+  const syncService = {
+    getChanges: vi.fn(),
+    getStatus: vi.fn(),
+  } as unknown as SyncService;
 
   const app = createApp({
     config,
@@ -174,6 +180,7 @@ describe('RoomScan HTTP application', () => {
     shareLinkService,
     sharedProjectsService,
     sharedScansService,
+    syncService,
     accessTokenVerifier,
     currentUserRepository,
     rateLimiters,
@@ -226,6 +233,7 @@ describe('RoomScan HTTP application', () => {
       shareLinkService,
       sharedProjectsService,
       sharedScansService,
+      syncService,
       accessTokenVerifier,
       currentUserRepository,
       rateLimiters,
@@ -294,6 +302,41 @@ describe('RoomScan HTTP application', () => {
     expect(body.paths).toHaveProperty('/api/v1/health');
     expect(body.paths).toHaveProperty('/api/v1/ready');
     expect(body.paths).toHaveProperty('/api/v1/auth/apple');
+    expect(body.paths).toHaveProperty('/api/v1/sync/changes');
+    expect(body.paths).toHaveProperty('/api/v1/sync/status');
+    const projectCreate = z
+      .object({
+        post: z.object({
+          parameters: z.array(
+            z.object({ name: z.string(), in: z.string(), required: z.boolean() }),
+          ),
+          responses: z.record(z.string(), z.unknown()),
+        }),
+      })
+      .parse(body.paths['/api/v1/projects']);
+    expect(projectCreate.post.parameters).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'Idempotency-Key', in: 'header', required: true }),
+      ]),
+    );
+    expect(projectCreate.post.responses).toHaveProperty('409');
+
+    const projectMutation = z
+      .object({
+        patch: z.object({
+          parameters: z.array(
+            z.object({ name: z.string(), in: z.string(), required: z.boolean() }),
+          ),
+          responses: z.record(z.string(), z.unknown()),
+        }),
+      })
+      .parse(body.paths['/api/v1/projects/{projectId}']);
+    expect(projectMutation.patch.parameters).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'If-Match', in: 'header', required: true }),
+      ]),
+    );
+    expect(projectMutation.patch.responses).toHaveProperty('409');
     const authPath = z
       .object({
         post: z.object({
@@ -432,7 +475,7 @@ describe('RoomScan HTTP application', () => {
       .expect(200);
 
     expect(response.headers['access-control-expose-headers']).toBe(
-      'RateLimit,RateLimit-Policy,Retry-After',
+      'ETag,RateLimit,RateLimit-Policy,Retry-After',
     );
   });
 
@@ -525,6 +568,7 @@ describe('RoomScan HTTP application', () => {
       shareLinkService,
       sharedProjectsService,
       sharedScansService,
+      syncService,
       accessTokenVerifier,
       currentUserRepository,
       rateLimiters,
@@ -539,6 +583,8 @@ describe('RoomScan HTTP application', () => {
         name: 'District 2 Apartment',
         description: null,
         thumbnail: null,
+        owner: { id: 'eb5d278f-c857-45c7-887d-7be65288cb75', email: 'owner@example.com' },
+        scanCount: 1,
       },
       scan: null,
       status: 'PENDING',
@@ -547,7 +593,10 @@ describe('RoomScan HTTP application', () => {
       expiresAt: '2026-08-05T10:00:00.000Z',
     });
 
-    await request(loggingApp).get(`/api/v1/invitations/${token}`).expect(200);
+    await request(loggingApp)
+      .get(`/api/v1/invitations/${token}`)
+      .set('Authorization', 'Bearer some-token')
+      .expect(200);
     await request(loggingApp).get(`/api/v1/invitations?token=${token}`).expect(404);
 
     const pathLog = records.find((record) => record.req?.url?.startsWith('/api/v1/invitations/'));

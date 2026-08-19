@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "aff34309-3dd8-4bb2-ab68-c177c4ffa8f6",
     "name": "RoomScan - Staging",
-    "description": "Postman collection covering the full RoomScan API surface at https://roomscan-be.onrender.com (all `/api/v1` routes plus the Swagger docs endpoints).\n\n## Setup\n1. Create an environment (or edit the collection variables) and fill in:\n   - `baseUrl` (default already set)\n   - `accessToken` + `refreshToken` from a working RoomScan session, or run **Auth > Apple Sign In** to mint a pair\n   - `projectId` (or run **Projects > Create Project** to populate it)\n2. For Apple Sign In on staging you need a real Apple identity token; for local development with `LOCAL_TEST_AUTH_ENABLED=true` use the sentinel `roomscan-local-test-user` as the `appleIdentityToken`.\n3. For model uploads, set these variables before running the upload requests:\n   - `contentType` (e.g. `model/usdz`)\n   - `sizeBytes` (exact file byte size: `stat -c%s model.usdz`)\n   - `checksum` (e.g. `sha256sum model.usdz | awk '{print $1}'`)\n   - `modelVersion`\n4. The thumbnail is optional. To upload one in the same call, set `thumbnailSizeBytes` (exact byte size) and `thumbnailContentType` (`image/jpeg` or `image/png`); otherwise delete the `thumbnail` block from the create-scan body.\n5. In **Upload Flow**, select your files in the Body tabs of the two PUT requests (`PUT model file to presigned URL` and `PUT thumbnail to presigned URL`).\n6. For the Sharing & Invitations flow, `recipientEmail` defaults to `recipient@example.com`; the **Create Invitation** request saves `invitationId` and the raw `invitationToken` automatically. Both *Sharing & Invitations* and *Share Links* are organized into *Projects*, *Scans*, and *General* subfolders. Scan-scope sharing is covered in the *Scans* subfolders (e.g. **Create Scan Invitation**, **List Scan Shares**, **Revoke Scan Viewer**, and the scan share-link create/list/revoke requests). Reusable generic links (no email) live in *Share Links* and save `shareLinkId` and the raw `shareLinkToken`. The *General* subfolders hold the token resolve endpoints (preview/accept/decline), which operate on both invitations and share links for both scopes. The **Shared With Me** folder covers accepted projects **and** scans (list, detail, and self-remove).\n7. The **RoomScan - Local** environment pre-fills `projectId`, `scanId`, `noteId`, and `invitationId` from the seeded data, but not `invitationToken`: the seed rotates it on every `yarn seed:local` run and stores only its SHA-256 hash. Copy the token from the seed's printed `Demo invitation link` (the part after `/invitations/`) or run **Create Invitation** to populate it.\n\nCollection-level **Bearer Token** auth ({{accessToken}}) is applied to every request except the presigned PUTs and the anonymous invitation preview, which deliberately override to No Auth.\n\n## Gotchas\n- Each presigned PUT must use a **binary/file body** (not form-data) and the byte size must match the matching `sizeBytes` variable exactly.\n- `scanFile` size must be between 10 MB and 100 MB; thumbnails are capped at 10 MB.\n- `thumbnail` and `scanFile` are independent: one create call may include both, only the model, or only the thumbnail.\n- Each minted session is completed separately (`Complete model upload session` and `Complete thumbnail upload session`).\n- Presigned upload URLs expire after the configured TTL, so run the upload flow steps in sequence.\n- `/auth/refresh` rotates tokens (old one is revoked) and is rate-limited (10 req / 15 min). Run it, then use the returned pair.\n- A project is shareable only after it has at least one non-deleted scan with an uploaded model (`assetStatus = UPLOADED`); otherwise creating an invitation returns `409 PROJECT_NOT_SHAREABLE`.\n- One pending invitation is allowed per `(project, recipientEmail)`; a duplicate returns `409 INVITATION_ALREADY_SENT`. An expired link does not block re-inviting the recipient.\n- `POST /invitations/:invitationId/resend` rotates the token \u2014 the previous link stops working and `invitationToken` is refreshed.\n- The project Owner cannot accept or decline their own invitation (`409 CANNOT_ACCEPT_OWN_INVITATION`) and cannot accept twice; use a second user's token (override the request auth) to exercise the accept/decline flow.\n- `DELETE` endpoints that return `204` have no response body.\n- `projectId` must be owned by your token's user, otherwise the API returns `403 NOT_OWNER` (share management) or `404 PROJECT_NOT_FOUND`.",
+    "description": "Postman collection covering the full RoomScan API surface at https://roomscan-be.onrender.com (all `/api/v1` routes plus the Swagger docs endpoints).\n\n## Setup\n1. Create an environment (or edit the collection variables) and fill in:\n   - `baseUrl` (default already set)\n   - `accessToken` + `refreshToken` from a working RoomScan session, or run **Auth > Apple Sign In** to mint a pair\n   - `projectId` (or run **Projects > Create Project** to populate it)\n2. For Apple Sign In on staging you need a real Apple identity token; for local development with `LOCAL_TEST_AUTH_ENABLED=true` use the sentinel `roomscan-local-test-user` as the `appleIdentityToken`.\n3. For model uploads, set these variables before running the upload requests:\n   - `contentType` (e.g. `model/usdz`)\n   - `sizeBytes` (exact file byte size: `stat -c%s model.usdz`)\n   - `checksum` (e.g. `sha256sum model.usdz | awk '{print $1}'`)\n   - `modelVersion`\n4. The thumbnail is optional. To upload one in the same call, set `thumbnailSizeBytes` (exact byte size) and `thumbnailContentType` (`image/jpeg` or `image/png`); otherwise delete the `thumbnail` block from the create-scan body.\n5. In **Upload Flow**, select your files in the Body tabs of the two PUT requests (`PUT model file to presigned URL` and `PUT thumbnail to presigned URL`).\n6. For the Sharing & Invitations flow, `recipientEmail` defaults to `recipient@example.com`; the **Create Invitation** request saves `invitationId` and the raw `invitationToken` automatically. Both *Sharing & Invitations* and *Share Links* are organized into *Projects*, *Scans*, and *General* subfolders. Scan-scope sharing is covered in the *Scans* subfolders (e.g. **Create Scan Invitation**, **List Scan Shares**, **Revoke Scan Viewer**, and the scan share-link create/list/revoke requests). Reusable generic links (no email) live in *Share Links* and save `shareLinkId` and the raw `shareLinkToken`. The *General* subfolders hold the token resolve endpoints (preview/accept/decline), which operate on both invitations and share links for both scopes. The **Shared With Me** folder covers accepted projects **and** scans (list, detail, and self-remove).\n7. The **RoomScan - Local** environment pre-fills `projectId`, `scanId`, `noteId`, and `invitationId` from the seeded data, but not `invitationToken`: the seed rotates it on every `yarn seed:local` run and stores only its SHA-256 hash. Copy the token from the seed's printed `Demo invitation link` (the part after `/invitations/`) or run **Create Invitation** to populate it.\n\nCollection-level **Bearer Token** auth ({{accessToken}}) is applied to every request except the presigned PUTs and the anonymous invitation preview, which deliberately override to No Auth. A collection pre-request script adds `Idempotency-Key: {{idempotencyKey}}` to the five retry-safe creates and `If-Match: \"{{revision}}\"` to revision-guarded mutations; response ETags refresh `revision`. Change `idempotencyKey` before intentionally creating a different payload in the same scope.\n\n## Gotchas\n- Each presigned PUT must use a **binary/file body** (not form-data) and the byte size must match the matching `sizeBytes` variable exactly.\n- `scanFile` size must be between 10 MB and 100 MB; thumbnails are capped at 10 MB.\n- `thumbnail` and `scanFile` are independent: one create call may include both, only the model, or only the thumbnail.\n- Each minted session is completed separately (`Complete model upload session` and `Complete thumbnail upload session`).\n- Presigned upload URLs expire after the configured TTL, so run the upload flow steps in sequence.\n- Retrying a selected create with the same key and payload replays its original status/body; changing the payload under the same key returns `409 IDEMPOTENCY_KEY_CONFLICT`.\n- Project/Scan/Note writes require the latest strong ETag. A stale revision returns `409 REVISION_CONFLICT`; run the relevant GET first to refresh `revision`.\n- The Sync folder saves and advances the opaque `syncCursor`; clear it to restart an initial snapshot.\n- `/auth/refresh` rotates tokens (old one is revoked) and is rate-limited (10 req / 15 min). Run it, then use the returned pair.\n- A project is shareable only after it has at least one non-deleted scan with an uploaded model (`assetStatus = UPLOADED`); otherwise creating an invitation returns `409 PROJECT_NOT_SHAREABLE`.\n- One pending invitation is allowed per `(project, recipientEmail)`; a duplicate returns `409 INVITATION_ALREADY_SENT`. An expired link does not block re-inviting the recipient.\n- `POST /invitations/:invitationId/resend` rotates the token \u2014 the previous link stops working and `invitationToken` is refreshed.\n- The project Owner cannot accept or decline their own invitation (`409 CANNOT_ACCEPT_OWN_INVITATION`) and cannot accept twice; use a second user's token (override the request auth) to exercise the accept/decline flow.\n- `DELETE` endpoints that return `204` have no response body.\n- `projectId` must be owned by your token's user, otherwise the API returns `403 NOT_OWNER` (share management) or `404 PROJECT_NOT_FOUND`.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
     "_exporter_id": "12630530"
   },
@@ -1483,9 +1483,7 @@
             {
               "name": "Preview Invitation",
               "request": {
-                "auth": {
-                  "type": "noauth"
-                },
+                "auth": null,
                 "method": "GET",
                 "header": [],
                 "url": {
@@ -1498,7 +1496,7 @@
                     "{{invitationToken}}"
                   ]
                 },
-                "description": "Previews a token anonymously (this request deliberately overrides auth to No Auth). Resolves either an invitation or a generic share link for a project or scan, returning `type` (`invitation` or `share-link`), `scope` (`project` or `scan`), the matching `project`/`scan` entity, and a `status` (PENDING/EXPIRED/ACCEPTED/DECLINED/REVOKED for invitations; ACTIVE/EXPIRED/REVOKED for share links). Invitations also return `recipientEmail`, `sentAt`, and `expiresAt`. A valid Bearer token can be added to also receive `hasAccess`. Use the **Share Links > Preview Share Link** request when working from a `shareLinkToken`."
+                "description": "Previews an invitation or generic share link for the authenticated user. Requires a valid Bearer token (inherited from the collection). Returns `type` (`invitation` or `share-link`), `scope` (`project` or `scan`), the matching `project`/`scan` entity, and a `status` (PENDING/EXPIRED/ACCEPTED/DECLINED/REVOKED for invitations; ACTIVE/EXPIRED/REVOKED for share links). Invitations also return `recipientEmail`, `sentAt`, `expiresAt`, and `hasAccess`. A per-recipient invitation whose current user email does not match the invited email returns 403 INVITATION_NOT_FOR_USER. Use the **Share Links > Preview Share Link** request when working from a `shareLinkToken`."
               },
               "response": []
             },
@@ -1518,7 +1516,7 @@
                     "accept"
                   ]
                 },
-                "description": "Accepts the token with the current user's token and gains Viewer access (`200`). Resolves invitations (project or scan scope) and generic share links; the response is discriminated by `type` and `scope`. The resource Owner cannot accept their own link (`409 CANNOT_ACCEPT_OWN_INVITATION`), and a user who already has active access gets `409 ACCESS_ALREADY_EXISTS` \u2014 override this request's auth with the invitee's token to exercise the flow. For invitations, the first acceptance wins (`409 INVITATION_ALREADY_ACCEPTED` afterwards); a share-link acceptance does not consume the link."
+                "description": "Accepts the token with the current user's token and gains Viewer access (`200`). Resolves invitations (project or scan scope) and generic share links; the response is discriminated by `type` and `scope`. The resource Owner cannot accept their own link (`409 CANNOT_ACCEPT_OWN_INVITATION`), and a user who already has active access gets `409 ACCESS_ALREADY_EXISTS` — override this request's auth with the invitee's token to exercise the flow. For invitations, the first acceptance wins (`409 INVITATION_ALREADY_ACCEPTED` afterwards); a share-link acceptance does not consume the link."
               },
               "response": []
             },
@@ -1538,7 +1536,7 @@
                     "decline"
                   ]
                 },
-                "description": "Declines the invitation for the current user (`200`, status becomes DECLINED). Applies to per-recipient invitations only \u2014 the Owner cannot decline their own link (`409 CANNOT_ACCEPT_OWN_INVITATION`). Generic share links cannot be declined (they are not addressed to anyone)."
+                "description": "Declines the invitation for the current user (`200`, status becomes DECLINED). Applies to per-recipient invitations only — the Owner cannot decline their own link (`409 CANNOT_ACCEPT_OWN_INVITATION`). Generic share links cannot be declined (they are not addressed to anyone)."
               },
               "response": []
             },
@@ -1746,9 +1744,7 @@
             {
               "name": "Preview Share Link (using token)",
               "request": {
-                "auth": {
-                  "type": "noauth"
-                },
+                "auth": null,
                 "method": "GET",
                 "header": [],
                 "url": {
@@ -1761,7 +1757,7 @@
                     "{{shareLinkToken}}"
                   ]
                 },
-                "description": "Previews a generic share link anonymously (No Auth) using the `shareLinkToken` saved by a create-share-link request. Returns `type: share-link`, the `scope` (`project` or `scan`), the matching `project`/`scan` entity, and `status` (ACTIVE/EXPIRED/REVOKED). A valid Bearer token can be added to also receive `hasAccess`."
+                "description": "Previews a generic share link for the authenticated user (requires a valid Bearer token, inherited from the collection) using the `shareLinkToken` saved by a create-share-link request. Returns `type: share-link`, the `scope` (`project` or `scan`), the matching `project`/`scan` entity, and `status` (ACTIVE/EXPIRED/REVOKED) plus `hasAccess`."
               },
               "response": []
             },
@@ -1971,6 +1967,116 @@
               ]
             },
             "description": "Removes a scan from the current user's Shared With Me list (Viewer only; `200`). Revokes only the current user's own scan access; the scan, the Owner, and other Viewers are unaffected. `403 NOT_SHARED_SCAN` for the Owner; `409 NOT_IN_SHARED_WITH_ME` when the scan is not in the list."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Sync",
+      "item": [
+        {
+          "name": "Initial Changes",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "pm.test('Sync snapshot returned', () => { pm.response.to.have.status(200); pm.expect(json.changes).to.be.an('array'); });",
+                  "if (json.nextCursor) pm.environment.set('syncCursor', json.nextCursor);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/sync/changes?limit=100",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "sync",
+                "changes"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "100"
+                }
+              ]
+            },
+            "description": "Starts a watermark-stable visible snapshot and saves nextCursor as syncCursor. Remove cursor to restart; use an RFC3339 since query instead for timestamp bootstrap."
+          },
+          "response": []
+        },
+        {
+          "name": "Incremental Changes",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "pm.test('Incremental changes returned', () => pm.response.to.have.status(200));",
+                  "if (json.nextCursor) pm.environment.set('syncCursor', json.nextCursor);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/sync/changes?cursor={{syncCursor}}&limit=100",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "sync",
+                "changes"
+              ],
+              "query": [
+                {
+                  "key": "cursor",
+                  "value": "{{syncCursor}}"
+                },
+                {
+                  "key": "limit",
+                  "value": "100"
+                }
+              ]
+            },
+            "description": "Continues from the opaque user-bound cursor and acknowledges covered conflict refresh events."
+          },
+          "response": []
+        },
+        {
+          "name": "Project Sync Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/sync/status?projectId={{projectId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "sync",
+                "status"
+              ],
+              "query": [
+                {
+                  "key": "projectId",
+                  "value": "{{projectId}}"
+                }
+              ]
+            },
+            "description": "Returns one accessible project status. Remove projectId to list every owned or actively shared project."
           },
           "response": []
         }

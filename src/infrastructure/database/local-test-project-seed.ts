@@ -3,6 +3,12 @@ import { Prisma } from '../../generated/prisma/client.js';
 import type { PrismaClient } from '../../generated/prisma/client.js';
 import { LOCAL_TEST_USER_ID, LOCAL_TEST_VIEWER_ID } from '../../config/constants.js';
 import { generateInvitationToken, hashInvitationToken } from '../../modules/share/share.service.js';
+import {
+  hasProjectSyncState,
+  resetProjectSyncState,
+  writeAccessUpsert,
+  writeProjectBootstrap,
+} from './prisma-sync-writer.js';
 
 export const LOCAL_TEST_PROJECT_ID = '00000000-0000-4000-8000-000000000101';
 export const LOCAL_TEST_PROJECT_NAME = 'District 2 Apartment';
@@ -232,6 +238,10 @@ export const LOCAL_TEST_NOTES = [
 
 type SeedClient = Pick<PrismaClient, '$transaction'>;
 
+function modelAssetId(scanId: string): string {
+  return `${scanId.slice(0, 24)}1${scanId.slice(25)}`;
+}
+
 export async function seedLocalTestProject(client: SeedClient): Promise<{ invitationUrl: string }> {
   let invitationUrl = '';
   await client.$transaction(async (transaction) => {
@@ -275,7 +285,49 @@ export async function seedLocalTestProject(client: SeedClient): Promise<{ invita
             deletedAt: null,
           },
         });
+        if (scan.assetStatus !== AssetStatus.NONE) {
+          await transaction.scanAsset.upsert({
+            where: { id: modelAssetId(scan.id) },
+            create: {
+              id: modelAssetId(scan.id),
+              scanId: scan.id,
+              assetType: 'MODEL',
+              status: scan.assetStatus,
+              contentType: 'model/usdz',
+              sizeBytes: 10_000_000,
+              checksum: `seed-${scan.id}`,
+              modelVersion: scan.modelVersion.toString(),
+              storageKey: `scans/${scan.id}/model`,
+              uploadedAt: scan.assetStatus === AssetStatus.UPLOADED ? new Date() : null,
+            },
+            update: {
+              status: scan.assetStatus,
+              checksum: `seed-${scan.id}`,
+              modelVersion: scan.modelVersion.toString(),
+              uploadedAt: scan.assetStatus === AssetStatus.UPLOADED ? new Date() : null,
+              deletedAt: null,
+            },
+          });
+        }
       }
+
+      const projectStatus = project.scans.some((scan) => scan.assetStatus === AssetStatus.FAILED)
+        ? SyncStatus.FAILED
+        : project.scans.some((scan) => scan.assetStatus === AssetStatus.UPLOADING)
+          ? SyncStatus.SYNCING
+          : project.scans.some(
+                (scan) =>
+                  scan.assetStatus === AssetStatus.NONE || scan.assetStatus === AssetStatus.PENDING,
+              )
+            ? SyncStatus.PENDING
+            : SyncStatus.SYNCED;
+      await transaction.project.update({
+        where: { id: project.id },
+        data: {
+          syncStatus: projectStatus,
+          ...(projectStatus === SyncStatus.SYNCED ? { lastSyncedAt: new Date() } : {}),
+        },
+      });
     }
 
     for (const note of LOCAL_TEST_NOTES) {
@@ -345,7 +397,28 @@ export async function seedLocalTestProject(client: SeedClient): Promise<{ invita
         },
       });
 
-      await transaction.projectAccess.upsert({
+      await transaction.scanAsset.upsert({
+        where: { id: modelAssetId(shared.scan.id) },
+        create: {
+          id: modelAssetId(shared.scan.id),
+          scanId: shared.scan.id,
+          assetType: 'MODEL',
+          status: 'UPLOADED',
+          contentType: 'model/usdz',
+          sizeBytes: 10_000_000,
+          checksum: `seed-${shared.scan.id}`,
+          modelVersion: '1',
+          storageKey: `scans/${shared.scan.id}/model`,
+          uploadedAt: new Date(),
+        },
+        update: { status: 'UPLOADED', uploadedAt: new Date(), deletedAt: null },
+      });
+      await transaction.project.update({
+        where: { id: shared.id },
+        data: { syncStatus: 'SYNCED', lastSyncedAt: new Date() },
+      });
+
+      const access = await transaction.projectAccess.upsert({
         where: {
           projectId_userId: {
             projectId: shared.id,
@@ -365,9 +438,20 @@ export async function seedLocalTestProject(client: SeedClient): Promise<{ invita
           revokedAt: shared.accessRevokedAt,
         },
       });
+      if (
+        shared.projectDeletedAt === null &&
+        shared.accessRevokedAt === null &&
+        !(await hasProjectSyncState(transaction, [shared.id]))
+      ) {
+        await resetProjectSyncState(transaction, [shared.id]);
+        await writeAccessUpsert(transaction, access.id);
+        await writeAccessUpsert(transaction, access.id, { targetUserId: LOCAL_TEST_USER_ID });
+        await writeProjectBootstrap(transaction, shared.id, LOCAL_TEST_USER_ID, new Date());
+        await writeProjectBootstrap(transaction, shared.id, LOCAL_TEST_VIEWER_ID, new Date());
+      }
     }
 
-    await transaction.projectAccess.upsert({
+    const ownerProjectViewerAccess = await transaction.projectAccess.upsert({
       where: {
         projectId_userId: {
           projectId: LOCAL_TEST_PROJECT_ID,
@@ -387,6 +471,23 @@ export async function seedLocalTestProject(client: SeedClient): Promise<{ invita
         revokedAt: null,
       },
     });
+    const ownerProjectIds = LOCAL_TEST_PROJECTS.map((project) => project.id);
+    if (!(await hasProjectSyncState(transaction, ownerProjectIds))) {
+      await resetProjectSyncState(transaction, ownerProjectIds);
+      await writeAccessUpsert(transaction, ownerProjectViewerAccess.id);
+      await writeAccessUpsert(transaction, ownerProjectViewerAccess.id, {
+        targetUserId: LOCAL_TEST_VIEWER_ID,
+      });
+      for (const project of LOCAL_TEST_PROJECTS) {
+        await writeProjectBootstrap(transaction, project.id, LOCAL_TEST_USER_ID, new Date());
+      }
+      await writeProjectBootstrap(
+        transaction,
+        LOCAL_TEST_PROJECT_ID,
+        LOCAL_TEST_VIEWER_ID,
+        new Date(),
+      );
+    }
 
     for (const scanAccess of LOCAL_TEST_SCAN_ACCESSES) {
       await transaction.scanAccess.upsert({

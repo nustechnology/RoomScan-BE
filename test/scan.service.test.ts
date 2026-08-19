@@ -28,6 +28,7 @@ function createRecord(overrides: Partial<ScanRecord> = {}): ScanRecord {
     assetStatus: 'NONE',
     syncStatus: 'PENDING',
     modelVersion: 1,
+    revision: 1,
     clientMutationId: null,
     deletedAt: null,
     createdAt: NOW,
@@ -41,6 +42,8 @@ function createRepository() {
     create: vi
       .fn<ScanRepository['create']>()
       .mockResolvedValue({ record: createRecord(), created: true }),
+    createIdempotently: vi.fn<ScanRepository['createIdempotently']>(),
+    createWithUploadsIdempotently: vi.fn<ScanRepository['createWithUploadsIdempotently']>(),
     listByProject: vi
       .fn<ScanRepository['listByProject']>()
       .mockResolvedValue({ items: [createRecord()], total: 1 }),
@@ -50,7 +53,7 @@ function createRepository() {
       .fn<ScanRepository['findByIdForUser']>()
       .mockResolvedValue({ record: createRecord(), role: 'OWNER' }),
     update: vi.fn<ScanRepository['update']>().mockResolvedValue(createRecord()),
-    softDelete: vi.fn<ScanRepository['softDelete']>().mockResolvedValue(undefined),
+    softDelete: vi.fn<ScanRepository['softDelete']>().mockResolvedValue(1),
     updateAssetStatus: vi.fn<ScanRepository['updateAssetStatus']>().mockResolvedValue(undefined),
     updateThumbnail: vi.fn<ScanRepository['updateThumbnail']>().mockResolvedValue(undefined),
   };
@@ -122,7 +125,7 @@ describe('ScanService', () => {
     expect(result.scan.id).toBe(SCAN_ID);
   });
 
-  it('propagates a restored scan as not-created for a deleted clientMutationId', async () => {
+  it('propagates an existing legacy-key scan as not-created', async () => {
     const { mocks, service } = createRepository();
     mocks.create.mockResolvedValueOnce({
       record: createRecord({ clientMutationId: 'deleted-mutation', name: 'Restored' }),
@@ -137,6 +140,109 @@ describe('ScanService', () => {
 
     expect(result.created).toBe(false);
     expect(result.scan.name).toBe('Restored');
+  });
+
+  it('prepares optional uploads only after receipt lookup and delegates one transactional create', async () => {
+    const { repository, permissions } = createRepository();
+    const context = {
+      userId: OWNER_ID,
+      operation: 'CREATE_SCAN' as const,
+      parentScope: `project:${PROJECT_ID}`,
+      keyHash: 'key-hash',
+      requestHash: 'request-hash',
+    };
+    const idempotency = {
+      createContext: vi.fn().mockReturnValue(context),
+      lookup: vi.fn().mockResolvedValue(null),
+      execute: vi.fn(),
+    };
+    const prepared = [
+      {
+        data: {
+          id: 'c0ffee00-0000-4000-8000-000000000001',
+          scanId: SCAN_ID,
+          assetType: 'MODEL' as const,
+          contentType: 'model/usdz',
+          sizeBytes: 20_000_000,
+          checksum: 'checksum',
+          modelVersion: '1',
+          storageKey: `scans/${SCAN_ID}/model`,
+          idempotencyKey: null,
+          uploadUrlExpiresAt: NOW,
+        },
+        response: {
+          uploadSessionId: 'c0ffee00-0000-4000-8000-000000000001',
+          assetId: 'c0ffee00-0000-4000-8000-000000000001',
+          uploadUrl: 'https://storage/upload',
+          uploadUrlExpiresAt: NOW.toISOString(),
+        },
+      },
+    ];
+    const uploadPreparer = {
+      prepareScanCreateUploads: vi.fn().mockImplementation((scanId: string) => {
+        prepared[0]!.data.scanId = scanId;
+        return Promise.resolve(prepared);
+      }),
+    };
+    const createWithUploadsIdempotently = vi
+      .fn()
+      .mockImplementation(
+        (
+          _scanId: string,
+          _projectId: string,
+          _userId: string,
+          _data: unknown,
+          uploads: typeof prepared,
+        ) =>
+          Promise.resolve({
+            body: {
+              ...createRecord(),
+              createdAt: NOW.toISOString(),
+              updatedAt: NOW.toISOString(),
+              permissions: { role: 'OWNER', canView: true, canEdit: true, canDelete: true },
+              uploads: { scanFile: uploads[0]!.response },
+            },
+            statusCode: 201,
+            replayed: false,
+          }),
+      );
+    repository.createWithUploadsIdempotently = createWithUploadsIdempotently;
+    const service = new ScanService({
+      repository,
+      permissions,
+      idempotency,
+      uploadPreparer,
+    });
+    const descriptor = {
+      assetType: 'MODEL' as const,
+      contentType: 'model/usdz',
+      sizeBytes: 20_000_000,
+      checksum: 'checksum',
+      modelVersion: '1',
+    };
+
+    const result = await service.createWithUploadsIdempotently(
+      OWNER_ID,
+      PROJECT_ID,
+      { name: 'Living Room', description: null },
+      [descriptor],
+      'retry-key',
+      { name: 'Living Room', scanFile: descriptor },
+    );
+
+    expect(idempotency.lookup).toHaveBeenCalledWith(context);
+    expect(uploadPreparer.prepareScanCreateUploads).toHaveBeenCalledWith(expect.any(String), [
+      descriptor,
+    ]);
+    expect(createWithUploadsIdempotently).toHaveBeenCalledWith(
+      expect.any(String),
+      PROJECT_ID,
+      OWNER_ID,
+      { name: 'Living Room', description: null },
+      prepared,
+      context,
+    );
+    expect(result.body.uploads?.scanFile?.uploadUrl).toBe('https://storage/upload');
   });
 
   it('lists active scans for an Owner', async () => {
@@ -222,53 +328,151 @@ describe('ScanService', () => {
     const { mocks, service } = createRepository();
     mocks.update.mockResolvedValueOnce(createRecord({ name: 'Updated Room' }));
 
-    const result = await service.update(OWNER_ID, SCAN_ID, {
+    const result = await service.update(OWNER_ID, SCAN_ID, 1, {
       name: 'Updated Room',
     });
 
-    expect(mocks.findProjectId).toHaveBeenCalledWith(SCAN_ID);
-    expect(mocks.update).toHaveBeenCalledWith(SCAN_ID, OWNER_ID, {
+    expect(mocks.update).toHaveBeenCalledWith(SCAN_ID, OWNER_ID, 1, {
       name: 'Updated Room',
     });
     expect(result.name).toBe('Updated Room');
   });
 
-  it('rejects rename from a Viewer', async () => {
-    const { service } = createRepository();
-
-    await expect(
-      service.update(VIEWER_ID, SCAN_ID, { name: 'Updated Room' }),
-    ).rejects.toBeInstanceOf(ScanNotFoundError);
-  });
-
   it('throws hidden not-found when updating a missing scan', async () => {
     const { mocks, service } = createRepository();
-    mocks.findProjectId.mockResolvedValueOnce(null);
+    mocks.update.mockRejectedValueOnce(new ScanNotFoundError());
 
     await expect(
-      service.update(OWNER_ID, SCAN_ID, { name: 'Updated Room' }),
+      service.update(OWNER_ID, SCAN_ID, 1, { name: 'Updated Room' }),
     ).rejects.toBeInstanceOf(ScanNotFoundError);
   });
 
   it('deletes a scan as the Owner', async () => {
     const { mocks, service } = createRepository();
 
-    await service.delete(OWNER_ID, SCAN_ID);
+    await service.delete(OWNER_ID, SCAN_ID, 1);
 
-    expect(mocks.findProjectId).toHaveBeenCalledWith(SCAN_ID);
-    expect(mocks.softDelete).toHaveBeenCalledWith(SCAN_ID, OWNER_ID);
-  });
-
-  it('rejects delete from a Viewer', async () => {
-    const { service } = createRepository();
-
-    await expect(service.delete(VIEWER_ID, SCAN_ID)).rejects.toBeInstanceOf(ScanNotFoundError);
+    expect(mocks.softDelete).toHaveBeenCalledWith(SCAN_ID, OWNER_ID, 1);
   });
 
   it('throws hidden not-found when deleting a missing scan', async () => {
     const { mocks, service } = createRepository();
-    mocks.findProjectId.mockResolvedValueOnce(null);
+    mocks.softDelete.mockRejectedValueOnce(new ScanNotFoundError());
 
-    await expect(service.delete(OWNER_ID, SCAN_ID)).rejects.toBeInstanceOf(ScanNotFoundError);
+    await expect(service.delete(OWNER_ID, SCAN_ID, 1)).rejects.toBeInstanceOf(ScanNotFoundError);
+  });
+
+  it('rethrows a non-not-found permission error from create', async () => {
+    const { service, findAccessRole } = createRepository();
+    findAccessRole.mockRejectedValueOnce(new Error('boom'));
+
+    await expect(
+      service.create(OWNER_ID, PROJECT_ID, { name: 'Living Room', description: null }),
+    ).rejects.toThrow('boom');
+  });
+
+  it('rethrows a non-not-found permission error from list', async () => {
+    const { service, findAccessRole } = createRepository();
+    findAccessRole.mockRejectedValueOnce(new Error('boom'));
+
+    await expect(
+      service.list(OWNER_ID, PROJECT_ID, { page: 1, limit: 5, sort: 'createdAt:desc' }),
+    ).rejects.toThrow('boom');
+  });
+
+  it('rejects an idempotent create when idempotency is not configured', async () => {
+    const { service } = createRepository();
+
+    await expect(
+      service.createIdempotently(
+        OWNER_ID,
+        PROJECT_ID,
+        { name: 'Living Room', description: null },
+        'k',
+      ),
+    ).rejects.toThrow('Scan idempotency is not configured');
+  });
+
+  it('replays a stored idempotent create without invoking the repository', async () => {
+    const { repository, permissions } = createRepository();
+    const context = {
+      userId: OWNER_ID,
+      operation: 'CREATE_SCAN' as const,
+      parentScope: `project:${PROJECT_ID}`,
+      keyHash: 'key-hash',
+      requestHash: 'request-hash',
+    };
+    const idempotency = {
+      createContext: vi.fn().mockReturnValue(context),
+      lookup: vi.fn().mockResolvedValue({
+        body: { id: SCAN_ID },
+        statusCode: 201,
+        replayed: true,
+      }),
+    };
+    const createIdempotently = vi.fn();
+    repository.createIdempotently = createIdempotently;
+    const service = new ScanService({ repository, permissions, idempotency });
+
+    const result = await service.createIdempotently(
+      OWNER_ID,
+      PROJECT_ID,
+      { name: 'Living Room', description: null },
+      'k',
+    );
+
+    expect(idempotency.lookup).toHaveBeenCalledWith(context);
+    expect(createIdempotently).not.toHaveBeenCalled();
+    expect(result.replayed).toBe(true);
+  });
+
+  it('rejects a transactional create when its dependencies are not configured', async () => {
+    const { repository, permissions } = createRepository();
+    const service = new ScanService({ repository, permissions });
+
+    await expect(
+      service.createWithUploadsIdempotently(
+        OWNER_ID,
+        PROJECT_ID,
+        { name: 'Living Room', description: null },
+        [],
+        'k',
+        {},
+      ),
+    ).rejects.toThrow('Transactional scan upload creation is not configured');
+  });
+
+  it('replays a stored transactional create', async () => {
+    const { repository, permissions } = createRepository();
+    const context = {
+      userId: OWNER_ID,
+      operation: 'CREATE_SCAN' as const,
+      parentScope: `project:${PROJECT_ID}`,
+      keyHash: 'key-hash',
+      requestHash: 'request-hash',
+    };
+    const idempotency = {
+      createContext: vi.fn().mockReturnValue(context),
+      lookup: vi.fn().mockResolvedValue({
+        body: { id: SCAN_ID },
+        statusCode: 201,
+        replayed: true,
+      }),
+    };
+    const uploadPreparer = { prepareScanCreateUploads: vi.fn() };
+    repository.createWithUploadsIdempotently = vi.fn();
+    const service = new ScanService({ repository, permissions, idempotency, uploadPreparer });
+
+    const result = await service.createWithUploadsIdempotently(
+      OWNER_ID,
+      PROJECT_ID,
+      { name: 'Living Room', description: null },
+      [],
+      'k',
+      {},
+    );
+
+    expect(result.replayed).toBe(true);
+    expect(uploadPreparer.prepareScanCreateUploads).not.toHaveBeenCalled();
   });
 });

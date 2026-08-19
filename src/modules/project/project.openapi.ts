@@ -2,6 +2,10 @@ import { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
 
 import { ErrorResponseSchema } from '../../common/schemas/error.js';
 import {
+  IdempotencyKeyHeaderSchema,
+  IfMatchHeaderSchema,
+} from '../../common/schemas/sync-headers.js';
+import {
   CreateProjectBodySchema,
   ListProjectsQuerySchema,
   ProjectIdParamSchema,
@@ -46,6 +50,20 @@ const rateLimitHeaders = {
       type: 'string' as const,
     },
   },
+};
+
+const revisionHeaders = {
+  ...rateLimitHeaders,
+  ETag: {
+    description: 'Strong ETag containing the current resource revision',
+    schema: { type: 'string' as const, example: '"3"' },
+  },
+};
+
+const conflictResponse = {
+  description: 'The revision is stale or the idempotency key was reused with another payload',
+  headers: rateLimitHeaders,
+  content: { 'application/json': { schema: errorResponse } },
 };
 
 const commonErrorResponses = {
@@ -111,8 +129,10 @@ projectOpenApiRegistry.registerPath({
   path: '/api/v1/projects',
   tags: ['Projects'],
   summary: 'Create a project',
+  description: 'Requires Idempotency-Key. A successful retry replays the original 201 response.',
   security: [{ [bearerAuth.name]: [] }],
   request: {
+    headers: IdempotencyKeyHeaderSchema,
     body: {
       required: true,
       content: {
@@ -125,7 +145,7 @@ projectOpenApiRegistry.registerPath({
   responses: {
     201: {
       description: 'The project was created',
-      headers: rateLimitHeaders,
+      headers: revisionHeaders,
       content: {
         'application/json': {
           schema: projectResponse,
@@ -133,6 +153,7 @@ projectOpenApiRegistry.registerPath({
       },
     },
     ...commonErrorResponses,
+    409: conflictResponse,
   },
 });
 
@@ -171,7 +192,7 @@ projectOpenApiRegistry.registerPath({
   responses: {
     200: {
       description: 'The project',
-      headers: rateLimitHeaders,
+      headers: revisionHeaders,
       content: {
         'application/json': {
           schema: projectResponse,
@@ -191,6 +212,7 @@ projectOpenApiRegistry.registerPath({
   security: [{ [bearerAuth.name]: [] }],
   request: {
     params: ProjectIdParamSchema,
+    headers: IfMatchHeaderSchema,
     body: {
       required: true,
       content: {
@@ -203,7 +225,7 @@ projectOpenApiRegistry.registerPath({
   responses: {
     200: {
       description: 'The updated project',
-      headers: rateLimitHeaders,
+      headers: revisionHeaders,
       content: {
         'application/json': {
           schema: projectResponse,
@@ -212,6 +234,7 @@ projectOpenApiRegistry.registerPath({
     },
     ...commonErrorResponses,
     404: projectNotFoundResponse,
+    409: conflictResponse,
   },
 });
 
@@ -223,13 +246,15 @@ projectOpenApiRegistry.registerPath({
   security: [{ [bearerAuth.name]: [] }],
   request: {
     params: ProjectIdParamSchema,
+    headers: IfMatchHeaderSchema,
   },
   responses: {
     204: {
       description: 'The project was deleted',
-      headers: rateLimitHeaders,
+      headers: revisionHeaders,
     },
     ...commonErrorResponses,
     404: projectNotFoundResponse,
+    409: conflictResponse,
   },
 });

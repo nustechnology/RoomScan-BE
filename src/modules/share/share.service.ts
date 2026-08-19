@@ -1,7 +1,11 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 
 import type { Logger } from 'pino';
 
+import type {
+  IdempotencyGateway,
+  IdempotencyResult,
+} from '../../common/idempotency/idempotency.types.js';
 import type { Mailer } from '../../infrastructure/mail/mailer.types.js';
 import { ProjectNotFoundError } from '../project/project.errors.js';
 import { ScanNotFoundError } from '../scan/scan.errors.js';
@@ -13,13 +17,14 @@ import {
   InvitationDeclinedError,
   InvitationExpiredError,
   InvitationNotFoundError,
+  InvitationNotForUserError,
   InvitationRevokedError,
   NotOwnerError,
   ProjectNotShareableError,
   ScanNotShareableError,
   ShareLinkExpiredError,
   ShareLinkNotFoundError,
-  ShareLinkRevokedError,
+  ShareNoLongerAvailableError,
   ViewerAccessNotFoundError,
 } from './share.errors.js';
 import type {
@@ -37,6 +42,7 @@ import type {
   ShareLinkPreviewResult,
   ShareLinkRecord,
   ShareLinkWithEntity,
+  ShareProjectPreview,
   ShareProjectSummary,
   ShareRepository,
   ShareScanPreview,
@@ -55,6 +61,12 @@ export interface ShareServiceDependencies {
   clock?: () => Date;
   invitationTtlSeconds: number;
   invitationBaseUrl: string;
+  idempotency?: IdempotencyGateway;
+}
+
+export interface PreviewContextUser {
+  id: string;
+  email: string | null;
 }
 
 export function generateInvitationToken(): string {
@@ -65,7 +77,7 @@ export function hashInvitationToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
 }
 
-function toPreviewProject(project: ShareProjectSummary | null) {
+function toPreviewProject(project: ShareProjectSummary | null): ShareProjectPreview | null {
   if (project === null) {
     return null;
   }
@@ -74,6 +86,8 @@ function toPreviewProject(project: ShareProjectSummary | null) {
     name: project.name,
     description: project.description,
     thumbnail: project.thumbnail,
+    owner: project.owner,
+    scanCount: project.scanCount,
   };
 }
 
@@ -87,6 +101,8 @@ function toPreviewScan(scan: ShareScanSummary | null): ShareScanPreview | null {
     name: scan.name,
     description: scan.description,
     thumbnail: scan.thumbnail,
+    noteCount: scan.noteCount,
+    creator: scan.creator,
   };
 }
 
@@ -97,6 +113,7 @@ export class ShareService {
   readonly #clock: () => Date;
   readonly #invitationTtlSeconds: number;
   readonly #invitationBaseUrl: string;
+  readonly #idempotency: IdempotencyGateway | undefined;
 
   constructor({
     repository,
@@ -105,6 +122,7 @@ export class ShareService {
     clock,
     invitationTtlSeconds,
     invitationBaseUrl,
+    idempotency,
   }: ShareServiceDependencies) {
     this.#repository = repository;
     this.#mailer = mailer;
@@ -112,6 +130,7 @@ export class ShareService {
     this.#clock = clock ?? (() => new Date());
     this.#invitationTtlSeconds = invitationTtlSeconds;
     this.#invitationBaseUrl = invitationBaseUrl;
+    this.#idempotency = idempotency;
   }
 
   #viewStatus(record: InvitationRecord): InvitationViewStatus {
@@ -128,6 +147,10 @@ export class ShareService {
       return 'EXPIRED';
     }
     return 'PENDING';
+  }
+
+  #inviteUrl(rawToken: string, scope: ShareScope): string {
+    return `${this.#invitationBaseUrl}/invitations/${rawToken}?scope=${scope}`;
   }
 
   #scopeOf(record: InvitationRecord | ShareLinkRecord): ShareScope {
@@ -226,6 +249,16 @@ export class ShareService {
     }
   }
 
+  #assertRecipientMatch(recipientEmail: string, currentUser: PreviewContextUser): void {
+    const matches =
+      currentUser.email !== null &&
+      recipientEmail.toLowerCase() === currentUser.email.toLowerCase();
+
+    if (!matches) {
+      throw new InvitationNotForUserError();
+    }
+  }
+
   async #hasActiveAccess(scope: ShareScope, entityId: string, userId: string): Promise<boolean> {
     if (scope === 'project') {
       return (await this.#repository.findActiveViewerAccess(entityId, userId)) !== null;
@@ -310,7 +343,7 @@ export class ShareService {
       sentAt: now,
     });
 
-    const invitationUrl = `${this.#invitationBaseUrl}/invitations/${rawToken}`;
+    const invitationUrl = this.#inviteUrl(rawToken, 'project');
     await this.#sendInvitationEmail({
       scope: 'project',
       recipientEmail: data.recipientEmail,
@@ -328,6 +361,75 @@ export class ShareService {
       status: 'PENDING',
       sentAt: now.toISOString(),
     };
+  }
+
+  async createInvitationIdempotently(
+    userId: string,
+    projectId: string,
+    data: InvitationCreateInput,
+    key: string,
+  ): Promise<IdempotencyResult<InvitationCreateResult>> {
+    if (
+      this.#idempotency === undefined ||
+      this.#repository.createInvitationIdempotently === undefined
+    ) {
+      throw new Error('Invitation idempotency is not configured');
+    }
+    const context = this.#idempotency.createContext({
+      userId,
+      operation: 'CREATE_INVITATION',
+      parentScope: `project:${projectId}`,
+      key,
+      request: data,
+    });
+    const replay = await this.#idempotency.lookup<InvitationCreateResult>(context);
+    if (replay !== null) return replay;
+
+    const info = await this.#repository.findProjectInfo(projectId);
+    if (info === null) throw new ProjectNotFoundError();
+    if (info.ownerId !== userId) throw new NotOwnerError();
+    if (!(await this.#repository.hasUploadedModel(projectId))) {
+      throw new ProjectNotShareableError();
+    }
+
+    const now = this.#clock();
+    const ttlSeconds = data.expiresInSeconds ?? this.#invitationTtlSeconds;
+    const expiresAt = new Date(now.getTime() + ttlSeconds * 1000);
+    const rawToken = generateInvitationToken();
+    const invitationId = randomUUID();
+    const invitationUrl = `${this.#invitationBaseUrl}/invitations/${rawToken}`;
+    const responseBody: InvitationCreateResult = {
+      invitationId,
+      invitationUrl,
+      recipientEmail: data.recipientEmail,
+      expiresAt: expiresAt.toISOString(),
+      status: 'PENDING',
+      sentAt: now.toISOString(),
+    };
+    const result = await this.#repository.createInvitationIdempotently(
+      {
+        id: invitationId,
+        projectId,
+        createdById: userId,
+        recipientEmail: data.recipientEmail,
+        tokenHash: hashInvitationToken(rawToken),
+        expiresAt,
+        sentAt: now,
+      },
+      context,
+      responseBody,
+    );
+    if (!result.replayed) {
+      await this.#sendInvitationEmail({
+        scope: 'project',
+        recipientEmail: data.recipientEmail,
+        ownerDisplay: info.ownerEmail ?? 'the project owner',
+        entityName: info.name,
+        invitationUrl,
+        expiresInSeconds: ttlSeconds,
+      });
+    }
+    return result;
   }
 
   async createScanInvitation(
@@ -360,7 +462,7 @@ export class ShareService {
       sentAt: now,
     });
 
-    const invitationUrl = `${this.#invitationBaseUrl}/invitations/${rawToken}`;
+    const invitationUrl = this.#inviteUrl(rawToken, 'scan');
     await this.#sendInvitationEmail({
       scope: 'scan',
       recipientEmail: data.recipientEmail,
@@ -380,27 +482,34 @@ export class ShareService {
     };
   }
 
-  async previewInvitation(rawToken: string, userId?: string): Promise<TokenPreviewResult> {
-    const invitation = await this.#repository.findByTokenHash(hashInvitationToken(rawToken));
+  async previewInvitation(
+    rawToken: string,
+    currentUser: PreviewContextUser,
+  ): Promise<TokenPreviewResult> {
+    const tokenHash = hashInvitationToken(rawToken);
+    const invitation = await this.#repository.findByTokenHash(tokenHash);
 
     if (invitation !== null) {
+      this.#assertRecipientMatch(invitation.invitation.recipientEmail, currentUser);
+
+      if (invitation.invitation.status === 'REVOKED') {
+        throw new ShareNoLongerAvailableError();
+      }
+
       const result: InvitationPreviewResult = {
         type: 'invitation',
         scope: this.#scopeOf(invitation.invitation),
         project: toPreviewProject(invitation.project),
         scan: toPreviewScan(invitation.scan),
         status: this.#viewStatus(invitation.invitation),
+        recipientEmail: invitation.invitation.recipientEmail,
         sentAt: invitation.invitation.sentAt.toISOString(),
         expiresAt: invitation.invitation.expiresAt.toISOString(),
       };
-
-      if (userId !== undefined) {
-        result.recipientEmail = invitation.invitation.recipientEmail;
-        const { scope, project, scan } = this.#entityOf(invitation);
-        const entityId = scope === 'project' ? project?.id : scan?.id;
-        result.hasAccess =
-          entityId !== undefined && (await this.#hasActiveAccess(scope, entityId, userId));
-      }
+      const { scope, project, scan } = this.#entityOf(invitation);
+      const entityId = scope === 'project' ? project?.id : scan?.id;
+      result.hasAccess =
+        entityId !== undefined && (await this.#hasActiveAccess(scope, entityId, currentUser.id));
 
       return result;
     }
@@ -410,6 +519,10 @@ export class ShareService {
     );
 
     if (shareLink !== null) {
+      if (shareLink.shareLink.revokedAt !== null) {
+        throw new ShareNoLongerAvailableError();
+      }
+
       const result: ShareLinkPreviewResult = {
         type: 'share-link',
         scope: this.#scopeOf(shareLink.shareLink),
@@ -419,14 +532,16 @@ export class ShareService {
         expiresAt: shareLink.shareLink.expiresAt.toISOString(),
       };
 
-      if (userId !== undefined) {
-        const { scope, project, scan } = this.#entityOf(shareLink);
-        const entityId = scope === 'project' ? project?.id : scan?.id;
-        result.hasAccess =
-          entityId !== undefined && (await this.#hasActiveAccess(scope, entityId, userId));
-      }
+      const { scope, project, scan } = this.#entityOf(shareLink);
+      const entityId = scope === 'project' ? project?.id : scan?.id;
+      result.hasAccess =
+        entityId !== undefined && (await this.#hasActiveAccess(scope, entityId, currentUser.id));
 
       return result;
+    }
+
+    if ((await this.#repository.findTokenSourceKindByTokenHash(tokenHash)) !== null) {
+      throw new ShareNoLongerAvailableError();
     }
 
     throw new InvitationNotFoundError();
@@ -442,19 +557,25 @@ export class ShareService {
     return 'ACTIVE';
   }
 
-  async acceptInvitation(userId: string, rawToken: string): Promise<TokenAcceptResult> {
-    const invitation = await this.#repository.findByTokenHash(hashInvitationToken(rawToken));
+  async acceptInvitation(
+    currentUser: PreviewContextUser,
+    rawToken: string,
+  ): Promise<TokenAcceptResult> {
+    const tokenHash = hashInvitationToken(rawToken);
+    const invitation = await this.#repository.findByTokenHash(tokenHash);
 
     if (invitation !== null) {
-      return await this.#acceptEmailInvitation(invitation, userId);
+      return await this.#acceptEmailInvitation(invitation, currentUser);
     }
 
-    const shareLink = await this.#repository.findShareLinkByTokenHash(
-      hashInvitationToken(rawToken),
-    );
+    const shareLink = await this.#repository.findShareLinkByTokenHash(tokenHash);
 
     if (shareLink !== null) {
-      return await this.#acceptShareLink(shareLink, userId);
+      return await this.#acceptShareLink(shareLink, currentUser.id);
+    }
+
+    if ((await this.#repository.findTokenSourceKindByTokenHash(tokenHash)) !== null) {
+      throw new ShareNoLongerAvailableError();
     }
 
     throw new InvitationNotFoundError();
@@ -462,13 +583,14 @@ export class ShareService {
 
   async #acceptEmailInvitation(
     context: InvitationWithEntity,
-    userId: string,
+    currentUser: PreviewContextUser,
   ): Promise<InvitationAcceptResult> {
     const { invitation } = context;
     const { scope, project, scan } = this.#entityOf(context);
+    const userId = currentUser.id;
 
     if (invitation.status === 'REVOKED') {
-      throw new InvitationRevokedError();
+      throw new ShareNoLongerAvailableError();
     }
     if (invitation.status === 'ACCEPTED') {
       throw new InvitationAlreadyAcceptedError();
@@ -489,6 +611,7 @@ export class ShareService {
       if (project.owner.id === userId) {
         throw new CannotAcceptOwnInvitationError();
       }
+      this.#assertRecipientMatch(invitation.recipientEmail, currentUser);
       if (await this.#hasActiveAccess(scope, project.id, userId)) {
         throw new AccessAlreadyExistsError();
       }
@@ -521,6 +644,7 @@ export class ShareService {
     if (scan.ownerId === userId) {
       throw new CannotAcceptOwnInvitationError();
     }
+    this.#assertRecipientMatch(invitation.recipientEmail, currentUser);
     if (await this.#hasActiveAccess(scope, scan.id, userId)) {
       throw new AccessAlreadyExistsError();
     }
@@ -555,7 +679,7 @@ export class ShareService {
     const { scope, project, scan, ownerId } = this.#entityOf(context);
 
     if (shareLink.revokedAt !== null) {
-      throw new ShareLinkRevokedError();
+      throw new ShareNoLongerAvailableError();
     }
     if (shareLink.expiresAt.getTime() <= this.#clock().getTime()) {
       throw new ShareLinkExpiredError();
@@ -573,18 +697,27 @@ export class ShareService {
     return await this.#grantAccessFromShareLink(context, userId, this.#clock());
   }
 
-  async declineInvitation(userId: string, rawToken: string): Promise<InvitationDeclineResult> {
-    const invitation = await this.#repository.findByTokenHash(hashInvitationToken(rawToken));
+  async declineInvitation(
+    currentUser: PreviewContextUser,
+    rawToken: string,
+  ): Promise<InvitationDeclineResult> {
+    const tokenHash = hashInvitationToken(rawToken);
+    const invitation = await this.#repository.findByTokenHash(tokenHash);
 
     if (invitation === null) {
+      if ((await this.#repository.findTokenSourceKindByTokenHash(tokenHash)) !== null) {
+        throw new ShareNoLongerAvailableError();
+      }
       throw new InvitationNotFoundError();
     }
 
     const { invitation: record } = invitation;
+    const userId = currentUser.id;
+
     const { scope, project, scan } = this.#entityOf(invitation);
 
     if (record.status === 'REVOKED') {
-      throw new InvitationRevokedError();
+      throw new ShareNoLongerAvailableError();
     }
     if (record.status === 'ACCEPTED') {
       throw new InvitationAlreadyAcceptedError();
@@ -599,6 +732,7 @@ export class ShareService {
     if (ownerId === userId) {
       throw new CannotAcceptOwnInvitationError();
     }
+    this.#assertRecipientMatch(record.recipientEmail, currentUser);
     const entityId = scope === 'project' ? project?.id : scan?.id;
     if (entityId !== undefined && (await this.#hasActiveAccess(scope, entityId, userId))) {
       throw new AccessAlreadyExistsError();
@@ -693,8 +827,8 @@ export class ShareService {
       throw new InvitationNotFoundError();
     }
 
-    const invitationUrl = `${this.#invitationBaseUrl}/invitations/${rawToken}`;
     const scope = this.#scopeOf(updated);
+    const invitationUrl = this.#inviteUrl(rawToken, scope);
 
     if (scope === 'project') {
       if (updated.projectId === null) {
@@ -757,6 +891,7 @@ export class ShareService {
       })),
       viewers: viewers.map((viewer) => ({
         userId: viewer.userId,
+        revision: viewer.revision,
         recipientUser: viewer.user,
         grantedAt: viewer.grantedAt.toISOString(),
       })),
@@ -813,6 +948,7 @@ export class ShareService {
     return {
       projectId,
       userId: targetUserId,
+      revision: result.revision,
       revokedAt: result.revokedAt.toISOString(),
     };
   }

@@ -1,3 +1,8 @@
+import type {
+  IdempotencyContext,
+  IdempotencyResult,
+} from '../../common/idempotency/idempotency.types.js';
+
 export type InvitationStatus = 'PENDING' | 'ACCEPTED' | 'DECLINED' | 'REVOKED';
 export type InvitationViewStatus = 'PENDING' | 'EXPIRED' | 'ACCEPTED' | 'DECLINED' | 'REVOKED';
 export type ShareScope = 'project' | 'scan';
@@ -12,6 +17,7 @@ export interface ShareProjectSummary {
     id: string;
     email: string | null;
   };
+  scanCount: number;
 }
 
 export interface ShareScanSummary {
@@ -20,6 +26,7 @@ export interface ShareScanSummary {
   name: string;
   description: string | null;
   thumbnail: string | null;
+  noteCount: number;
   creator: {
     id: string;
     email: string | null;
@@ -33,6 +40,23 @@ export interface ShareScanPreview {
   name: string;
   description: string | null;
   thumbnail: string | null;
+  noteCount: number;
+  creator: {
+    id: string;
+    email: string | null;
+  };
+}
+
+export interface ShareProjectPreview {
+  id: string;
+  name: string;
+  description: string | null;
+  thumbnail: string | null;
+  owner: {
+    id: string;
+    email: string | null;
+  };
+  scanCount: number;
 }
 
 export interface InvitationRecord {
@@ -76,12 +100,12 @@ export interface InvitationSendResult {
 export type InvitationCreateResult = InvitationSendResult;
 export type InvitationResendResult = InvitationSendResult;
 
-export type ShareEntityPreview = Omit<ShareProjectSummary, 'owner'> | ShareScanSummary | null;
+export type ShareEntityPreview = ShareProjectPreview | ShareScanSummary | null;
 
 export interface InvitationPreviewResult {
   type: 'invitation';
   scope: ShareScope;
-  project: Omit<ShareProjectSummary, 'owner'> | null;
+  project: ShareProjectPreview | null;
   scan: ShareScanPreview | null;
   status: InvitationViewStatus;
   recipientEmail?: string;
@@ -93,7 +117,7 @@ export interface InvitationPreviewResult {
 export interface ShareLinkPreviewResult {
   type: 'share-link';
   scope: ShareScope;
-  project: Omit<ShareProjectSummary, 'owner'> | null;
+  project: ShareProjectPreview | null;
   scan: ShareScanPreview | null;
   status: ShareLinkViewStatus;
   expiresAt: string;
@@ -152,6 +176,7 @@ export interface PendingInvitationResult {
 
 export interface ViewerResult {
   userId: string;
+  revision?: number;
   recipientUser: {
     id: string;
     email: string | null;
@@ -167,6 +192,7 @@ export interface SharesListResult {
 export interface ViewerRevokeResult {
   projectId: string;
   userId: string;
+  revision: number;
   revokedAt: string;
 }
 
@@ -257,7 +283,21 @@ export interface ShareRepository {
   findScanInfo(scanId: string): Promise<ShareScanInfo | null>;
   hasUploadedScanModel(scanId: string): Promise<boolean>;
   createInvitation(data: InvitationCreateData): Promise<InvitationRecord>;
+  createInvitationIdempotently?(
+    data: {
+      id: string;
+      projectId: string;
+      createdById: string;
+      recipientEmail: string;
+      tokenHash: string;
+      expiresAt: Date;
+      sentAt: Date;
+    },
+    context: IdempotencyContext,
+    result: InvitationCreateResult,
+  ): Promise<IdempotencyResult<InvitationCreateResult>>;
   findByTokenHash(tokenHash: string): Promise<InvitationWithEntity | null>;
+  findTokenSourceKindByTokenHash(tokenHash: string): Promise<'invitation' | 'share-link' | null>;
   findInvitationById(id: string): Promise<InvitationRecord | null>;
   acceptInvitation(
     invitationId: string,
@@ -281,10 +321,13 @@ export interface ShareRepository {
   listPendingByScan(scanId: string): Promise<InvitationRecord[]>;
   findActiveViewerAccess(projectId: string, userId: string): Promise<{ id: string } | null>;
   findActiveScanAccess(scanId: string, userId: string): Promise<{ id: string } | null>;
-  listActiveViewers(
-    projectId: string,
-  ): Promise<
-    Array<{ userId: string; user: { id: string; email: string | null }; grantedAt: Date }>
+  listActiveViewers(projectId: string): Promise<
+    Array<{
+      userId: string;
+      revision: number;
+      user: { id: string; email: string | null };
+      grantedAt: Date;
+    }>
   >;
   listActiveScanViewers(
     scanId: string,
@@ -295,7 +338,7 @@ export interface ShareRepository {
     projectId: string,
     userId: string,
     revokedAt: Date,
-  ): Promise<{ revokedAt: Date } | null>;
+  ): Promise<{ revokedAt: Date; revision: number } | null>;
   revokeScanViewerAccess(
     scanId: string,
     userId: string,

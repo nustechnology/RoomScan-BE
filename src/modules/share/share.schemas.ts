@@ -53,9 +53,18 @@ const ProjectPreviewSchema = z.object({
   name: z.string(),
   description: z.string().nullable(),
   thumbnail: z.url().nullable(),
+  owner: z.object({
+    id: z.uuid(),
+    email: z.email().nullable(),
+  }),
+  scanCount: z.number().int().nonnegative(),
 });
 
-const ProjectDetailSchema = ProjectPreviewSchema.extend({
+const ProjectDetailSchema = z.object({
+  id: z.uuid(),
+  name: z.string(),
+  description: z.string().nullable(),
+  thumbnail: z.url().nullable(),
   owner: z.object({
     id: z.uuid(),
     email: z.email().nullable(),
@@ -68,13 +77,15 @@ const ScanPreviewSchema = z.object({
   name: z.string(),
   description: z.string().nullable(),
   thumbnail: z.url().nullable(),
-});
-
-const ScanDetailSchema = ScanPreviewSchema.extend({
+  noteCount: z.number().int().nonnegative(),
   creator: z.object({
     id: z.uuid(),
     email: z.email().nullable(),
   }),
+});
+
+const ScanDetailSchema = ScanPreviewSchema.extend({
+  ownerId: z.uuid(),
 });
 
 const InvitationPreviewLiteralSchema = z.object({
@@ -82,7 +93,7 @@ const InvitationPreviewLiteralSchema = z.object({
   scope: ShareScopeSchema,
   project: ProjectPreviewSchema.nullable(),
   scan: ScanPreviewSchema.nullable(),
-  status: z.enum(['PENDING', 'EXPIRED', 'ACCEPTED', 'DECLINED', 'REVOKED']),
+  status: z.enum(['PENDING', 'EXPIRED', 'ACCEPTED', 'DECLINED']),
   recipientEmail: z.email().optional(),
   sentAt: z.iso.datetime(),
   expiresAt: z.iso.datetime(),
@@ -94,7 +105,7 @@ const ShareLinkPreviewLiteralSchema = z.object({
   scope: ShareScopeSchema,
   project: ProjectPreviewSchema.nullable(),
   scan: ScanPreviewSchema.nullable(),
-  status: z.enum(['ACTIVE', 'EXPIRED', 'REVOKED']),
+  status: z.enum(['ACTIVE', 'EXPIRED']),
   expiresAt: z.iso.datetime(),
   hasAccess: z.boolean().optional(),
 });
@@ -160,6 +171,7 @@ export const SharesListResponseSchema = z.object({
   viewers: z.array(
     z.object({
       userId: z.uuid(),
+      revision: z.number().int().positive().optional(),
       recipientUser: z.object({
         id: z.uuid(),
         email: z.email().nullable(),
@@ -174,6 +186,7 @@ export const ScanSharesListResponseSchema = SharesListResponseSchema;
 export const ViewerRevokeResponseSchema = z.object({
   projectId: z.uuid(),
   userId: z.uuid(),
+  revision: z.number().int().positive(),
   revokedAt: z.iso.datetime(),
 });
 

@@ -28,6 +28,7 @@ import type { ShareService } from '../src/modules/share/share.service.js';
 import type { ShareLinkService } from '../src/modules/share/share-link.service.js';
 import type { SharedProjectsService } from '../src/modules/shared-projects/shared-projects.service.js';
 import type { SharedScansService } from '../src/modules/shared-scans/shared-scans.service.js';
+import type { SyncService } from '../src/modules/sync/sync.service.js';
 import type { ProjectResult, ProjectRole } from '../src/modules/project/project.types.js';
 
 const ACCESS_SECRET = 'access-secret-that-is-at-least-32-characters';
@@ -52,6 +53,7 @@ const config: AppConfig = {
   appleClientId: 'com.example.roomscan',
   accessTokenSecret: ACCESS_SECRET,
   refreshTokenSecret: 'refresh-secret-that-is-at-least-32-characters',
+  syncCryptoKey: 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=',
   accessTokenTtlSeconds: 3600,
   refreshTokenTtlSeconds: 2_592_000,
   localTestAuthEnabled: false,
@@ -93,6 +95,8 @@ function projectResult(role: ProjectRole = 'OWNER'): ProjectResult {
     sharedCount: 1,
     thumbnail: null,
     syncStatus: null,
+    revision: 1,
+    lastSyncedAt: null,
     createdAt: NOW.toISOString(),
     updatedAt: NOW.toISOString(),
     permissions: {
@@ -208,6 +212,10 @@ describe('Project HTTP endpoints', () => {
     detail: vi.fn(),
     remove: vi.fn(),
   } as unknown as SharedScansService;
+  const syncService = {
+    getChanges: vi.fn(),
+    getStatus: vi.fn(),
+  } as unknown as SyncService;
   const app = createApp({
     config,
     database,
@@ -222,6 +230,7 @@ describe('Project HTTP endpoints', () => {
     shareLinkService,
     sharedProjectsService,
     sharedScansService,
+    syncService,
     accessTokenVerifier,
     currentUserRepository,
     rateLimiters,
@@ -251,7 +260,7 @@ describe('Project HTTP endpoints', () => {
       name: 'Updated scan',
       description: 'Second floor',
     });
-    deleteProject.mockResolvedValue(undefined);
+    deleteProject.mockResolvedValue(1);
   });
 
   describe('POST /api/v1/projects', () => {
@@ -259,6 +268,7 @@ describe('Project HTTP endpoints', () => {
       const response = await request(app)
         .post('/api/v1/projects')
         .set('Authorization', `Bearer ${tokenA}`)
+        .set('Idempotency-Key', 'project-create-1')
         .send({ name: '  Căn hộ Quận 2  ', description: 'Apartment survey' })
         .expect(201);
       const body = ProjectResponseSchema.parse(response.body as unknown);
@@ -274,11 +284,13 @@ describe('Project HTTP endpoints', () => {
       await request(app)
         .post('/api/v1/projects')
         .set('Authorization', `Bearer ${tokenA}`)
+        .set('Idempotency-Key', 'project-create-boundary')
         .send({ name: 'x'.repeat(50), description: 'y'.repeat(500) })
         .expect(201);
       await request(app)
         .post('/api/v1/projects')
         .set('Authorization', `Bearer ${tokenA}`)
+        .set('Idempotency-Key', 'project-create-null-description')
         .send({ name: 'No description' })
         .expect(201);
 
@@ -504,12 +516,13 @@ describe('Project HTTP endpoints', () => {
       const response = await request(app)
         .patch(`/api/v1/projects/${PROJECT_ID}`)
         .set('Authorization', `Bearer ${tokenA}`)
+        .set('If-Match', '"1"')
         .send({ name: '  Updated scan  ', description: null })
         .expect(200);
       const body = ProjectResponseSchema.parse(response.body as unknown);
 
       expect(body.name).toBe('Updated scan');
-      expect(update).toHaveBeenCalledWith(USER_A, PROJECT_ID, {
+      expect(update).toHaveBeenCalledWith(USER_A, PROJECT_ID, 1, {
         name: 'Updated scan',
         description: null,
       });
@@ -535,6 +548,7 @@ describe('Project HTTP endpoints', () => {
       const response = await request(app)
         .patch(`/api/v1/projects/${PROJECT_ID}`)
         .set('Authorization', `Bearer ${tokenB}`)
+        .set('If-Match', '"1"')
         .send({ name: 'Forbidden' })
         .expect(404);
 
@@ -549,14 +563,16 @@ describe('Project HTTP endpoints', () => {
       await request(app)
         .delete(`/api/v1/projects/${PROJECT_ID}`)
         .set('Authorization', `Bearer ${tokenA}`)
+        .set('If-Match', '"1"')
         .expect(204);
       await request(app)
         .delete(`/api/v1/projects/${PROJECT_ID}`)
         .set('Authorization', `Bearer ${tokenA}`)
+        .set('If-Match', '"1"')
         .expect(204);
 
       expect(deleteProject).toHaveBeenCalledTimes(2);
-      expect(deleteProject).toHaveBeenLastCalledWith(USER_A, PROJECT_ID);
+      expect(deleteProject).toHaveBeenLastCalledWith(USER_A, PROJECT_ID, 1);
     });
 
     it('hides deletion from a Viewer or unrelated user', async () => {
@@ -565,6 +581,7 @@ describe('Project HTTP endpoints', () => {
       const response = await request(app)
         .delete(`/api/v1/projects/${PROJECT_ID}`)
         .set('Authorization', `Bearer ${tokenB}`)
+        .set('If-Match', '"1"')
         .expect(404);
 
       expect(ErrorResponseSchema.parse(response.body as unknown).error.code).toBe(
@@ -600,6 +617,7 @@ describe('Project HTTP endpoints', () => {
     const response = await request(app)
       .post('/api/v1/projects')
       .set('Authorization', `Bearer ${tokenA}`)
+      .set('Idempotency-Key', 'project-create-error')
       .send({ name: 'Test' })
       .expect(500);
     const body = ErrorResponseSchema.parse(response.body as unknown);

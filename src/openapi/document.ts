@@ -10,6 +10,7 @@ import { noteOpenApiRegistry } from '../modules/note/note.openapi.js';
 import { shareOpenApiRegistry } from '../modules/share/share.openapi.js';
 import { sharedProjectsOpenApiRegistry } from '../modules/shared-projects/shared-projects.openapi.js';
 import { sharedScansOpenApiRegistry } from '../modules/shared-scans/shared-scans.openapi.js';
+import { syncOpenApiRegistry } from '../modules/sync/sync.openapi.js';
 
 export function createOpenApiDocument(): ReturnType<OpenApiGeneratorV31['generateDocument']> {
   const generator = new OpenApiGeneratorV31([
@@ -22,6 +23,7 @@ export function createOpenApiDocument(): ReturnType<OpenApiGeneratorV31['generat
     ...shareOpenApiRegistry.definitions,
     ...sharedProjectsOpenApiRegistry.definitions,
     ...sharedScansOpenApiRegistry.definitions,
+    ...syncOpenApiRegistry.definitions,
   ]);
 
   return generator.generateDocument({
@@ -69,6 +71,10 @@ export function createOpenApiDocument(): ReturnType<OpenApiGeneratorV31['generat
       {
         name: 'Shared With Me',
         description: 'Projects and scans accepted by the current user as a Viewer',
+      },
+      {
+        name: 'Sync',
+        description: 'Offline-first change feed, conflict recovery, and project sync readiness',
       },
     ],
   });

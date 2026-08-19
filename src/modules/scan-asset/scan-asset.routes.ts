@@ -1,12 +1,17 @@
 import { Router } from 'express';
 
 import { AppError } from '../../common/errors/app-error.js';
+import {
+  idempotencyErrorToAppError,
+  resolveIdempotencyKey,
+} from '../../common/idempotency/idempotency.js';
 import { authenticate, getUserId } from '../../common/middleware/authenticate.js';
 import type {
   AccessTokenVerifier,
   CurrentUserRepository,
 } from '../../common/middleware/authenticate.js';
 import { validateRequest } from '../../common/middleware/validate-request.js';
+import { IdempotencyKeyHeaderSchema } from '../../common/schemas/sync-headers.js';
 import { ScanIdParamSchema, type ScanIdParam } from '../scan/scan.schemas.js';
 import { ScanNotFoundError } from '../scan/scan.errors.js';
 import { ProjectNotFoundError } from '../project/project.errors.js';
@@ -14,6 +19,7 @@ import {
   AssetNotReadyError,
   AssetUploadFailedError,
   InvalidAssetRequestError,
+  ModelAlreadyCompletedError,
   ScanAssetNotFoundError,
   StorageUnavailableError,
   UploadSessionExpiredError,
@@ -43,6 +49,8 @@ export interface ScanAssetRouterDependencies {
 }
 
 function mapError(error: unknown): AppError | undefined {
+  const idempotencyError = idempotencyErrorToAppError(error);
+  if (idempotencyError !== undefined) return idempotencyError;
   if (error instanceof ScanNotFoundError) {
     return new AppError({ statusCode: 404, code: 'SCAN_NOT_FOUND', message: 'Scan was not found' });
   }
@@ -95,6 +103,13 @@ function mapError(error: unknown): AppError | undefined {
       message: 'Storage provider is unavailable',
     });
   }
+  if (error instanceof ModelAlreadyCompletedError) {
+    return new AppError({
+      statusCode: 409,
+      code: 'MODEL_ALREADY_COMPLETED',
+      message: 'Completed scan model cannot be overwritten',
+    });
+  }
   return undefined;
 }
 
@@ -109,13 +124,18 @@ export function createScanAssetRouter({
   router.post(
     '/scans/:scanId/assets/upload-sessions',
     requireAuth,
-    validateRequest({ body: CreateUploadSessionBodySchema, params: ScanIdParamSchema }),
+    validateRequest({
+      body: CreateUploadSessionBodySchema,
+      params: ScanIdParamSchema,
+      headers: IdempotencyKeyHeaderSchema,
+    }),
     async (request, response, next) => {
       try {
         const userId = getUserId(request);
-        const { body, params } = response.locals.validated as {
+        const { body, params, headers } = response.locals.validated as {
           body: CreateUploadSessionBody;
           params: ScanIdParam;
+          headers: { 'Idempotency-Key': string };
         };
         const data = {
           assetType: body.assetType,
@@ -125,9 +145,20 @@ export function createScanAssetRouter({
           ...(body.modelVersion === undefined ? {} : { modelVersion: body.modelVersion }),
           ...(body.idempotencyKey === undefined ? {} : { idempotencyKey: body.idempotencyKey }),
         };
-        const result = await scanAssetService.createUploadSession(userId, params.scanId, data);
-        const responseBody = CreateUploadSessionResponseSchema.parse(result);
-        response.status(result.created ? 201 : 200).json(responseBody);
+        const key = resolveIdempotencyKey(headers['Idempotency-Key'], body.idempotencyKey);
+        const result =
+          typeof scanAssetService.createUploadSessionIdempotently === 'function'
+            ? await scanAssetService.createUploadSessionIdempotently(
+                userId,
+                params.scanId,
+                data,
+                key,
+              )
+            : await scanAssetService
+                .createUploadSession(userId, params.scanId, data)
+                .then((body) => ({ body, statusCode: body.created ? 201 : 200 }));
+        const responseBody = CreateUploadSessionResponseSchema.parse(result.body);
+        response.status(result.statusCode).json(responseBody);
       } catch (error) {
         next(mapError(error) ?? error);
       }

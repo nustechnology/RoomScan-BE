@@ -2,6 +2,7 @@ import { z } from '../../openapi/zod.js';
 import {
   ProjectIdParamSchema,
   ProjectPermissionsSchema,
+  ProjectScanSummarySchema,
   ProjectSortSchema,
 } from '../project/project.schemas.js';
 
@@ -25,6 +26,10 @@ export const SharedProjectResponseSchema = z.object({
   updatedAt: z.iso.datetime(),
   status: SharedProjectStatusSchema,
   permissions: ProjectPermissionsSchema,
+});
+
+export const SharedProjectDetailResponseSchema = SharedProjectResponseSchema.extend({
+  scans: z.array(ProjectScanSummarySchema),
 });
 
 export const SharedProjectListResponseSchema = z.object({
@@ -59,6 +64,7 @@ export const ListSharedProjectsQuerySchema = z
 export const SharedProjectIdParamSchema = ProjectIdParamSchema;
 
 export type SharedProjectResponse = z.infer<typeof SharedProjectResponseSchema>;
+export type SharedProjectDetailResponse = z.infer<typeof SharedProjectDetailResponseSchema>;
 export type SharedProjectListResponse = z.infer<typeof SharedProjectListResponseSchema>;
 export type SharedProjectRemoveResponse = z.infer<typeof SharedProjectRemoveResponseSchema>;
 export type ListSharedProjectsQuery = z.infer<typeof ListSharedProjectsQuerySchema>;

@@ -1,6 +1,7 @@
 import { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
 
 import { ErrorResponseSchema } from '../../common/schemas/error.js';
+import { IdempotencyKeyHeaderSchema } from '../../common/schemas/sync-headers.js';
 import { ProjectIdParamSchema } from '../project/project.schemas.js';
 import { ScanIdParamSchema } from '../scan/scan.schemas.js';
 import {
@@ -127,7 +128,8 @@ const errorResponses = {
     },
   },
   403: {
-    description: 'Only the project owner can manage sharing',
+    description:
+      "The caller lacks permission: the current user is not the project owner, or the current user's email does not match the invited email",
     headers: rateLimitHeaders,
     content: {
       'application/json': {
@@ -137,7 +139,7 @@ const errorResponses = {
   },
   404: {
     description:
-      'The project, scan, invitation, share link, or viewer access is missing, deleted, or inaccessible',
+      'The project, scan, invitation, share link, or viewer access is missing, deleted, or inaccessible, or the shared project/scan was revoked or deleted before the current user acted (SHARE_NO_LONGER_AVAILABLE)',
     headers: rateLimitHeaders,
     content: {
       'application/json': {
@@ -147,7 +149,7 @@ const errorResponses = {
   },
   409: {
     description:
-      'The invitation, share link, or access state is final: already sent to this email, already accepted, expired, revoked, declined, already has access, or the resource is not shareable',
+      'The invitation, share link, or access state is final: already sent to this email, already accepted, expired, declined, already has access, or the resource is not shareable',
     headers: rateLimitHeaders,
     content: {
       'application/json': {
@@ -190,10 +192,11 @@ shareOpenApiRegistry.registerPath({
   tags: ['Shares'],
   summary: 'Create an invitation link for a project',
   description:
-    'Owner only. The project must have at least one scan with an uploaded model before it can be shared. Sends the invitation email to the recipient.',
+    'Owner only. Requires Idempotency-Key. The project must have at least one scan with an uploaded model before it can be shared. The email is sent only after the first successful commit and is not re-sent on replay.',
   security: [{ [bearerAuth.name]: [] }],
   request: {
     params: ProjectIdParamSchema,
+    headers: IdempotencyKeyHeaderSchema,
     body: {
       required: true,
       content: {
@@ -248,8 +251,8 @@ shareOpenApiRegistry.registerPath({
   tags: ['Shares'],
   summary: 'Preview an invitation or share link',
   description:
-    'No authentication is required. Resolves either an invitation or a generic share link for a project or scan. When a valid Bearer token is supplied, the response includes whether the current user already has access.',
-  security: [{ [bearerAuth.name]: [] }, {}],
+    'Requires a valid Bearer token. Resolves either an invitation or a generic share link for a project or scan and reports whether the current user already has access. For a per-recipient invitation, a preview whose email does not match the invited email returns 403.',
+  security: [{ [bearerAuth.name]: [] }],
   request: {
     params: InvitationTokenParamSchema,
   },
@@ -264,6 +267,8 @@ shareOpenApiRegistry.registerPath({
       },
     },
     400: errorResponses[400],
+    401: errorResponses[401],
+    403: errorResponses[403],
     404: errorResponses[404],
     429: errorResponses[429],
     500: errorResponses[500],

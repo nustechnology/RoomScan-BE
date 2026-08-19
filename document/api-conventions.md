@@ -37,6 +37,8 @@
   `DELETE /api/v1/shared-projects/:projectId`; the same read-only surface is
   available for scan-level sharing at `GET /api/v1/shared-scans`,
   `GET /api/v1/shared-scans/:scanId`, and `DELETE /api/v1/shared-scans/:scanId`.
+- Offline synchronization pulls visible changes and readiness at
+  `GET /api/v1/sync/changes` and `GET /api/v1/sync/status`.
 - Swagger UI remains at `/api-doc`; raw OpenAPI is `/api-doc.json`.
 - The Apple App Site Association file is served without authentication at the
   host root `GET /.well-known/apple-app-site-association` with content type
@@ -109,7 +111,8 @@ Allowed and rejected limited requests expose draft-8 `RateLimit` and
 ```
 
 Rate-limit responses never expose the raw client IP, token, unhashed store key
-or store details. Browser clients may read the three headers through CORS.
+or store details. Browser clients may read those headers and resource `ETag`
+through CORS.
 
 ## Apple authentication
 
@@ -201,6 +204,128 @@ stale token.
 The same per-IP rate-limit headers (`RateLimit`, `RateLimit-Policy`, and
 `Retry-After` on 429) apply to this endpoint.
 
+## Offline mutation contract
+
+The following authenticated creates require `Idempotency-Key`:
+
+- `POST /api/v1/projects`
+- `POST /api/v1/projects/:projectId/scans`
+- `POST /api/v1/scans/:scanId/notes`
+- `POST /api/v1/scans/:scanId/assets/upload-sessions`
+- `POST /api/v1/projects/:projectId/invitations`
+
+The key is trimmed, must contain 1–128 non-control characters, and is scoped by
+authenticated user, operation, and concrete parent. Only a SHA-256 key hash is
+stored. The canonical request hash excludes deprecated body aliases. A retry
+with the same request replays the exact committed HTTP status and JSON body;
+reuse with another validated payload returns
+`409 IDEMPOTENCY_KEY_CONFLICT`. Validation, authorization, business failures,
+and presign `503` failures do not claim the key. `clientMutationId` on Create
+Scan and body `idempotencyKey` on Create Upload Session remain deprecated
+aliases; when the header is also present the values must match. A legacy scan
+key collision never restores a deleted scan. A missing key on Project, Scan,
+Note, and Invitation creates returns `400 IDEMPOTENCY_KEY_REQUIRED`; a
+malformed key (empty after trim, over 128 characters, or containing control
+characters) returns `400 VALIDATION_ERROR`. Create Upload Session validates the
+header through the `validateRequest` middleware with `IdempotencyKeyHeaderSchema`,
+so a missing or malformed key returns `400 VALIDATION_ERROR` before the
+deprecated body alias is reconciled.
+
+Project, Scan, and Note single-resource responses include `revision` and return
+the strong `ETag: "N"` header. Project PATCH/DELETE, Scan PATCH/DELETE, and Note
+PATCH/move/DELETE require `If-Match: "N"`. Missing and malformed headers return
+`400 REVISION_REQUIRED` and `400 INVALID_REVISION`. An atomic guarded write that
+loses to a newer revision returns `409 REVISION_CONFLICT` with
+`details.currentRevision` and `details.deleted`. Delete wins over stale update;
+a stale mutation cannot clear any Project, Scan, or Note tombstone. Repeating a
+completed Owner delete still returns `204`.
+
+Revision roll-up is hierarchical: Note changes increment Note + Scan;
+Scan and ScanAsset changes increment Scan; access lifecycle changes
+increment ProjectAccess. Project rollups update `syncStatus` and
+`lastSyncedAt` without incrementing the project revision, so optimistic
+concurrency on the project resource is not invalidated by child mutations.
+Acknowledging a conflict that leaves a project fully synced increments the
+project revision, updates `lastSyncedAt`, and emits a project UPSERT sync
+change so other clients observe the status transition. A fully synced project
+updates `lastSyncedAt` after a successful mutation or conflict
+acknowledgement; a project that becomes pending/syncing/failed keeps the
+prior successful time.
+
+## Sync
+
+Both sync endpoints require Bearer authentication.
+
+`GET /api/v1/sync/changes` accepts optional `since`, optional `cursor`, and
+`limit` (default 100, maximum 500). `since` must be RFC3339 and is mutually
+exclusive with `cursor`. Without either value the API freezes a sequence
+watermark and returns the latest visible UPSERT for every active resource,
+paged stably by resource type and ID. The returned opaque cursor continues that
+snapshot and then switches the client to incremental sequence order. `since`
+returns events whose `changedAt >= since` and also switches to a cursor.
+Malformed, tampered, wrong-user, or ambiguous cursors return 400.
+
+```json
+{
+  "changes": [
+    {
+      "resourceType": "NOTE",
+      "resourceId": "b1a2c3d4-e5f6-4890-abcd-ef1234567890",
+      "operation": "UPSERT",
+      "revision": 3,
+      "syncStatus": "SYNCED",
+      "changedAt": "2026-08-17T04:00:00.000Z",
+      "cursor": "opaque-user-bound-cursor",
+      "deletedAt": null,
+      "data": {
+        "id": "b1a2c3d4-e5f6-4890-abcd-ef1234567890",
+        "scanId": "f1e2d3c4-a5b6-7890-abcd-ef1234567890",
+        "title": "Cabinet hinge",
+        "content": "Cabinet hinge is loose"
+      }
+    }
+  ],
+  "nextCursor": "opaque-user-bound-cursor"
+}
+```
+
+`resourceType` is `PROJECT | SCAN | NOTE | SCAN_ASSET | PROJECT_ACCESS`.
+DELETE items always have `data: null` and a non-null `deletedAt`. Normalized
+UPSERT data includes public identity/metadata and lifecycle timestamps, but
+never storage keys, raw idempotency keys, presigned URLs, secrets, or internal
+SQL fields. NOTE UPSERT data includes `title`, `content`, `color`,
+`position`, `orientation`, and `modelVersion`. Owners receive their project
+resources and access records. An
+active Viewer receives project resources plus only their own access record. A
+grant emits a targeted access UPSERT and current project bootstrap; revocation
+emits a self-access tombstone, after which no later project event is visible to
+that Viewer.
+
+`GET /api/v1/sync/status` accepts optional `projectId` and always returns
+`{ "items": [...] }`. Without it, results include every owned or actively
+shared project; with it, an inaccessible project is hidden as
+`404 PROJECT_NOT_FOUND`. Counts classify active scans by required MODEL asset
+lifecycle. `requiredAssetsUploaded` is true only when every active scan has an
+UPLOADED MODEL; it is also true for zero scans. Status priority is `CONFLICT >
+FAILED > SYNCING > PENDING > SYNCED`.
+
+```json
+{
+  "items": [
+    {
+      "projectId": "a1b2c3d4-e5f6-4890-abcd-ef1234567890",
+      "syncStatus": "PENDING",
+      "pendingCount": 1,
+      "syncingCount": 0,
+      "failedCount": 0,
+      "conflictCount": 0,
+      "lastSyncedAt": null,
+      "requiredAssetsUploaded": false
+    }
+  ]
+}
+```
+
 ## Projects
 
 Every project endpoint requires a valid Bearer access token in the
@@ -242,7 +367,9 @@ Project response:
   ],
   "sharedCount": 0,
   "thumbnail": null,
-  "syncStatus": null,
+  "syncStatus": "SYNCED",
+  "revision": 1,
+  "lastSyncedAt": "2026-07-29T10:00:00.000Z",
   "createdAt": "2026-07-29T10:00:00.000Z",
   "updatedAt": "2026-07-29T10:00:00.000Z",
   "permissions": {
@@ -261,8 +388,9 @@ Project response:
 `scanCount` counts active (non-deleted) scans in the project, and `scans` lists
 those scans ordered by newest `createdAt` first with `id`, `name`,
 `description`, `thumbnail`, `noteCount`, `assetStatus`, `syncStatus`, and
-`createdAt`. `thumbnail` and `syncStatus` are `null` until the downstream
-thumbnail and sync persistence features are present.
+`createdAt`. `thumbnail` remains nullable. Project `syncStatus` and
+`lastSyncedAt` are persisted readiness fields; a new zero-scan project starts
+`SYNCED`.
 
 The owned-project list supports case-insensitive name search and page-based
 pagination:
@@ -349,6 +477,7 @@ Scan response:
   "assetStatus": "NONE",
   "syncStatus": "PENDING",
   "modelVersion": 1,
+  "revision": 1,
   "createdAt": "2026-07-29T10:00:00.000Z",
   "updatedAt": "2026-07-29T10:00:00.000Z",
   "permissions": {
@@ -380,6 +509,7 @@ descriptor, returning the scan plus `uploads`:
   "assetStatus": "NONE",
   "syncStatus": "PENDING",
   "modelVersion": 1,
+  "revision": 1,
   "createdAt": "2026-07-29T10:00:00.000Z",
   "updatedAt": "2026-07-29T10:00:00.000Z",
   "permissions": {
@@ -451,12 +581,11 @@ Authorization and deletion rules:
 - Create with a reused active `clientMutationId` in the same project returns the
   existing scan with `200` instead of creating a duplicate.
 - Reusing a `clientMutationId` that matches a soft-deleted scan in the same
-  project restores that scan (clears its `deletedAt`), applies the submitted
-  `name` and `description`, and returns the restored scan with `200` (not
-  created) instead of inserting a new row. A `clientMutationId` is unique per
-  project, so the same value in a different project creates a new scan.
-- Delete sets `deletedAt` and touches the parent project `updatedAt` in one
-  transaction.
+  project returns `409 IDEMPOTENCY_KEY_CONFLICT`; it never restores the scan.
+  A `clientMutationId` is unique per project, so the same value in a different
+  project creates a new scan.
+- Delete sets `deletedAt`, soft-deletes active notes/assets, emits descendant
+  tombstones, and rolls up the parent project in one transaction.
 - Repeating delete as the same Owner returns `204`; other users receive the
   hidden not-found response.
 
@@ -497,8 +626,10 @@ Create-session request:
   maximum (200 MB), and for
   `THUMBNAIL` assets at most the configured maximum (10 MB).
 - `checksum` and `modelVersion`: required for `MODEL` assets.
-- `idempotencyKey`: optional; a repeated create with an active, unexpired
-  session returns the existing session with `200`.
+- `Idempotency-Key` header: required. Body `idempotencyKey` is a deprecated
+  alias and must match the header if both are sent. A repeated create with an
+  active, unexpired session returns the original response without another
+  active session.
 
 Asset metadata response fields: `assetId`, `scanId`, `assetType`, `status`, and
 for the download response `downloadUrl` plus `downloadUrlExpiresAt`. The target
@@ -512,6 +643,8 @@ Behavior and rules:
 - Completed uploads are idempotent: repeating `complete` returns the stored
   asset without creating duplicates and, for a model, re-applies the parent scan
   status update so a retry recovers from an earlier failed scan update.
+- A completed MODEL cannot be reset or overwritten directly; another session
+  request returns `409 MODEL_ALREADY_COMPLETED`.
 - Completed model uploads mark the scan `assetStatus = UPLOADED` and
   `syncStatus = SYNCED`; a reported failure marks the scan `FAILED`. Thumbnail
   completion leaves the scan status unchanged but persists a display URL onto
@@ -532,8 +665,8 @@ Behavior and rules:
 
 Error behavior:
 
-- `400 VALIDATION_ERROR`: invalid assetType, content type, size, checksum, or
-  model version.
+- `400 VALIDATION_ERROR`: invalid assetType, content type, size, checksum,
+  model version, or a missing/malformed `Idempotency-Key` header.
 - `401 UNAUTHORIZED`: missing/invalid access token or missing current user.
 - `404 SCAN_NOT_FOUND`: parent scan/project missing, deleted, or inaccessible.
 - `404 ASSET_NOT_FOUND`: asset record missing or inaccessible.
@@ -574,6 +707,7 @@ Note response:
   "position": { "x": 1.5, "y": -2, "z": 3.25 },
   "orientation": { "x": 0, "y": 0, "z": 1 },
   "modelVersion": "1",
+  "revision": 1,
   "creator": {
     "id": "eb5d278f-c857-45c7-887d-7be65288cb75",
     "email": "owner@example.com"
@@ -629,7 +763,8 @@ Authorization and behavior rules:
 - A note cannot exist outside a scan. Deleting a scan or project makes its notes
   inaccessible: scan endpoints filter notes on the non-deleted scan, and the
   `notes` foreign key cascades when a scan row is physically removed.
-- Deleting a note is a physical delete that returns `204`.
+- Deleting a note sets `deletedAt`, increments its revision, writes a tombstone,
+  and returns `204`; stale updates cannot restore it.
 
 Error behavior:
 
@@ -676,7 +811,7 @@ its assets without granting project-level access.
 | `POST`   | `/api/v1/projects/:projectId/invitations`              | Create a project invitation for an email; Owner only; `201`       |
 | `POST`   | `/api/v1/scans/:scanId/invitations`                    | Create a scan invitation for an email; Owner only; `201`          |
 | `POST`   | `/api/v1/invitations/:invitationId/resend`             | Resend a pending invitation; Owner only; `200`                    |
-| `GET`    | `/api/v1/invitations/:token`                           | Preview an invitation or share link; anonymous or optional Bearer |
+| `GET`    | `/api/v1/invitations/:token`                           | Preview an invitation or share link; requires authentication      |
 | `POST`   | `/api/v1/invitations/:token/accept`                    | Accept and gain Viewer access; `200`                              |
 | `POST`   | `/api/v1/invitations/:token/decline`                   | Decline an invitation for the current user; `200`                 |
 | `DELETE` | `/api/v1/invitations/:invitationId`                    | Revoke a pending invitation; Owner only; `200`                    |
@@ -704,7 +839,7 @@ days). Create response `201`:
 ```json
 {
   "invitationId": "b1a2c3d4-e5f6-4890-abcd-ef1234567890",
-  "invitationUrl": "https://invite.roomscan.dev/invitations/AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-ab",
+  "invitationUrl": "https://invite.roomscan.dev/invitations/AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-ab?scope=project",
   "recipientEmail": "recipient@example.com",
   "expiresAt": "2026-08-05T10:00:00.000Z",
   "status": "PENDING",
@@ -712,9 +847,14 @@ days). Create response `201`:
 }
 ```
 
-`invitationUrl` is `{INVITATION_BASE_URL}/invitations/{rawToken}`. Creating the
-invitation sends an AC5-style invitation email to `recipientEmail`; a mail
-delivery failure is logged and does not fail the request.
+`invitationUrl` is `{INVITATION_BASE_URL}/invitations/{rawToken}?scope={scope}`,
+where `scope` is `project` or `scan`. The `scope` query parameter is an
+informational hint only that lets a client (such as the mobile universal-link
+parser) know whether the link targets a project or a scan before it previews the
+token; it is never trusted server-side, and the preview, accept, and decline
+endpoints always resolve the scope from the token. Creating the invitation
+sends an AC5-style invitation email to `recipientEmail`; a mail delivery failure
+is logged and does not fail the request.
 
 Resend `200` has the same shape as the create response. Resending a pending
 invitation rotates the token (the previous link stops working), extends
@@ -725,11 +865,10 @@ Preview `200` resolves either an invitation or a generic share link and returns
 a `type` (`invitation` or `share-link`) and `scope` (`project` or `scan`) plus
 the matching entity (`project` or `scan`); the other entity is `null`. An
 invitation adds `sentAt` and its lifecycle `status`; a share link has no
-recipient and reports `ACTIVE`, `EXPIRED`, or `REVOKED`. The invitation
-`recipientEmail` is submitted only when the caller is authorized (a valid Bearer
-token is supplied); anonymous previews omit it.
-`hasAccess` is present only when a valid Bearer token is supplied and reports
-whether that user already has active access. A project-scope invitation preview:
+recipient and reports `ACTIVE`, `EXPIRED`, or `REVOKED`. The preview endpoint
+requires a valid Bearer access token. The invitation `recipientEmail` is always
+submitted, and `hasAccess` reports whether that user already has active access. A
+project-scope invitation preview:
 
 ```json
 {
@@ -739,7 +878,12 @@ whether that user already has active access. A project-scope invitation preview:
     "id": "a1b2c3d4-e5f6-4890-abcd-ef1234567890",
     "name": "District 2 Apartment",
     "description": null,
-    "thumbnail": null
+    "thumbnail": null,
+    "owner": {
+      "id": "eb5d278f-c857-45c7-887d-7be65288cb75",
+      "email": "owner@example.com"
+    },
+    "scanCount": 4
   },
   "scan": null,
   "status": "PENDING",
@@ -750,8 +894,30 @@ whether that user already has active access. A project-scope invitation preview:
 }
 ```
 
-`status` is `PENDING`, `EXPIRED`, `ACCEPTED`, `DECLINED`, or `REVOKED` for
-invitations and `ACTIVE`, `EXPIRED`, or `REVOKED` for share links.
+For a project-scope link, `project` includes the Owner info (`owner.id`, nullable
+`owner.email`), `scanCount` (number of active, non-deleted scans), and `thumbnail`
+set to the thumbnail of the project's most recently created scan (nullable). The
+`owner` and `scanCount` fields are always present for a project-scope link and are
+absent for a scan-scope link, where `project` is `null`.
+
+For a scan-scope link, `scan` includes `id`, `projectId`, `name`, `description`,
+`thumbnail`, `creator` (the parent project Owner: `id` and nullable `email`), and
+`noteCount` (number of active notes on the scan). `project` is `null` for a
+scan-scope link.
+
+`status` is `PENDING`, `EXPIRED`, `ACCEPTED`, or `DECLINED` for invitation
+previews and `ACTIVE` or `EXPIRED` for share-link previews. When the source was
+revoked or deleted before the Viewer previews, accepts, or declines, preview,
+accept, and decline instead return `404 SHARE_NO_LONGER_AVAILABLE` with the
+message "This project/scan is no longer available." An unknown token or one that
+resolves to no record returns `404 INVITATION_NOT_FOUND` (or
+`SHARE_LINK_NOT_FOUND` for share links).
+
+Per-recipient invitations are restricted to the invited recipient: when the
+current user's email does not match the invited email (case-insensitive,
+null-safe), preview, accept, or decline returns `403 INVITATION_NOT_FOR_USER`
+with the message "You do not have permission to access this item." Generic share
+links (which have no recipient) are not subject to this check.
 
 Accept `200` also discriminates on `type` and `scope` and returns the matching
 entity. A project-scope invitation accept:
@@ -781,8 +947,8 @@ entity. A project-scope invitation accept:
 ```
 
 A scan-scope accept returns the scan entity (`id`, `projectId`, `name`,
-`description`, `thumbnail`, `creator`, `ownerId`) with `project` set to `null`,
-and a share-link accept reports `shareLinkId` instead of `invitationId`.
+`description`, `thumbnail`, `noteCount`, `creator`, `ownerId`) with `project` set
+to `null`, and a share-link accept reports `shareLinkId` instead of `invitationId`.
 
 Decline `200`:
 
@@ -820,6 +986,7 @@ List shares `200`:
   "viewers": [
     {
       "userId": "f1a2b3c4-d5e6-7890-abcd-ef1234567890",
+      "revision": 1,
       "recipientUser": {
         "id": "f1a2b3c4-d5e6-7890-abcd-ef1234567890",
         "email": "recipient@example.com"
@@ -833,7 +1000,7 @@ List shares `200`:
 `pendingInvitations` includes every `PENDING` invitation (labelled `EXPIRED`
 once past `expiresAt`) so the owner can still revoke or resend stale links.
 `viewers` lists active (`revokedAt` null) Viewer access records with the
-recipient and the date access was granted.
+recipient, current access revision, and the date access was granted.
 
 Revoke Viewer access `200`:
 
@@ -841,6 +1008,7 @@ Revoke Viewer access `200`:
 {
   "projectId": "a1b2c3d4-e5f6-4890-abcd-ef1234567890",
   "userId": "f1a2b3c4-d5e6-7890-abcd-ef1234567890",
+  "revision": 2,
   "revokedAt": "2026-07-29T10:00:00.000Z"
 }
 ```
@@ -871,15 +1039,17 @@ INVITATION_ALREADY_SENT`. Re-inviting an email whose earlier invitation is
   `409` instead of creating a second pending link.
 - Invitations are per-recipient: the first acceptance marks the invitation
   `ACCEPTED`; an already accepted or declined invitation cannot be accepted
-  again. Acceptance is open (any signed-in user with the link can accept)
-  because Apple Sign-In may deliver a private-relay email different from the
-  invited address.
+  again. Previewing, accepting, or declining a per-recipient invitation requires
+  the current user's email to match the invited email; otherwise the endpoint
+  returns `403 INVITATION_NOT_FOR_USER`.
 - An invitation can be revoked while pending; revocation is idempotent. Expired,
   accepted, and declined invitations cannot be revoked.
 - Resend requires a pending, unexpired invitation; it rotates the token and
   re-sends the email. Resend works for both project and scan invitations and
   uses the matching email template.
-- Expired and revoked invitations cannot be accepted or declined.
+- Expired and revoked invitations cannot be accepted or declined. Previewing,
+  accepting, or declining a revoked invitation or share link, or one whose
+  project or scan was deleted, returns `404 SHARE_NO_LONGER_AVAILABLE`.
 - A generic share link has no recipient and no `ACCEPTED`/`DECLINED` lifecycle;
   acceptance creates access without changing the link, so it remains usable by
   other users until it expires or the Owner revokes it. Revoking a link stops
@@ -902,7 +1072,7 @@ Share-link create `201`:
 ```json
 {
   "shareLinkId": "c0ffee00-0000-4000-8000-0000000000aa",
-  "shareLinkUrl": "https://invite.roomscan.dev/invitations/AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-ab",
+  "shareLinkUrl": "https://invite.roomscan.dev/invitations/AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-ab?scope=project",
   "scope": "project",
   "expiresAt": "2026-08-05T10:00:00.000Z"
 }
@@ -911,8 +1081,10 @@ Share-link create `201`:
 The share link list returns `{ "items": [{ "shareLinkId", "status": "ACTIVE",
 "expiresAt", "createdAt" }] }`; revoked and expired links are omitted. Revoking
 a share link returns `{ "shareLinkId", "status": "REVOKED", "revokedAt" }` and
-is idempotent. `shareLinkUrl` is `{INVITATION_BASE_URL}/invitations/{rawToken}`,
-the same token namespace as invitations.
+is idempotent. `shareLinkUrl` is `{INVITATION_BASE_URL}/invitations/{rawToken}?scope={scope}`
+(the same scope hint as invitations, where `scope` is `project` or `scan`, used
+only as a client-side hint and never trusted server-side), and shares the same
+token namespace as invitations.
 
 Validation rules:
 
@@ -927,14 +1099,19 @@ Error behavior:
 
 - `400 VALIDATION_ERROR`: malformed token, invalid body, or invalid path/query.
 - `401 UNAUTHORIZED`: missing/invalid access token where authentication is
-  required (accept, decline, and all Owner-only endpoints).
+  required (preview, accept, decline, and all Owner-only endpoints).
 - `403 NOT_OWNER`: a non-owner attempts share management.
+- `403 INVITATION_NOT_FOR_USER`: an authenticated user's email does not match the
+  invited email (per-recipient invitations only); the caller lacks permission.
 - `404 PROJECT_NOT_FOUND`: project missing, deleted, or inaccessible.
 - `404 SCAN_NOT_FOUND`: scan missing, deleted, or inaccessible.
 - `404 INVITATION_NOT_FOUND`: unknown token or invitation, or the invitation's
   project or scan was deleted.
 - `404 SHARE_LINK_NOT_FOUND`: unknown share-link token or id, or its resource
   was deleted.
+- `404 SHARE_NO_LONGER_AVAILABLE`: the shared project or scan was revoked or
+  deleted before the current user previewed, accepted, or declined it; the link
+  is unusable.
 - `404 ACCESS_NOT_FOUND`: no access record exists for the user being unshared.
 - `409 INVITATION_ALREADY_SENT`: a pending invitation already targets this email.
 - `409 INVITATION_ALREADY_ACCEPTED`: the invitation was already accepted.
@@ -945,7 +1122,6 @@ Error behavior:
 - `409 CANNOT_ACCEPT_OWN_INVITATION`: the resource Owner acts on their own link.
 - `409 PROJECT_NOT_SHAREABLE`: the project has no uploaded scan model yet.
 - `409 SCAN_NOT_SHAREABLE`: the scan has no uploaded model yet.
-- `409 SHARE_LINK_REVOKED`: the share link was revoked.
 - `409 SHARE_LINK_EXPIRED`: the share link is past its expiry.
 - `429 RATE_LIMIT_EXCEEDED`: API quota exceeded.
 - `500 INTERNAL_SERVER_ERROR`: unexpected failure without Prisma, SQL, token, or
@@ -965,7 +1141,8 @@ the Owner, and other Viewers are never affected.
 | `GET`    | `/api/v1/shared-projects/:projectId` | Get shared project detail; active Viewer only         |
 | `DELETE` | `/api/v1/shared-projects/:projectId` | Remove a project from the current user's list         |
 
-Shared project item (list and detail share the same shape):
+Shared project item (list and detail share the same shape, except the detail also
+returns `scans`):
 
 ```json
 {
@@ -990,6 +1167,12 @@ Shared project item (list and detail share the same shape):
   }
 }
 ```
+
+`GET /api/v1/shared-projects/:projectId` additionally returns the project's
+active scans ordered by newest `createdAt` first, with the same `scans` array
+shape (`id`, `name`, `description`, `thumbnail`, `noteCount`, `assetStatus`,
+`syncStatus`, `createdAt`) as the canonical project detail. The Shared With Me
+list response omits `scans` to keep each list item lightweight.
 
 `owner.email` is nullable. `scanCount` counts active (non-deleted) scans in the
 project. `thumbnail` is `null` until the thumbnail persistence feature is
@@ -1063,7 +1246,8 @@ Business rules:
   project can no longer be opened.
 - Removing a project is a Viewer-only self-service action: it sets `revokedAt`
   on the current user's access row only, never the Owner's project, and never
-  other Viewers' access.
+  other Viewers' access. The access revision, project revision, Owner event,
+  and targeted self-access tombstone commit in the same transaction.
 - Removing an entry that is not in Shared With Me (already removed, Owner-revoked,
   or never shared) returns `409`.
 

@@ -19,12 +19,13 @@ import {
   SharedProjectNotInListError,
 } from '../src/modules/shared-projects/shared-projects.errors.js';
 import {
+  SharedProjectDetailResponseSchema,
   SharedProjectListResponseSchema,
   SharedProjectRemoveResponseSchema,
-  SharedProjectResponseSchema,
 } from '../src/modules/shared-projects/shared-projects.schemas.js';
 import type { SharedProjectsService } from '../src/modules/shared-projects/shared-projects.service.js';
 import type { SharedScansService } from '../src/modules/shared-scans/shared-scans.service.js';
+import type { SyncService } from '../src/modules/sync/sync.service.js';
 import type { NoteService } from '../src/modules/note/note.service.js';
 import type { ProjectService } from '../src/modules/project/project.service.js';
 import type { ScanService } from '../src/modules/scan/scan.service.js';
@@ -54,6 +55,7 @@ const config: AppConfig = {
   appleClientId: 'com.example.roomscan',
   accessTokenSecret: ACCESS_SECRET,
   refreshTokenSecret: 'refresh-secret-that-is-at-least-32-characters',
+  syncCryptoKey: 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=',
   accessTokenTtlSeconds: 3600,
   refreshTokenTtlSeconds: 2_592_000,
   localTestAuthEnabled: false,
@@ -176,6 +178,10 @@ describe('Shared With Me HTTP endpoints', () => {
     detail: vi.fn(),
     remove: vi.fn(),
   } as unknown as SharedScansService;
+  const syncService = {
+    getChanges: vi.fn(),
+    getStatus: vi.fn(),
+  } as unknown as SyncService;
   const app = createApp({
     config,
     database,
@@ -190,6 +196,7 @@ describe('Shared With Me HTTP endpoints', () => {
     shareLinkService,
     sharedProjectsService,
     sharedScansService,
+    syncService,
     accessTokenVerifier,
     currentUserRepository,
     rateLimiters,
@@ -235,6 +242,18 @@ describe('Shared With Me HTTP endpoints', () => {
       thumbnail: null,
       updatedAt: NOW.toISOString(),
       status: 'ACTIVE',
+      scans: [
+        {
+          id: 'f1e2d3c4-a5b6-7890-abcd-ef1234567890',
+          name: 'Living Room',
+          description: null,
+          thumbnail: null,
+          noteCount: 3,
+          assetStatus: 'UPLOADED',
+          syncStatus: 'SYNCED',
+          createdAt: NOW.toISOString(),
+        },
+      ],
       permissions: {
         role: 'VIEWER',
         canView: true,
@@ -306,9 +325,10 @@ describe('Shared With Me HTTP endpoints', () => {
         .set('Authorization', `Bearer ${viewerToken}`)
         .expect(200);
 
-      const body = SharedProjectResponseSchema.parse(response.body as unknown);
+      const body = SharedProjectDetailResponseSchema.parse(response.body as unknown);
       expect(body.id).toBe(PROJECT_ID);
       expect(body.status).toBe('ACTIVE');
+      expect(body.scans).toHaveLength(1);
       expect(detail).toHaveBeenCalledWith(USER_VIEWER, PROJECT_ID);
     });
 

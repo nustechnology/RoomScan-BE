@@ -2,19 +2,21 @@ import { Router } from 'express';
 
 import { AppError } from '../../common/errors/app-error.js';
 import {
-  authenticate,
-  getUserId,
-  optionalAuthenticate,
-} from '../../common/middleware/authenticate.js';
+  idempotencyErrorToAppError,
+  resolveIdempotencyKey,
+} from '../../common/idempotency/idempotency.js';
 import type {
   AccessTokenVerifier,
   CurrentUserRepository,
 } from '../../common/middleware/authenticate.js';
+import { authenticate, getUserId } from '../../common/middleware/authenticate.js';
 import { validateRequest } from '../../common/middleware/validate-request.js';
+import { IdempotencyKeyHeaderSchema } from '../../common/schemas/sync-headers.js';
 import { ProjectNotFoundError } from '../project/project.errors.js';
 import { ProjectIdParamSchema, type ProjectIdParam } from '../project/project.schemas.js';
 import { ScanNotFoundError } from '../scan/scan.errors.js';
 import { ScanIdParamSchema, type ScanIdParam } from '../scan/scan.schemas.js';
+import type { ShareLinkService } from './share-link.service.js';
 import {
   AccessAlreadyExistsError,
   CannotAcceptOwnInvitationError,
@@ -22,6 +24,7 @@ import {
   InvitationAlreadySentError,
   InvitationDeclinedError,
   InvitationExpiredError,
+  InvitationNotForUserError,
   InvitationNotFoundError,
   InvitationRevokedError,
   NotOwnerError,
@@ -29,10 +32,9 @@ import {
   ScanNotShareableError,
   ShareLinkExpiredError,
   ShareLinkNotFoundError,
-  ShareLinkRevokedError,
+  ShareNoLongerAvailableError,
   ViewerAccessNotFoundError,
 } from './share.errors.js';
-import type { ShareLinkService } from './share-link.service.js';
 import {
   InvitationAcceptResponseSchema,
   InvitationCreateBodySchema,
@@ -43,23 +45,23 @@ import {
   InvitationResendResponseSchema,
   InvitationRevokeResponseSchema,
   InvitationTokenParamSchema,
+  ProjectShareLinkIdParamSchema,
+  ScanShareLinkIdParamSchema,
   ScanShareRevokeParamsSchema,
   ScanSharesListResponseSchema,
   ScanViewerRevokeResponseSchema,
-  ProjectShareLinkIdParamSchema,
-  ScanShareLinkIdParamSchema,
   ShareLinkCreateResponseSchema,
   ShareLinkListResponseSchema,
   ShareLinkRevokeResponseSchema,
-  SharesListResponseSchema,
   ShareRevokeParamsSchema,
+  SharesListResponseSchema,
   ViewerRevokeResponseSchema,
   type InvitationCreateBody,
   type InvitationIdParam,
   type InvitationTokenParam,
   type ProjectShareLinkIdParam,
-  type ScanShareRevokeParams,
   type ScanShareLinkIdParam,
+  type ScanShareRevokeParams,
   type ShareRevokeParams,
 } from './share.schemas.js';
 import type { ShareService } from './share.service.js';
@@ -72,6 +74,8 @@ export interface ShareRouterDependencies {
 }
 
 function mapError(error: unknown): AppError | undefined {
+  const idempotencyError = idempotencyErrorToAppError(error);
+  if (idempotencyError !== undefined) return idempotencyError;
   if (error instanceof ProjectNotFoundError) {
     return new AppError({
       statusCode: 404,
@@ -91,6 +95,13 @@ function mapError(error: unknown): AppError | undefined {
       statusCode: 404,
       code: 'INVITATION_NOT_FOUND',
       message: 'Invitation was not found',
+    });
+  }
+  if (error instanceof ShareNoLongerAvailableError) {
+    return new AppError({
+      statusCode: 404,
+      code: 'SHARE_NO_LONGER_AVAILABLE',
+      message: 'This project/scan is no longer available.',
     });
   }
   if (error instanceof ShareLinkNotFoundError) {
@@ -149,6 +160,13 @@ function mapError(error: unknown): AppError | undefined {
       message: 'Invitation has already been declined',
     });
   }
+  if (error instanceof InvitationNotForUserError) {
+    return new AppError({
+      statusCode: 403,
+      code: 'INVITATION_NOT_FOR_USER',
+      message: 'You do not have permission to access this item',
+    });
+  }
   if (error instanceof AccessAlreadyExistsError) {
     return new AppError({
       statusCode: 409,
@@ -177,13 +195,6 @@ function mapError(error: unknown): AppError | undefined {
       message: 'Scan is not ready to be shared',
     });
   }
-  if (error instanceof ShareLinkRevokedError) {
-    return new AppError({
-      statusCode: 409,
-      code: 'SHARE_LINK_REVOKED',
-      message: 'Share link has been revoked',
-    });
-  }
   if (error instanceof ShareLinkExpiredError) {
     return new AppError({
       statusCode: 409,
@@ -202,28 +213,40 @@ export function createShareRouter({
 }: ShareRouterDependencies): Router {
   const router = Router();
   const requireAuth = authenticate(accessTokenVerifier, currentUserRepository);
-  const requireOptionalAuth = optionalAuthenticate(accessTokenVerifier, currentUserRepository);
 
   router.post(
     '/projects/:projectId/invitations',
     requireAuth,
-    validateRequest({ body: InvitationCreateBodySchema, params: ProjectIdParamSchema }),
+    validateRequest({
+      body: InvitationCreateBodySchema,
+      params: ProjectIdParamSchema,
+      headers: IdempotencyKeyHeaderSchema,
+    }),
     async (request, response, next) => {
       try {
         const userId = getUserId(request);
-        const { body, params } = response.locals.validated as {
+        const { body, params, headers } = response.locals.validated as {
           body: InvitationCreateBody;
           params: ProjectIdParam;
+          headers: { 'Idempotency-Key': string };
         };
-        const result = await shareService.createInvitation(userId, params.projectId, {
+        const key = resolveIdempotencyKey(headers['Idempotency-Key']);
+        const input = {
           recipientEmail: body.recipientEmail,
           ...(body.expiresInSeconds === undefined
             ? {}
             : { expiresInSeconds: body.expiresInSeconds }),
-        });
-        const responseBody = InvitationCreateResponseSchema.parse(result);
+        };
+        const result =
+          typeof shareService.createInvitationIdempotently === 'function'
+            ? await shareService.createInvitationIdempotently(userId, params.projectId, input, key)
+            : {
+                body: await shareService.createInvitation(userId, params.projectId, input),
+                statusCode: 201,
+              };
+        const responseBody = InvitationCreateResponseSchema.parse(result.body);
 
-        response.status(201).json(responseBody);
+        response.status(result.statusCode).json(responseBody);
       } catch (error) {
         next(mapError(error) ?? error);
       }
@@ -276,13 +299,16 @@ export function createShareRouter({
 
   router.get(
     '/invitations/:token',
-    requireOptionalAuth,
+    requireAuth,
     validateRequest({ params: InvitationTokenParamSchema }),
     async (request, response, next) => {
       try {
         const { params } = response.locals.validated as { params: InvitationTokenParam };
-        const currentUserId = request.locals?.currentUser?.id;
-        const result = await shareService.previewInvitation(params.token, currentUserId);
+        const currentUser = request.locals!.currentUser;
+        const result = await shareService.previewInvitation(params.token, {
+          id: currentUser.id,
+          email: currentUser.email,
+        });
         const responseBody = InvitationPreviewResponseSchema.parse(result);
 
         response.status(200).json(responseBody);
@@ -298,9 +324,12 @@ export function createShareRouter({
     validateRequest({ params: InvitationTokenParamSchema }),
     async (request, response, next) => {
       try {
-        const userId = getUserId(request);
+        const currentUser = request.locals!.currentUser;
         const { params } = response.locals.validated as { params: InvitationTokenParam };
-        const result = await shareService.acceptInvitation(userId, params.token);
+        const result = await shareService.acceptInvitation(
+          { id: currentUser.id, email: currentUser.email },
+          params.token,
+        );
         const responseBody = InvitationAcceptResponseSchema.parse(result);
 
         response.status(200).json(responseBody);
@@ -316,9 +345,12 @@ export function createShareRouter({
     validateRequest({ params: InvitationTokenParamSchema }),
     async (request, response, next) => {
       try {
-        const userId = getUserId(request);
+        const currentUser = request.locals!.currentUser;
         const { params } = response.locals.validated as { params: InvitationTokenParam };
-        const result = await shareService.declineInvitation(userId, params.token);
+        const result = await shareService.declineInvitation(
+          { id: currentUser.id, email: currentUser.email },
+          params.token,
+        );
         const responseBody = InvitationDeclineResponseSchema.parse(result);
 
         response.status(200).json(responseBody);

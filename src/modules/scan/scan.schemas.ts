@@ -33,6 +33,7 @@ export const ScanResponseSchema = z.object({
   assetStatus: ScanAssetStatusSchema,
   syncStatus: ScanSyncStatusSchema,
   modelVersion: z.number().int().positive(),
+  revision: z.number().int().positive().default(1),
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
   permissions: ScanPermissionsSchema,
