@@ -1,4 +1,8 @@
-import type { ProjectSort } from '../project/project.types.js';
+import type {
+  ProjectScanSummary,
+  ProjectScanSummaryResult,
+  ProjectSort,
+} from '../project/project.types.js';
 
 export type SharedProjectStatus =
   'ACTIVE' | 'REVOKED' | 'PROJECT_DELETED' | 'TEMPORARILY_UNAVAILABLE';
@@ -40,6 +44,14 @@ export interface SharedProjectResult {
   };
 }
 
+export interface SharedProjectDetailRecord extends SharedProjectRecord {
+  scans: ProjectScanSummary[];
+}
+
+export interface SharedProjectDetailResult extends SharedProjectResult {
+  scans: ProjectScanSummaryResult[];
+}
+
 export interface SharedProjectsListOptions {
   search?: string;
   page: number;
@@ -67,7 +79,7 @@ export interface SharedProjectsRepository {
     userId: string,
     options: SharedProjectsListOptions,
   ): Promise<{ items: SharedProjectRecord[]; total: number }>;
-  findSharedForUser(projectId: string, userId: string): Promise<SharedProjectRecord | null>;
+  findSharedForUser(projectId: string, userId: string): Promise<SharedProjectDetailRecord | null>;
   findAccessStatus(projectId: string, userId: string): Promise<{ revokedAt: Date | null } | null>;
   findProjectOwner(projectId: string): Promise<string | null>;
   removeFromShared(projectId: string, userId: string, removedAt: Date): Promise<boolean>;

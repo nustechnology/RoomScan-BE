@@ -116,7 +116,22 @@ describe('PrismaSharedProjectsRepository', () => {
     projectAccess.findFirst.mockResolvedValue(
       createAccessRow({
         revokedAt: NOW,
-        project: { ...createAccessRow().project, deletedAt: null },
+        project: {
+          ...createAccessRow().project,
+          deletedAt: null,
+          scans: [
+            {
+              id: 'f1e2d3c4-a5b6-7890-abcd-ef1234567890',
+              name: 'Living Room',
+              description: null,
+              thumbnail: null,
+              assetStatus: 'UPLOADED',
+              syncStatus: 'SYNCED',
+              createdAt: NOW,
+              _count: { notes: 3 },
+            },
+          ],
+        },
       }),
     );
 
@@ -132,6 +147,18 @@ describe('PrismaSharedProjectsRepository', () => {
     );
     expect(result?.accessRevokedAt).toEqual(NOW);
     expect(result?.projectDeletedAt).toBeNull();
+    expect(result?.scans).toEqual([
+      {
+        id: 'f1e2d3c4-a5b6-7890-abcd-ef1234567890',
+        name: 'Living Room',
+        description: null,
+        thumbnail: null,
+        noteCount: 3,
+        assetStatus: 'UPLOADED',
+        syncStatus: 'SYNCED',
+        createdAt: NOW,
+      },
+    ]);
   });
 
   it('findSharedForUser returns null without an access record', async () => {
