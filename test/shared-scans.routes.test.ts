@@ -31,6 +31,7 @@ import type { ScanAssetService } from '../src/modules/scan-asset/scan-asset.serv
 import type { ShareService } from '../src/modules/share/share.service.js';
 import type { ShareLinkService } from '../src/modules/share/share-link.service.js';
 import type { SharedProjectsService } from '../src/modules/shared-projects/shared-projects.service.js';
+import type { SyncService } from '../src/modules/sync/sync.service.js';
 
 const ACCESS_SECRET = 'access-secret-that-is-at-least-32-characters';
 const USER_VIEWER = 'f1a2b3c4-d5e6-7890-abcd-ef1234567890';
@@ -178,6 +179,10 @@ describe('Shared With Me scan HTTP endpoints', () => {
     detail,
     remove,
   } as unknown as SharedScansService;
+  const syncService = {
+    getChanges: vi.fn(),
+    getStatus: vi.fn(),
+  } as unknown as SyncService;
   const app = createApp({
     config,
     database,
@@ -192,6 +197,7 @@ describe('Shared With Me scan HTTP endpoints', () => {
     shareLinkService,
     sharedProjectsService,
     sharedScansService,
+    syncService,
     accessTokenVerifier,
     currentUserRepository,
     rateLimiters,

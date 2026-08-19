@@ -716,22 +716,36 @@ export class PrismaShareRepository implements ShareRepository {
         return { revokedAt: access.revokedAt, revision: access.revision };
       }
 
-      await transaction.projectAccess.update({
-        where: { id: access.id },
+      const claimed = await transaction.projectAccess.updateMany({
+        where: { id: access.id, revokedAt: null },
         data: { revokedAt, revision: { increment: 1 }, updatedAt: revokedAt },
       });
+      if (claimed.count === 0) {
+        const current = await transaction.projectAccess.findUnique({
+          where: { projectId_userId: { projectId, userId } },
+          select: { revision: true, revokedAt: true },
+        });
+        return current === null
+          ? null
+          : { revokedAt: current.revokedAt as Date, revision: current.revision };
+      }
+      const updated = await transaction.projectAccess.findUnique({
+        where: { id: access.id },
+        select: { revision: true },
+      });
+      const storedRevision = updated?.revision ?? access.revision + 1;
       const change = {
         projectId,
         ownerId: access.project.ownerId,
         resourceType: 'PROJECT_ACCESS' as const,
         resourceId: access.id,
-        revision: access.revision + 1,
+        revision: storedRevision,
         deletedAt: revokedAt,
       };
       await writeDeleteChange(transaction, change);
       await writeDeleteChange(transaction, { ...change, targetUserId: userId });
       await refreshProjectRollup(transaction, projectId, revokedAt);
-      return { revokedAt, revision: access.revision + 1 };
+      return { revokedAt, revision: storedRevision };
     });
   }
 

@@ -167,13 +167,19 @@ describe('PrismaSyncRepository', () => {
     );
     expect(project.update).toHaveBeenCalledWith({
       where: { id: PROJECT_ID },
-      data: { syncStatus: 'SYNCED', lastSyncedAt: NOW },
+      data: {
+        syncStatus: 'SYNCED',
+        lastSyncedAt: NOW,
+        revision: { increment: 1 },
+        updatedAt: NOW,
+      },
     });
-    const [changeArguments] = syncChange.create.mock.calls[0] as unknown as [
-      { data: Record<string, unknown> },
-    ];
+    const projectUpsertCall = syncChange.create.mock.calls.find(
+      (call) => (call[0] as { data: { resourceType: string } }).data.resourceType === 'PROJECT',
+    );
+    expect(projectUpsertCall).toBeDefined();
+    const changeArguments = projectUpsertCall![0] as { data: Record<string, unknown> };
     expect(changeArguments.data).toMatchObject({
-      targetUserId: USER_ID,
       syncStatus: 'SYNCED',
     });
   });

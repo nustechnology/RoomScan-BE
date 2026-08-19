@@ -12,6 +12,10 @@ import type {
 } from '../../common/middleware/authenticate.js';
 import { validateRequest } from '../../common/middleware/validate-request.js';
 import {
+  IdempotencyKeyHeaderSchema,
+  IfMatchHeaderSchema,
+} from '../../common/schemas/sync-headers.js';
+import {
   parseIfMatch,
   revisionErrorToAppError,
   setRevisionEtag,
@@ -22,7 +26,7 @@ import {
   InvalidAssetRequestError,
   StorageUnavailableError,
 } from '../scan-asset/scan-asset.errors.js';
-import type { ScanAssetService } from '../scan-asset/scan-asset.service.js';
+
 import { ScanNotFoundError } from './scan.errors.js';
 import {
   CreateScanBodySchema,
@@ -31,12 +35,10 @@ import {
   ScanIdParamSchema,
   ScanListResponseSchema,
   ScanResponseSchema,
-  ScanUploadUrlSchema,
   UpdateScanBodySchema,
   type CreateScanBody,
   type ListScansQuery,
   type ScanIdParam,
-  type ScanUploadUrl,
   type UpdateScanBody,
 } from './scan.schemas.js';
 import type { ScanService } from './scan.service.js';
@@ -44,7 +46,6 @@ import type { ScanCreateInput, ScanUpdateInput } from './scan.types.js';
 
 export interface ScanRouterDependencies {
   scanService: ScanService;
-  scanAssetService: ScanAssetService;
   accessTokenVerifier: AccessTokenVerifier;
   currentUserRepository: CurrentUserRepository;
 }
@@ -87,7 +88,6 @@ function notFoundToAppError(error: unknown): AppError | undefined {
 
 export function createScanRouter({
   scanService,
-  scanAssetService,
   accessTokenVerifier,
   currentUserRepository,
 }: ScanRouterDependencies): Router {
@@ -97,13 +97,18 @@ export function createScanRouter({
   router.post(
     '/projects/:projectId/scans',
     requireAuth,
-    validateRequest({ body: CreateScanBodySchema, params: ProjectIdParamSchema }),
+    validateRequest({
+      body: CreateScanBodySchema,
+      params: ProjectIdParamSchema,
+      headers: IdempotencyKeyHeaderSchema,
+    }),
     async (request, response, next) => {
       try {
         const userId = getUserId(request);
-        const { body, params } = response.locals.validated as {
+        const { body, params, headers } = response.locals.validated as {
           body: CreateScanBody;
           params: ProjectIdParam;
+          headers: { 'Idempotency-Key': string };
         };
         const data: ScanCreateInput = {
           name: body.name,
@@ -112,131 +117,49 @@ export function createScanRouter({
             ? {}
             : { clientMutationId: body.clientMutationId }),
         };
-        const key = resolveIdempotencyKey(
-          typeof request.headers['idempotency-key'] === 'string'
-            ? request.headers['idempotency-key']
-            : undefined,
-          body.clientMutationId,
-        );
+        const key = resolveIdempotencyKey(headers['Idempotency-Key'], body.clientMutationId);
         const canonicalBody = {
           name: body.name,
           description: body.description,
           ...(body.thumbnail === undefined ? {} : { thumbnail: body.thumbnail }),
           ...(body.scanFile === undefined ? {} : { scanFile: body.scanFile }),
         };
-        if (typeof scanService.createWithUploadsIdempotently === 'function') {
-          const uploadDescriptors = [
-            ...(body.thumbnail === undefined
-              ? []
-              : [
-                  {
-                    assetType: 'THUMBNAIL' as const,
-                    contentType: body.thumbnail.contentType,
-                    sizeBytes: body.thumbnail.sizeBytes,
-                    ...(body.thumbnail.checksum === undefined
-                      ? {}
-                      : { checksum: body.thumbnail.checksum }),
-                  },
-                ]),
-            ...(body.scanFile === undefined
-              ? []
-              : [
-                  {
-                    assetType: 'MODEL' as const,
-                    contentType: body.scanFile.contentType,
-                    sizeBytes: body.scanFile.sizeBytes,
-                    checksum: body.scanFile.checksum,
-                    modelVersion: body.scanFile.modelVersion,
-                  },
-                ]),
-          ];
-          const result = await scanService.createWithUploadsIdempotently(
-            userId,
-            params.projectId,
-            data,
-            uploadDescriptors,
-            key,
-            canonicalBody,
-          );
-          const responseBody = CreateScanResponseSchema.parse(result.body);
-          setRevisionEtag(response, responseBody.revision);
-          response.status(result.statusCode).json(responseBody);
-          return;
-        }
-        const idempotent =
-          typeof scanService.createIdempotently === 'function'
-            ? await scanService.createIdempotently(
-                userId,
-                params.projectId,
-                data,
-                key,
-                canonicalBody,
-              )
-            : await scanService
-                .create(userId, params.projectId, data)
-                .then(({ scan, created }) => ({
-                  body: scan,
-                  statusCode: created ? 201 : 200,
-                  replayed: !created,
-                }));
-        const scan = idempotent.body;
-
-        const uploads: { thumbnail?: ScanUploadUrl; scanFile?: ScanUploadUrl } = {};
-        if (body.thumbnail !== undefined) {
-          const uploadInput = {
-            assetType: 'THUMBNAIL',
-            contentType: body.thumbnail.contentType,
-            sizeBytes: body.thumbnail.sizeBytes,
-            ...(body.thumbnail.checksum === undefined ? {} : { checksum: body.thumbnail.checksum }),
-          } as const;
-          const result =
-            typeof scanAssetService.createUploadSessionIdempotently === 'function'
-              ? await scanAssetService.createUploadSessionIdempotently(
-                  userId,
-                  scan.id,
-                  uploadInput,
-                  `${key.slice(0, 110)}:thumbnail`,
-                )
-              : { body: await scanAssetService.createUploadSession(userId, scan.id, uploadInput) };
-          uploads.thumbnail = ScanUploadUrlSchema.parse({
-            uploadSessionId: result.body.uploadSessionId,
-            assetId: result.body.assetId,
-            uploadUrl: result.body.uploadUrl,
-            uploadUrlExpiresAt: result.body.uploadUrlExpiresAt,
-          });
-        }
-        if (body.scanFile !== undefined) {
-          const uploadInput = {
-            assetType: 'MODEL',
-            contentType: body.scanFile.contentType,
-            sizeBytes: body.scanFile.sizeBytes,
-            checksum: body.scanFile.checksum,
-            modelVersion: body.scanFile.modelVersion,
-          } as const;
-          const result =
-            typeof scanAssetService.createUploadSessionIdempotently === 'function'
-              ? await scanAssetService.createUploadSessionIdempotently(
-                  userId,
-                  scan.id,
-                  uploadInput,
-                  `${key.slice(0, 114)}:model`,
-                )
-              : { body: await scanAssetService.createUploadSession(userId, scan.id, uploadInput) };
-          uploads.scanFile = ScanUploadUrlSchema.parse({
-            uploadSessionId: result.body.uploadSessionId,
-            assetId: result.body.assetId,
-            uploadUrl: result.body.uploadUrl,
-            uploadUrlExpiresAt: result.body.uploadUrlExpiresAt,
-          });
-        }
-
-        const hasUploads = body.thumbnail !== undefined || body.scanFile !== undefined;
-        const responseBody = hasUploads
-          ? CreateScanResponseSchema.parse({ ...scan, uploads })
-          : ScanResponseSchema.parse(scan);
-
+        const uploadDescriptors = [
+          ...(body.thumbnail === undefined
+            ? []
+            : [
+                {
+                  assetType: 'THUMBNAIL' as const,
+                  contentType: body.thumbnail.contentType,
+                  sizeBytes: body.thumbnail.sizeBytes,
+                  ...(body.thumbnail.checksum === undefined
+                    ? {}
+                    : { checksum: body.thumbnail.checksum }),
+                },
+              ]),
+          ...(body.scanFile === undefined
+            ? []
+            : [
+                {
+                  assetType: 'MODEL' as const,
+                  contentType: body.scanFile.contentType,
+                  sizeBytes: body.scanFile.sizeBytes,
+                  checksum: body.scanFile.checksum,
+                  modelVersion: body.scanFile.modelVersion,
+                },
+              ]),
+        ];
+        const result = await scanService.createWithUploadsIdempotently(
+          userId,
+          params.projectId,
+          data,
+          uploadDescriptors,
+          key,
+          canonicalBody,
+        );
+        const responseBody = CreateScanResponseSchema.parse(result.body);
         setRevisionEtag(response, responseBody.revision);
-        response.status(idempotent.statusCode).json(responseBody);
+        response.status(result.statusCode).json(responseBody);
       } catch (error) {
         next(notFoundToAppError(error) ?? error);
       }
@@ -290,18 +213,21 @@ export function createScanRouter({
   router.patch(
     '/scans/:scanId',
     requireAuth,
-    validateRequest({ body: UpdateScanBodySchema, params: ScanIdParamSchema }),
+    validateRequest({
+      body: UpdateScanBodySchema,
+      params: ScanIdParamSchema,
+      headers: IfMatchHeaderSchema,
+    }),
     async (request, response, next) => {
       try {
         const userId = getUserId(request);
-        const { body, params } = response.locals.validated as {
+        const { body, params, headers } = response.locals.validated as {
           body: UpdateScanBody;
           params: ScanIdParam;
+          headers: { 'If-Match': string };
         };
         const data: ScanUpdateInput = {};
-        const expectedRevision = parseIfMatch(
-          typeof request.headers['if-match'] === 'string' ? request.headers['if-match'] : undefined,
-        );
+        const expectedRevision = parseIfMatch(headers['If-Match']);
         if (body.name !== undefined) {
           data.name = body.name;
         }
@@ -322,14 +248,15 @@ export function createScanRouter({
   router.delete(
     '/scans/:scanId',
     requireAuth,
-    validateRequest({ params: ScanIdParamSchema }),
+    validateRequest({ params: ScanIdParamSchema, headers: IfMatchHeaderSchema }),
     async (request, response, next) => {
       try {
         const userId = getUserId(request);
-        const { params } = response.locals.validated as { params: ScanIdParam };
-        const expectedRevision = parseIfMatch(
-          typeof request.headers['if-match'] === 'string' ? request.headers['if-match'] : undefined,
-        );
+        const { params, headers } = response.locals.validated as {
+          params: ScanIdParam;
+          headers: { 'If-Match': string };
+        };
+        const expectedRevision = parseIfMatch(headers['If-Match']);
         const revision = await scanService.delete(userId, params.scanId, expectedRevision);
 
         setRevisionEtag(response, revision);

@@ -171,7 +171,7 @@ the existing row instead of rethrowing. The repository also performs
 allow-listed sorting with a stable `id` tie-breaker and offset pagination. An
 Owner update runs its guarded write and response read in one transaction.
 Deleting a scan marks `Scan.deletedAt`, soft-deletes its active `ScanAsset` and
-`Note` descendants, rolls up the project revision/readiness, and writes all
+`Note` descendants, rolls up the project readiness, and writes all
 tombstones in the same transaction; a repeated delete by the same Owner is
 idempotent.
 
@@ -246,7 +246,7 @@ cannot be anchored to a stale model revision.
 
 `PrismaNoteRepository` filters active reads through `Note.deletedAt` and a
 non-deleted scan. Note delete is a soft-delete tombstone. Every note mutation
-increments the note revision, rolls up the scan and project revisions, and
+increments the note revision, rolls up the scan revision, and
 writes normalized change snapshots in one transaction. Note content is never
 written to logs; the error envelope returns only stable codes and messages.
 The repository derives the scan's real `noteCount` from active note rows.
@@ -301,8 +301,11 @@ the expected revision atomically. A stale write commits a per-user conflict
 ledger row plus a targeted refresh snapshot/tombstone, then returns
 `409 REVISION_CONFLICT`. Delete wins over stale update and no stale mutation can
 clear a tombstone. Consuming the refresh cursor acknowledges the conflict and
-appends a targeted non-conflict snapshot. Successful current-revision writes
-resolve earlier conflicts in their domain transaction.
+appends a targeted non-conflict snapshot. Acknowledging a conflict that leaves
+a project fully synced also increments the project revision and emits a
+project UPSERT sync change so other clients observe the status transition.
+Successful current-revision writes resolve earlier conflicts in their domain
+transaction.
 
 ## Share module
 
@@ -420,8 +423,8 @@ revoked, deleted, and never-shared projects are hidden behind the standard
 `VIEWER` rows: list filters by `userId` and the `VIEWER` role, detail and
 access-status checks match on `(projectId, userId)` with the same role filter,
 and removal runs a transactionally guarded revision update on the access row
-(`role: VIEWER`, `revokedAt: null`). That transaction increments the access and
-project revisions and emits Owner plus targeted Viewer tombstones, so owner
+(`role: VIEWER`, `revokedAt: null`). That transaction increments the access
+revision and emits Owner plus targeted Viewer tombstones, so owner
 records are never returned or revoked and a concurrent removal or Owner revocation resolves to
 `409 NOT_IN_SHARED_WITH_ME` instead of succeeding. Lookups apply
 case-insensitive name search against the parent project, sort by a to-one

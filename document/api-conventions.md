@@ -240,11 +240,17 @@ loses to a newer revision returns `409 REVISION_CONFLICT` with
 a stale mutation cannot clear any Project, Scan, or Note tombstone. Repeating a
 completed Owner delete still returns `204`.
 
-Revision roll-up is hierarchical: Note changes increment Note + Scan + Project;
-Scan and ScanAsset changes increment Scan + Project; access lifecycle changes
-increment ProjectAccess + Project. A fully synced project updates
-`lastSyncedAt` after a successful mutation or conflict acknowledgement; a
-project that becomes pending/syncing/failed keeps the prior successful time.
+Revision roll-up is hierarchical: Note changes increment Note + Scan;
+Scan and ScanAsset changes increment Scan; access lifecycle changes
+increment ProjectAccess. Project rollups update `syncStatus` and
+`lastSyncedAt` without incrementing the project revision, so optimistic
+concurrency on the project resource is not invalidated by child mutations.
+Acknowledging a conflict that leaves a project fully synced increments the
+project revision, updates `lastSyncedAt`, and emits a project UPSERT sync
+change so other clients observe the status transition. A fully synced project
+updates `lastSyncedAt` after a successful mutation or conflict
+acknowledgement; a project that becomes pending/syncing/failed keeps the
+prior successful time.
 
 ## Sync
 
@@ -274,6 +280,7 @@ Malformed, tampered, wrong-user, or ambiguous cursors return 400.
       "data": {
         "id": "b1a2c3d4-e5f6-4890-abcd-ef1234567890",
         "scanId": "f1e2d3c4-a5b6-7890-abcd-ef1234567890",
+        "title": "Cabinet hinge",
         "content": "Cabinet hinge is loose"
       }
     }
@@ -286,7 +293,9 @@ Malformed, tampered, wrong-user, or ambiguous cursors return 400.
 DELETE items always have `data: null` and a non-null `deletedAt`. Normalized
 UPSERT data includes public identity/metadata and lifecycle timestamps, but
 never storage keys, raw idempotency keys, presigned URLs, secrets, or internal
-SQL fields. Owners receive their project resources and access records. An
+SQL fields. NOTE UPSERT data includes `title`, `content`, `color`,
+`position`, `orientation`, and `modelVersion`. Owners receive their project
+resources and access records. An
 active Viewer receives project resources plus only their own access record. A
 grant emits a targeted access UPSERT and current project bootstrap; revocation
 emits a self-access tombstone, after which no later project event is visible to

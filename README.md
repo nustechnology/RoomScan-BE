@@ -265,7 +265,7 @@ upload session for each present descriptor and return its `uploadUrl` under
 call may include `thumbnail` only, `scanFile` only, or both. The client then
 PUTs each file directly to its own `uploadUrl` and marks each session complete
 with `POST /api/v1/upload-sessions/:uploadSessionId/complete`. Scan metadata,
-optional session rows, sync events, revision roll-up, and the receipt commit
+optional session rows, sync events, scan revision roll-up, and the receipt commit
 together after all URLs are successfully presigned.
 
 Scan assets use minted URLs: the Owner creates an upload session

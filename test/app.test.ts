@@ -34,6 +34,7 @@ import type { ShareService } from '../src/modules/share/share.service.js';
 import type { ShareLinkService } from '../src/modules/share/share-link.service.js';
 import type { SharedProjectsService } from '../src/modules/shared-projects/shared-projects.service.js';
 import type { SharedScansService } from '../src/modules/shared-scans/shared-scans.service.js';
+import type { SyncService } from '../src/modules/sync/sync.service.js';
 
 const config: AppConfig = {
   nodeEnv: 'test',
@@ -160,6 +161,10 @@ describe('RoomScan HTTP application', () => {
     detail: vi.fn(),
     remove: vi.fn(),
   } as unknown as SharedScansService;
+  const syncService = {
+    getChanges: vi.fn(),
+    getStatus: vi.fn(),
+  } as unknown as SyncService;
 
   const app = createApp({
     config,
@@ -175,6 +180,7 @@ describe('RoomScan HTTP application', () => {
     shareLinkService,
     sharedProjectsService,
     sharedScansService,
+    syncService,
     accessTokenVerifier,
     currentUserRepository,
     rateLimiters,
@@ -227,6 +233,7 @@ describe('RoomScan HTTP application', () => {
       shareLinkService,
       sharedProjectsService,
       sharedScansService,
+      syncService,
       accessTokenVerifier,
       currentUserRepository,
       rateLimiters,
@@ -561,6 +568,7 @@ describe('RoomScan HTTP application', () => {
       shareLinkService,
       sharedProjectsService,
       sharedScansService,
+      syncService,
       accessTokenVerifier,
       currentUserRepository,
       rateLimiters,

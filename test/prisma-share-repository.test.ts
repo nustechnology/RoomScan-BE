@@ -1207,10 +1207,20 @@ describe('PrismaShareRepository', () => {
       revokedAt: null,
       project: { ownerId: OWNER_ID },
     });
-    const update = vi.fn().mockResolvedValue({});
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const findUniqueAfterUpdate = vi.fn().mockResolvedValue({ revision: 2 });
+    let findUniqueCallCount = 0;
     transaction.mockImplementationOnce(async (operation: unknown) => {
       return (operation as (tx: unknown) => Promise<unknown>)({
-        projectAccess: { findUnique, update },
+        projectAccess: {
+          findUnique: vi.fn().mockImplementation(() => {
+            findUniqueCallCount += 1;
+            return Promise.resolve(
+              findUniqueCallCount === 1 ? findUnique() : findUniqueAfterUpdate(),
+            );
+          }),
+          updateMany,
+        },
       });
     });
     const repository = new PrismaShareRepository(client, {} as PrismaIdempotencyExecutor);
@@ -1218,8 +1228,8 @@ describe('PrismaShareRepository', () => {
     const result = await repository.revokeViewerAccess(PROJECT_ID, VIEWER_ID, NOW);
 
     expect(result).toEqual({ revokedAt: NOW, revision: 2 });
-    expect(update).toHaveBeenCalledWith({
-      where: { id: 'access-id' },
+    expect(updateMany).toHaveBeenCalledWith({
+      where: { id: 'access-id', revokedAt: null },
       data: { revokedAt: NOW, revision: { increment: 1 }, updatedAt: NOW },
     });
   });

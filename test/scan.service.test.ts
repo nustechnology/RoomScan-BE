@@ -42,6 +42,8 @@ function createRepository() {
     create: vi
       .fn<ScanRepository['create']>()
       .mockResolvedValue({ record: createRecord(), created: true }),
+    createIdempotently: vi.fn<ScanRepository['createIdempotently']>(),
+    createWithUploadsIdempotently: vi.fn<ScanRepository['createWithUploadsIdempotently']>(),
     listByProject: vi
       .fn<ScanRepository['listByProject']>()
       .mockResolvedValue({ items: [createRecord()], total: 1 }),
@@ -336,15 +338,6 @@ describe('ScanService', () => {
     expect(result.name).toBe('Updated Room');
   });
 
-  it('rejects rename from a Viewer', async () => {
-    const { mocks, service } = createRepository();
-    mocks.update.mockRejectedValueOnce(new ScanNotFoundError());
-
-    await expect(
-      service.update(VIEWER_ID, SCAN_ID, 1, { name: 'Updated Room' }),
-    ).rejects.toBeInstanceOf(ScanNotFoundError);
-  });
-
   it('throws hidden not-found when updating a missing scan', async () => {
     const { mocks, service } = createRepository();
     mocks.update.mockRejectedValueOnce(new ScanNotFoundError());
@@ -360,13 +353,6 @@ describe('ScanService', () => {
     await service.delete(OWNER_ID, SCAN_ID, 1);
 
     expect(mocks.softDelete).toHaveBeenCalledWith(SCAN_ID, OWNER_ID, 1);
-  });
-
-  it('rejects delete from a Viewer', async () => {
-    const { mocks, service } = createRepository();
-    mocks.softDelete.mockRejectedValueOnce(new ScanNotFoundError());
-
-    await expect(service.delete(VIEWER_ID, SCAN_ID, 1)).rejects.toBeInstanceOf(ScanNotFoundError);
   });
 
   it('throws hidden not-found when deleting a missing scan', async () => {

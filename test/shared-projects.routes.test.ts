@@ -25,6 +25,7 @@ import {
 } from '../src/modules/shared-projects/shared-projects.schemas.js';
 import type { SharedProjectsService } from '../src/modules/shared-projects/shared-projects.service.js';
 import type { SharedScansService } from '../src/modules/shared-scans/shared-scans.service.js';
+import type { SyncService } from '../src/modules/sync/sync.service.js';
 import type { NoteService } from '../src/modules/note/note.service.js';
 import type { ProjectService } from '../src/modules/project/project.service.js';
 import type { ScanService } from '../src/modules/scan/scan.service.js';
@@ -177,6 +178,10 @@ describe('Shared With Me HTTP endpoints', () => {
     detail: vi.fn(),
     remove: vi.fn(),
   } as unknown as SharedScansService;
+  const syncService = {
+    getChanges: vi.fn(),
+    getStatus: vi.fn(),
+  } as unknown as SyncService;
   const app = createApp({
     config,
     database,
@@ -191,6 +196,7 @@ describe('Shared With Me HTTP endpoints', () => {
     shareLinkService,
     sharedProjectsService,
     sharedScansService,
+    syncService,
     accessTokenVerifier,
     currentUserRepository,
     rateLimiters,

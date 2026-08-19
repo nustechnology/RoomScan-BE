@@ -6,6 +6,7 @@ import type {
 } from '../../common/idempotency/idempotency.types.js';
 import { RevisionConflictError } from '../../common/revision/revision.errors.js';
 import { NoteNotFoundError } from '../../modules/note/note.errors.js';
+import { ScanNotFoundError } from '../../modules/scan/scan.errors.js';
 import type {
   NoteCreateInput,
   NoteListOptions,
@@ -249,6 +250,11 @@ export class PrismaNoteRepository implements NoteRepository {
 
   async create(scanId: string, createdById: string, data: NoteCreateInput): Promise<NoteRecord> {
     return await this.#client.$transaction(async (transaction) => {
+      const scan = await transaction.scan.findFirst({
+        where: { id: scanId, deletedAt: null, project: { deletedAt: null } },
+        select: { id: true },
+      });
+      if (scan === null) throw new ScanNotFoundError();
       const now = new Date();
       const row = await transaction.note.create({
         data: {
@@ -284,6 +290,11 @@ export class PrismaNoteRepository implements NoteRepository {
   ): Promise<IdempotencyResult<NoteResult>> {
     if (this.#idempotency === undefined) throw new Error('Note idempotency is not configured');
     return await this.#idempotency.execute(context, 201, async (transaction) => {
+      const scan = await transaction.scan.findFirst({
+        where: { id: scanId, deletedAt: null, project: { deletedAt: null } },
+        select: { id: true },
+      });
+      if (scan === null) throw new ScanNotFoundError();
       const now = new Date();
       const row = await transaction.note.create({
         data: {
@@ -396,6 +407,13 @@ export class PrismaNoteRepository implements NoteRepository {
       if (note.deletedAt !== null) return { kind: 'deleted' as const, revision: note.revision };
       const deletedAt = new Date();
       if (this.#idempotency === undefined) {
+        if (expectedRevision !== note.revision) {
+          return {
+            kind: 'conflict' as const,
+            revision: note.revision,
+            projectId: note.projectId,
+          };
+        }
         await transaction.note.update({
           where: { id: noteId },
           data: { deletedAt, revision: { increment: 1 }, updatedAt: deletedAt },

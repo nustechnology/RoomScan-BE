@@ -12,6 +12,10 @@ import type {
 } from '../../common/middleware/authenticate.js';
 import { validateRequest } from '../../common/middleware/validate-request.js';
 import {
+  IdempotencyKeyHeaderSchema,
+  IfMatchHeaderSchema,
+} from '../../common/schemas/sync-headers.js';
+import {
   parseIfMatch,
   revisionErrorToAppError,
   setRevisionEtag,
@@ -64,13 +68,15 @@ export function createProjectRouter({
   router.post(
     '/projects',
     requireAuth,
-    validateRequest({ body: CreateProjectBodySchema }),
+    validateRequest({ body: CreateProjectBodySchema, headers: IdempotencyKeyHeaderSchema }),
     async (request, response, next) => {
       try {
         const userId = getUserId(request);
-        const { body } = response.locals.validated as { body: CreateProjectBody };
-        const header = request.headers['idempotency-key'];
-        const key = resolveIdempotencyKey(typeof header === 'string' ? header : undefined);
+        const { body, headers } = response.locals.validated as {
+          body: CreateProjectBody;
+          headers: { 'Idempotency-Key': string };
+        };
+        const key = resolveIdempotencyKey(headers['Idempotency-Key']);
         const result =
           typeof projectService.createIdempotently === 'function'
             ? await projectService.createIdempotently(userId, body, key)
@@ -130,16 +136,21 @@ export function createProjectRouter({
   router.patch(
     '/projects/:projectId',
     requireAuth,
-    validateRequest({ body: UpdateProjectBodySchema, params: ProjectIdParamSchema }),
+    validateRequest({
+      body: UpdateProjectBodySchema,
+      params: ProjectIdParamSchema,
+      headers: IfMatchHeaderSchema,
+    }),
     async (request, response, next) => {
       try {
         const userId = getUserId(request);
-        const { body, params } = response.locals.validated as {
+        const { body, params, headers } = response.locals.validated as {
           body: UpdateProjectBody;
           params: ProjectIdParam;
+          headers: { 'If-Match': string };
         };
         const data: ProjectUpdateInput = {};
-        const expectedRevision = parseIfMatch(request.headers['if-match']);
+        const expectedRevision = parseIfMatch(headers['If-Match']);
         if (body.name !== undefined) {
           data.name = body.name;
         }
@@ -165,12 +176,15 @@ export function createProjectRouter({
   router.delete(
     '/projects/:projectId',
     requireAuth,
-    validateRequest({ params: ProjectIdParamSchema }),
+    validateRequest({ params: ProjectIdParamSchema, headers: IfMatchHeaderSchema }),
     async (request, response, next) => {
       try {
         const userId = getUserId(request);
-        const { params } = response.locals.validated as { params: ProjectIdParam };
-        const expectedRevision = parseIfMatch(request.headers['if-match']);
+        const { params, headers } = response.locals.validated as {
+          params: ProjectIdParam;
+          headers: { 'If-Match': string };
+        };
+        const expectedRevision = parseIfMatch(headers['If-Match']);
         const revision = await projectService.delete(userId, params.projectId, expectedRevision);
 
         setRevisionEtag(response, revision);

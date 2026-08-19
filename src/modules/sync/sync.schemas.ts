@@ -69,6 +69,7 @@ const NoteSyncDataSchema = z.object({
   scanId: z.uuid(),
   createdById: z.uuid(),
   creatorEmail: z.email().nullable(),
+  title: z.string(),
   content: z.string(),
   color: z.enum(['YELLOW', 'RED', 'BLUE', 'GREEN', 'ORANGE', 'PURPLE']),
   position: Vector3Schema,

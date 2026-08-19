@@ -56,7 +56,7 @@ export interface AppDependencies {
   shareLinkService: ShareLinkService;
   sharedProjectsService: SharedProjectsService;
   sharedScansService: SharedScansService;
-  syncService?: SyncService;
+  syncService: SyncService;
   accessTokenVerifier: AccessTokenVerifier;
   currentUserRepository: CurrentUserRepository;
   rateLimiters: RateLimiters;
@@ -176,12 +176,10 @@ export function createApp({
       refreshTokenService,
     }),
   );
-  if (syncService !== undefined) {
-    app.use(
-      API_PREFIX,
-      createSyncRouter({ syncService, accessTokenVerifier, currentUserRepository }),
-    );
-  }
+  app.use(
+    API_PREFIX,
+    createSyncRouter({ syncService, accessTokenVerifier, currentUserRepository }),
+  );
   app.use(
     API_PREFIX,
     createProjectRouter({
@@ -194,7 +192,6 @@ export function createApp({
     API_PREFIX,
     createScanRouter({
       scanService,
-      scanAssetService,
       accessTokenVerifier,
       currentUserRepository,
     }),

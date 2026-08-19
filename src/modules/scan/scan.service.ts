@@ -101,7 +101,7 @@ export class ScanService {
     key: string,
     requestPayload: unknown = data,
   ): Promise<IdempotencyResult<ScanResult>> {
-    if (this.#idempotency === undefined || this.#repository.createIdempotently === undefined) {
+    if (this.#idempotency === undefined) {
       throw new Error('Scan idempotency is not configured');
     }
     const context = this.#idempotency.createContext({
@@ -131,11 +131,7 @@ export class ScanService {
     key: string,
     requestPayload: unknown,
   ): Promise<IdempotencyResult<ScanCreateWithUploadsResult>> {
-    if (
-      this.#idempotency === undefined ||
-      this.#uploadPreparer === undefined ||
-      this.#repository.createWithUploadsIdempotently === undefined
-    ) {
+    if (this.#idempotency === undefined || this.#uploadPreparer === undefined) {
       throw new Error('Transactional scan upload creation is not configured');
     }
     const context = this.#idempotency.createContext({

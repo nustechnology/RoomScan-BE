@@ -128,13 +128,13 @@ export interface ScanRepository {
     createdById: string,
     data: ScanCreateInput,
   ): Promise<{ record: ScanRecord; created: boolean }>;
-  createIdempotently?(
+  createIdempotently(
     projectId: string,
     createdById: string,
     data: ScanCreateInput,
     context: IdempotencyContext,
   ): Promise<IdempotencyResult<ScanResult>>;
-  createWithUploadsIdempotently?(
+  createWithUploadsIdempotently(
     scanId: string,
     projectId: string,
     createdById: string,

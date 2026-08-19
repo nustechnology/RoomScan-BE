@@ -362,8 +362,14 @@ export class PrismaSyncRepository implements SyncRepository {
         if (ready) {
           await transaction.project.update({
             where: { id: projectId },
-            data: { syncStatus: 'SYNCED', lastSyncedAt: acknowledgedAt },
+            data: {
+              syncStatus: 'SYNCED',
+              lastSyncedAt: acknowledgedAt,
+              revision: { increment: 1 },
+              updatedAt: acknowledgedAt,
+            },
           });
+          await writeProjectUpsert(transaction, projectId, { changedAt: acknowledgedAt });
         }
       }
 

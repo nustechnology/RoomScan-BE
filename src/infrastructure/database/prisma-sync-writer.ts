@@ -251,6 +251,7 @@ export async function writeNoteUpsert(
       scan: { select: { projectId: true, project: { select: { ownerId: true } } } },
       createdById: true,
       creator: { select: { email: true } },
+      title: true,
       content: true,
       color: true,
       position: true,
@@ -277,6 +278,7 @@ export async function writeNoteUpsert(
         scanId: row.scanId,
         createdById: row.createdById,
         creatorEmail: row.creator.email,
+        title: row.title,
         content: row.content,
         color: row.color,
         position: row.position,
@@ -427,7 +429,6 @@ export async function refreshProjectRollup(
   await transaction.project.update({
     where: { id: projectId },
     data: {
-      revision: { increment: 1 },
       syncStatus: status,
       updatedAt: changedAt,
       ...(status === 'SYNCED' ? { lastSyncedAt: changedAt } : {}),

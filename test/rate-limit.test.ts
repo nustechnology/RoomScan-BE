@@ -20,6 +20,7 @@ import type { ShareService } from '../src/modules/share/share.service.js';
 import type { ShareLinkService } from '../src/modules/share/share-link.service.js';
 import type { SharedProjectsService } from '../src/modules/shared-projects/shared-projects.service.js';
 import type { SharedScansService } from '../src/modules/shared-scans/shared-scans.service.js';
+import type { SyncService } from '../src/modules/sync/sync.service.js';
 
 const baseConfig: AppConfig = {
   nodeEnv: 'test',
@@ -148,6 +149,10 @@ function createTestApp(overrides: Partial<AppConfig> = {}, stores: RateLimitStor
     detail: vi.fn(),
     remove: vi.fn(),
   } as unknown as SharedScansService;
+  const syncService = {
+    getChanges: vi.fn(),
+    getStatus: vi.fn(),
+  } as unknown as SyncService;
   const rateLimiters = createRateLimiters(config, logger, stores);
   const app = createApp({
     config,
@@ -166,6 +171,7 @@ function createTestApp(overrides: Partial<AppConfig> = {}, stores: RateLimitStor
     shareLinkService,
     sharedProjectsService,
     sharedScansService,
+    syncService,
     accessTokenVerifier,
     currentUserRepository,
     rateLimiters,

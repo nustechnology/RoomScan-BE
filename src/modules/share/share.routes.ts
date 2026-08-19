@@ -15,6 +15,7 @@ import type {
   CurrentUserRepository,
 } from '../../common/middleware/authenticate.js';
 import { validateRequest } from '../../common/middleware/validate-request.js';
+import { IdempotencyKeyHeaderSchema } from '../../common/schemas/sync-headers.js';
 import { ProjectNotFoundError } from '../project/project.errors.js';
 import { ProjectIdParamSchema, type ProjectIdParam } from '../project/project.schemas.js';
 import { ScanNotFoundError } from '../scan/scan.errors.js';
@@ -213,19 +214,20 @@ export function createShareRouter({
   router.post(
     '/projects/:projectId/invitations',
     requireAuth,
-    validateRequest({ body: InvitationCreateBodySchema, params: ProjectIdParamSchema }),
+    validateRequest({
+      body: InvitationCreateBodySchema,
+      params: ProjectIdParamSchema,
+      headers: IdempotencyKeyHeaderSchema,
+    }),
     async (request, response, next) => {
       try {
         const userId = getUserId(request);
-        const { body, params } = response.locals.validated as {
+        const { body, params, headers } = response.locals.validated as {
           body: InvitationCreateBody;
           params: ProjectIdParam;
+          headers: { 'Idempotency-Key': string };
         };
-        const key = resolveIdempotencyKey(
-          typeof request.headers['idempotency-key'] === 'string'
-            ? request.headers['idempotency-key']
-            : undefined,
-        );
+        const key = resolveIdempotencyKey(headers['Idempotency-Key']);
         const input = {
           recipientEmail: body.recipientEmail,
           ...(body.expiresInSeconds === undefined

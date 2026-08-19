@@ -224,9 +224,11 @@ Project, Scan, Note, ScanAsset, and ProjectAccess; Note/ScanAsset tombstones;
 project readiness timestamps; scoped asset legacy-key uniqueness; encrypted
 idempotency receipts; the append-only `sync_changes` feed; and per-user
 `sync_conflicts`. Its reviewed SQL backfills readiness and initial UPSERT
-snapshots for existing active resources/access. Deploy it with
-`yarn prisma:migrate:deploy`; never rewrite older migrations or generated
-Prisma Client.
+snapshots for existing active resources/access. The follow-up
+`backfill_note_title_in_sync_changes` migration adds the note `title` field
+to existing NOTE UPSERT rows in `sync_changes` that were created without it.
+Deploy migrations with `yarn prisma:migrate:deploy`; never rewrite older
+migrations or generated Prisma Client.
 
 `SYNC_CRYPTO_KEY` must be configured before the migrated application starts and
 must remain unchanged. V1 ciphertext/cursor formats are versioned but do not

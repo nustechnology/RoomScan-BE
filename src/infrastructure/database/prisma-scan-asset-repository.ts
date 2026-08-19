@@ -11,6 +11,7 @@ import type {
   ScanAssetType,
   ScanAssetUpdateData,
 } from '../../modules/scan-asset/scan-asset.types.js';
+import { ScanNotFoundError } from '../../modules/scan/scan.errors.js';
 import type { PrismaIdempotencyExecutor } from './prisma-idempotency.js';
 import { refreshScanRollup, writeAssetUpsert } from './prisma-sync-writer.js';
 
@@ -93,9 +94,12 @@ function toScanAssetRecord(row: ScanAssetRow): ScanAssetRecord {
 }
 
 export class PrismaScanAssetRepository implements ScanAssetRepository {
-  readonly managesSyncRollups = true;
   readonly #client: Pick<PrismaClient, 'scanAsset' | '$transaction'>;
   readonly #idempotency: PrismaIdempotencyExecutor | undefined;
+
+  get managesSyncRollups(): boolean {
+    return this.#idempotency !== undefined;
+  }
 
   constructor(
     client: Pick<PrismaClient, 'scanAsset' | '$transaction'>,
@@ -159,6 +163,11 @@ export class PrismaScanAssetRepository implements ScanAssetRepository {
     }
     try {
       const row = await this.#client.$transaction(async (transaction) => {
+        const scan = await transaction.scan.findFirst({
+          where: { id: data.scanId, deletedAt: null, project: { deletedAt: null } },
+          select: { id: true },
+        });
+        if (scan === null) throw new ScanNotFoundError();
         const now = new Date();
         const created = await transaction.scanAsset.create({
           data: {
@@ -214,6 +223,11 @@ export class PrismaScanAssetRepository implements ScanAssetRepository {
       result.created ? 201 : 200,
       async (transaction) => {
         if (!reuseWithoutMutation) {
+          const scan = await transaction.scan.findFirst({
+            where: { id: data.scanId, deletedAt: null, project: { deletedAt: null } },
+            select: { id: true },
+          });
+          if (scan === null) throw new ScanNotFoundError();
           const changedAt = new Date();
           let assetId: string;
           if (existingId === null) {
