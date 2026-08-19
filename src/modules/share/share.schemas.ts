@@ -84,7 +84,9 @@ const ScanPreviewSchema = z.object({
   }),
 });
 
-const ScanDetailSchema = ScanPreviewSchema;
+const ScanDetailSchema = ScanPreviewSchema.extend({
+  ownerId: z.uuid(),
+});
 
 const InvitationPreviewLiteralSchema = z.object({
   type: z.literal('invitation'),

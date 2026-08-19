@@ -359,7 +359,12 @@ describe('PrismaShareRepository', () => {
           tokenHash: TOKEN_HASH,
           OR: [
             { projectId: { not: null }, project: { deletedAt: { not: null } } },
-            { scanId: { not: null }, scan: { deletedAt: { not: null } } },
+            {
+              scanId: { not: null },
+              scan: {
+                OR: [{ deletedAt: { not: null } }, { project: { deletedAt: { not: null } } }],
+              },
+            },
           ],
         },
       }),
@@ -376,6 +381,22 @@ describe('PrismaShareRepository', () => {
     );
 
     expect(result).toBe('share-link');
+    expect(shareLink.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          tokenHash: TOKEN_HASH,
+          OR: [
+            { projectId: { not: null }, project: { deletedAt: { not: null } } },
+            {
+              scanId: { not: null },
+              scan: {
+                OR: [{ deletedAt: { not: null } }, { project: { deletedAt: { not: null } } }],
+              },
+            },
+          ],
+        },
+      }),
+    );
   });
 
   it('findTokenSourceKindByTokenHash returns null when no token exists', async () => {

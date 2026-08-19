@@ -384,7 +384,12 @@ export class PrismaShareRepository implements ShareRepository {
         tokenHash,
         OR: [
           { projectId: { not: null }, project: { deletedAt: { not: null } } },
-          { scanId: { not: null }, scan: { deletedAt: { not: null } } },
+          {
+            scanId: { not: null },
+            scan: {
+              OR: [{ deletedAt: { not: null } }, { project: { deletedAt: { not: null } } }],
+            },
+          },
         ],
       },
       select: { id: true },
@@ -398,7 +403,12 @@ export class PrismaShareRepository implements ShareRepository {
         tokenHash,
         OR: [
           { projectId: { not: null }, project: { deletedAt: { not: null } } },
-          { scanId: { not: null }, scan: { deletedAt: { not: null } } },
+          {
+            scanId: { not: null },
+            scan: {
+              OR: [{ deletedAt: { not: null } }, { project: { deletedAt: { not: null } } }],
+            },
+          },
         ],
       },
       select: { id: true },
