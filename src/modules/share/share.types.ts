@@ -17,6 +17,7 @@ export interface ShareProjectSummary {
     id: string;
     email: string | null;
   };
+  scanCount: number;
 }
 
 export interface ShareScanSummary {
@@ -25,6 +26,7 @@ export interface ShareScanSummary {
   name: string;
   description: string | null;
   thumbnail: string | null;
+  noteCount: number;
   creator: {
     id: string;
     email: string | null;
@@ -38,6 +40,23 @@ export interface ShareScanPreview {
   name: string;
   description: string | null;
   thumbnail: string | null;
+  noteCount: number;
+  creator: {
+    id: string;
+    email: string | null;
+  };
+}
+
+export interface ShareProjectPreview {
+  id: string;
+  name: string;
+  description: string | null;
+  thumbnail: string | null;
+  owner: {
+    id: string;
+    email: string | null;
+  };
+  scanCount: number;
 }
 
 export interface InvitationRecord {
@@ -81,12 +100,12 @@ export interface InvitationSendResult {
 export type InvitationCreateResult = InvitationSendResult;
 export type InvitationResendResult = InvitationSendResult;
 
-export type ShareEntityPreview = Omit<ShareProjectSummary, 'owner'> | ShareScanSummary | null;
+export type ShareEntityPreview = ShareProjectPreview | ShareScanSummary | null;
 
 export interface InvitationPreviewResult {
   type: 'invitation';
   scope: ShareScope;
-  project: Omit<ShareProjectSummary, 'owner'> | null;
+  project: ShareProjectPreview | null;
   scan: ShareScanPreview | null;
   status: InvitationViewStatus;
   recipientEmail?: string;
@@ -98,7 +117,7 @@ export interface InvitationPreviewResult {
 export interface ShareLinkPreviewResult {
   type: 'share-link';
   scope: ShareScope;
-  project: Omit<ShareProjectSummary, 'owner'> | null;
+  project: ShareProjectPreview | null;
   scan: ShareScanPreview | null;
   status: ShareLinkViewStatus;
   expiresAt: string;
@@ -278,6 +297,7 @@ export interface ShareRepository {
     result: InvitationCreateResult,
   ): Promise<IdempotencyResult<InvitationCreateResult>>;
   findByTokenHash(tokenHash: string): Promise<InvitationWithEntity | null>;
+  findTokenSourceKindByTokenHash(tokenHash: string): Promise<'invitation' | 'share-link' | null>;
   findInvitationById(id: string): Promise<InvitationRecord | null>;
   acceptInvitation(
     invitationId: string,

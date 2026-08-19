@@ -811,7 +811,7 @@ its assets without granting project-level access.
 | `POST`   | `/api/v1/projects/:projectId/invitations`              | Create a project invitation for an email; Owner only; `201`       |
 | `POST`   | `/api/v1/scans/:scanId/invitations`                    | Create a scan invitation for an email; Owner only; `201`          |
 | `POST`   | `/api/v1/invitations/:invitationId/resend`             | Resend a pending invitation; Owner only; `200`                    |
-| `GET`    | `/api/v1/invitations/:token`                           | Preview an invitation or share link; anonymous or optional Bearer |
+| `GET`    | `/api/v1/invitations/:token`                           | Preview an invitation or share link; requires authentication      |
 | `POST`   | `/api/v1/invitations/:token/accept`                    | Accept and gain Viewer access; `200`                              |
 | `POST`   | `/api/v1/invitations/:token/decline`                   | Decline an invitation for the current user; `200`                 |
 | `DELETE` | `/api/v1/invitations/:invitationId`                    | Revoke a pending invitation; Owner only; `200`                    |
@@ -839,7 +839,7 @@ days). Create response `201`:
 ```json
 {
   "invitationId": "b1a2c3d4-e5f6-4890-abcd-ef1234567890",
-  "invitationUrl": "https://invite.roomscan.dev/invitations/AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-ab",
+  "invitationUrl": "https://invite.roomscan.dev/invitations/AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-ab?scope=project",
   "recipientEmail": "recipient@example.com",
   "expiresAt": "2026-08-05T10:00:00.000Z",
   "status": "PENDING",
@@ -847,9 +847,14 @@ days). Create response `201`:
 }
 ```
 
-`invitationUrl` is `{INVITATION_BASE_URL}/invitations/{rawToken}`. Creating the
-invitation sends an AC5-style invitation email to `recipientEmail`; a mail
-delivery failure is logged and does not fail the request.
+`invitationUrl` is `{INVITATION_BASE_URL}/invitations/{rawToken}?scope={scope}`,
+where `scope` is `project` or `scan`. The `scope` query parameter is an
+informational hint only that lets a client (such as the mobile universal-link
+parser) know whether the link targets a project or a scan before it previews the
+token; it is never trusted server-side, and the preview, accept, and decline
+endpoints always resolve the scope from the token. Creating the invitation
+sends an AC5-style invitation email to `recipientEmail`; a mail delivery failure
+is logged and does not fail the request.
 
 Resend `200` has the same shape as the create response. Resending a pending
 invitation rotates the token (the previous link stops working), extends
@@ -860,11 +865,10 @@ Preview `200` resolves either an invitation or a generic share link and returns
 a `type` (`invitation` or `share-link`) and `scope` (`project` or `scan`) plus
 the matching entity (`project` or `scan`); the other entity is `null`. An
 invitation adds `sentAt` and its lifecycle `status`; a share link has no
-recipient and reports `ACTIVE`, `EXPIRED`, or `REVOKED`. The invitation
-`recipientEmail` is submitted only when the caller is authorized (a valid Bearer
-token is supplied); anonymous previews omit it.
-`hasAccess` is present only when a valid Bearer token is supplied and reports
-whether that user already has active access. A project-scope invitation preview:
+recipient and reports `ACTIVE`, `EXPIRED`, or `REVOKED`. The preview endpoint
+requires a valid Bearer access token. The invitation `recipientEmail` is always
+submitted, and `hasAccess` reports whether that user already has active access. A
+project-scope invitation preview:
 
 ```json
 {
@@ -874,7 +878,12 @@ whether that user already has active access. A project-scope invitation preview:
     "id": "a1b2c3d4-e5f6-4890-abcd-ef1234567890",
     "name": "District 2 Apartment",
     "description": null,
-    "thumbnail": null
+    "thumbnail": null,
+    "owner": {
+      "id": "eb5d278f-c857-45c7-887d-7be65288cb75",
+      "email": "owner@example.com"
+    },
+    "scanCount": 4
   },
   "scan": null,
   "status": "PENDING",
@@ -885,8 +894,30 @@ whether that user already has active access. A project-scope invitation preview:
 }
 ```
 
-`status` is `PENDING`, `EXPIRED`, `ACCEPTED`, `DECLINED`, or `REVOKED` for
-invitations and `ACTIVE`, `EXPIRED`, or `REVOKED` for share links.
+For a project-scope link, `project` includes the Owner info (`owner.id`, nullable
+`owner.email`), `scanCount` (number of active, non-deleted scans), and `thumbnail`
+set to the thumbnail of the project's most recently created scan (nullable). The
+`owner` and `scanCount` fields are always present for a project-scope link and are
+absent for a scan-scope link, where `project` is `null`.
+
+For a scan-scope link, `scan` includes `id`, `projectId`, `name`, `description`,
+`thumbnail`, `creator` (the parent project Owner: `id` and nullable `email`), and
+`noteCount` (number of active notes on the scan). `project` is `null` for a
+scan-scope link.
+
+`status` is `PENDING`, `EXPIRED`, `ACCEPTED`, or `DECLINED` for invitation
+previews and `ACTIVE` or `EXPIRED` for share-link previews. When the source was
+revoked or deleted before the Viewer previews, accepts, or declines, preview,
+accept, and decline instead return `404 SHARE_NO_LONGER_AVAILABLE` with the
+message "This project/scan is no longer available." An unknown token or one that
+resolves to no record returns `404 INVITATION_NOT_FOUND` (or
+`SHARE_LINK_NOT_FOUND` for share links).
+
+Per-recipient invitations are restricted to the invited recipient: when the
+current user's email does not match the invited email (case-insensitive,
+null-safe), preview, accept, or decline returns `403 INVITATION_NOT_FOR_USER`
+with the message "You do not have permission to access this item." Generic share
+links (which have no recipient) are not subject to this check.
 
 Accept `200` also discriminates on `type` and `scope` and returns the matching
 entity. A project-scope invitation accept:
@@ -916,8 +947,8 @@ entity. A project-scope invitation accept:
 ```
 
 A scan-scope accept returns the scan entity (`id`, `projectId`, `name`,
-`description`, `thumbnail`, `creator`, `ownerId`) with `project` set to `null`,
-and a share-link accept reports `shareLinkId` instead of `invitationId`.
+`description`, `thumbnail`, `noteCount`, `creator`, `ownerId`) with `project` set
+to `null`, and a share-link accept reports `shareLinkId` instead of `invitationId`.
 
 Decline `200`:
 
@@ -1008,15 +1039,17 @@ INVITATION_ALREADY_SENT`. Re-inviting an email whose earlier invitation is
   `409` instead of creating a second pending link.
 - Invitations are per-recipient: the first acceptance marks the invitation
   `ACCEPTED`; an already accepted or declined invitation cannot be accepted
-  again. Acceptance is open (any signed-in user with the link can accept)
-  because Apple Sign-In may deliver a private-relay email different from the
-  invited address.
+  again. Previewing, accepting, or declining a per-recipient invitation requires
+  the current user's email to match the invited email; otherwise the endpoint
+  returns `403 INVITATION_NOT_FOR_USER`.
 - An invitation can be revoked while pending; revocation is idempotent. Expired,
   accepted, and declined invitations cannot be revoked.
 - Resend requires a pending, unexpired invitation; it rotates the token and
   re-sends the email. Resend works for both project and scan invitations and
   uses the matching email template.
-- Expired and revoked invitations cannot be accepted or declined.
+- Expired and revoked invitations cannot be accepted or declined. Previewing,
+  accepting, or declining a revoked invitation or share link, or one whose
+  project or scan was deleted, returns `404 SHARE_NO_LONGER_AVAILABLE`.
 - A generic share link has no recipient and no `ACCEPTED`/`DECLINED` lifecycle;
   acceptance creates access without changing the link, so it remains usable by
   other users until it expires or the Owner revokes it. Revoking a link stops
@@ -1039,7 +1072,7 @@ Share-link create `201`:
 ```json
 {
   "shareLinkId": "c0ffee00-0000-4000-8000-0000000000aa",
-  "shareLinkUrl": "https://invite.roomscan.dev/invitations/AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-ab",
+  "shareLinkUrl": "https://invite.roomscan.dev/invitations/AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-ab?scope=project",
   "scope": "project",
   "expiresAt": "2026-08-05T10:00:00.000Z"
 }
@@ -1048,8 +1081,10 @@ Share-link create `201`:
 The share link list returns `{ "items": [{ "shareLinkId", "status": "ACTIVE",
 "expiresAt", "createdAt" }] }`; revoked and expired links are omitted. Revoking
 a share link returns `{ "shareLinkId", "status": "REVOKED", "revokedAt" }` and
-is idempotent. `shareLinkUrl` is `{INVITATION_BASE_URL}/invitations/{rawToken}`,
-the same token namespace as invitations.
+is idempotent. `shareLinkUrl` is `{INVITATION_BASE_URL}/invitations/{rawToken}?scope={scope}`
+(the same scope hint as invitations, where `scope` is `project` or `scan`, used
+only as a client-side hint and never trusted server-side), and shares the same
+token namespace as invitations.
 
 Validation rules:
 
@@ -1064,14 +1099,19 @@ Error behavior:
 
 - `400 VALIDATION_ERROR`: malformed token, invalid body, or invalid path/query.
 - `401 UNAUTHORIZED`: missing/invalid access token where authentication is
-  required (accept, decline, and all Owner-only endpoints).
+  required (preview, accept, decline, and all Owner-only endpoints).
 - `403 NOT_OWNER`: a non-owner attempts share management.
+- `403 INVITATION_NOT_FOR_USER`: an authenticated user's email does not match the
+  invited email (per-recipient invitations only); the caller lacks permission.
 - `404 PROJECT_NOT_FOUND`: project missing, deleted, or inaccessible.
 - `404 SCAN_NOT_FOUND`: scan missing, deleted, or inaccessible.
 - `404 INVITATION_NOT_FOUND`: unknown token or invitation, or the invitation's
   project or scan was deleted.
 - `404 SHARE_LINK_NOT_FOUND`: unknown share-link token or id, or its resource
   was deleted.
+- `404 SHARE_NO_LONGER_AVAILABLE`: the shared project or scan was revoked or
+  deleted before the current user previewed, accepted, or declined it; the link
+  is unusable.
 - `404 ACCESS_NOT_FOUND`: no access record exists for the user being unshared.
 - `409 INVITATION_ALREADY_SENT`: a pending invitation already targets this email.
 - `409 INVITATION_ALREADY_ACCEPTED`: the invitation was already accepted.
@@ -1082,7 +1122,6 @@ Error behavior:
 - `409 CANNOT_ACCEPT_OWN_INVITATION`: the resource Owner acts on their own link.
 - `409 PROJECT_NOT_SHAREABLE`: the project has no uploaded scan model yet.
 - `409 SCAN_NOT_SHAREABLE`: the scan has no uploaded model yet.
-- `409 SHARE_LINK_REVOKED`: the share link was revoked.
 - `409 SHARE_LINK_EXPIRED`: the share link is past its expiry.
 - `429 RATE_LIMIT_EXCEEDED`: API quota exceeded.
 - `500 INTERNAL_SERVER_ERROR`: unexpected failure without Prisma, SQL, token, or
@@ -1102,7 +1141,8 @@ the Owner, and other Viewers are never affected.
 | `GET`    | `/api/v1/shared-projects/:projectId` | Get shared project detail; active Viewer only         |
 | `DELETE` | `/api/v1/shared-projects/:projectId` | Remove a project from the current user's list         |
 
-Shared project item (list and detail share the same shape):
+Shared project item (list and detail share the same shape, except the detail also
+returns `scans`):
 
 ```json
 {
@@ -1127,6 +1167,12 @@ Shared project item (list and detail share the same shape):
   }
 }
 ```
+
+`GET /api/v1/shared-projects/:projectId` additionally returns the project's
+active scans ordered by newest `createdAt` first, with the same `scans` array
+shape (`id`, `name`, `description`, `thumbnail`, `noteCount`, `assetStatus`,
+`syncStatus`, `createdAt`) as the canonical project detail. The Shared With Me
+list response omits `scans` to keep each list item lightweight.
 
 `owner.email` is nullable. `scanCount` counts active (non-deleted) scans in the
 project. `thumbnail` is `null` until the thumbnail persistence feature is

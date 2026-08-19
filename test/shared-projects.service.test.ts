@@ -10,7 +10,7 @@ import {
   SharedProjectsService,
 } from '../src/modules/shared-projects/shared-projects.service.js';
 import type {
-  SharedProjectRecord,
+  SharedProjectDetailRecord,
   SharedProjectsRepository,
 } from '../src/modules/shared-projects/shared-projects.types.js';
 
@@ -19,7 +19,9 @@ const OWNER_ID = 'eb5d278f-c857-45c7-887d-7be65288cb75';
 const PROJECT_ID = 'a1b2c3d4-e5f6-4890-abcd-ef1234567890';
 const NOW = new Date('2026-07-29T10:00:00.000Z');
 
-function createRecord(overrides: Partial<SharedProjectRecord> = {}): SharedProjectRecord {
+function createRecord(
+  overrides: Partial<SharedProjectDetailRecord> = {},
+): SharedProjectDetailRecord {
   return {
     id: PROJECT_ID,
     name: 'District 2 Apartment',
@@ -30,6 +32,7 @@ function createRecord(overrides: Partial<SharedProjectRecord> = {}): SharedProje
     updatedAt: NOW,
     projectDeletedAt: null,
     accessRevokedAt: null,
+    scans: [],
     ...overrides,
   };
 }
@@ -182,8 +185,23 @@ describe('SharedProjectsService', () => {
   });
 
   describe('detail', () => {
-    it('returns an active shared project', async () => {
-      findSharedForUser.mockResolvedValue(createRecord());
+    it('returns an active shared project with its scans', async () => {
+      findSharedForUser.mockResolvedValue(
+        createRecord({
+          scans: [
+            {
+              id: 'f1e2d3c4-a5b6-7890-abcd-ef1234567890',
+              name: 'Living Room',
+              description: null,
+              thumbnail: null,
+              noteCount: 3,
+              assetStatus: 'UPLOADED',
+              syncStatus: 'SYNCED',
+              createdAt: NOW,
+            },
+          ],
+        }),
+      );
 
       const result = await service.detail(USER_ID, PROJECT_ID);
 
@@ -197,6 +215,18 @@ describe('SharedProjectsService', () => {
         canShare: false,
         canCreateScan: false,
       });
+      expect(result.scans).toEqual([
+        {
+          id: 'f1e2d3c4-a5b6-7890-abcd-ef1234567890',
+          name: 'Living Room',
+          description: null,
+          thumbnail: null,
+          noteCount: 3,
+          assetStatus: 'UPLOADED',
+          syncStatus: 'SYNCED',
+          createdAt: NOW.toISOString(),
+        },
+      ]);
     });
 
     it('hides a project the user has no access to', async () => {

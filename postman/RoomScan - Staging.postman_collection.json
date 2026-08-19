@@ -1483,9 +1483,7 @@
             {
               "name": "Preview Invitation",
               "request": {
-                "auth": {
-                  "type": "noauth"
-                },
+                "auth": null,
                 "method": "GET",
                 "header": [],
                 "url": {
@@ -1498,7 +1496,7 @@
                     "{{invitationToken}}"
                   ]
                 },
-                "description": "Previews a token anonymously (this request deliberately overrides auth to No Auth). Resolves either an invitation or a generic share link for a project or scan, returning `type` (`invitation` or `share-link`), `scope` (`project` or `scan`), the matching `project`/`scan` entity, and a `status` (PENDING/EXPIRED/ACCEPTED/DECLINED/REVOKED for invitations; ACTIVE/EXPIRED/REVOKED for share links). Invitations also return `recipientEmail`, `sentAt`, and `expiresAt`. A valid Bearer token can be added to also receive `hasAccess`. Use the **Share Links > Preview Share Link** request when working from a `shareLinkToken`."
+                "description": "Previews an invitation or generic share link for the authenticated user. Requires a valid Bearer token (inherited from the collection). Returns `type` (`invitation` or `share-link`), `scope` (`project` or `scan`), the matching `project`/`scan` entity, and a `status` (PENDING/EXPIRED/ACCEPTED/DECLINED/REVOKED for invitations; ACTIVE/EXPIRED/REVOKED for share links). Invitations also return `recipientEmail`, `sentAt`, `expiresAt`, and `hasAccess`. A per-recipient invitation whose current user email does not match the invited email returns 403 INVITATION_NOT_FOR_USER. Use the **Share Links > Preview Share Link** request when working from a `shareLinkToken`."
               },
               "response": []
             },
@@ -1518,7 +1516,7 @@
                     "accept"
                   ]
                 },
-                "description": "Accepts the token with the current user's token and gains Viewer access (`200`). Resolves invitations (project or scan scope) and generic share links; the response is discriminated by `type` and `scope`. The resource Owner cannot accept their own link (`409 CANNOT_ACCEPT_OWN_INVITATION`), and a user who already has active access gets `409 ACCESS_ALREADY_EXISTS` \u2014 override this request's auth with the invitee's token to exercise the flow. For invitations, the first acceptance wins (`409 INVITATION_ALREADY_ACCEPTED` afterwards); a share-link acceptance does not consume the link."
+                "description": "Accepts the token with the current user's token and gains Viewer access (`200`). Resolves invitations (project or scan scope) and generic share links; the response is discriminated by `type` and `scope`. The resource Owner cannot accept their own link (`409 CANNOT_ACCEPT_OWN_INVITATION`), and a user who already has active access gets `409 ACCESS_ALREADY_EXISTS` — override this request's auth with the invitee's token to exercise the flow. For invitations, the first acceptance wins (`409 INVITATION_ALREADY_ACCEPTED` afterwards); a share-link acceptance does not consume the link."
               },
               "response": []
             },
@@ -1538,7 +1536,7 @@
                     "decline"
                   ]
                 },
-                "description": "Declines the invitation for the current user (`200`, status becomes DECLINED). Applies to per-recipient invitations only \u2014 the Owner cannot decline their own link (`409 CANNOT_ACCEPT_OWN_INVITATION`). Generic share links cannot be declined (they are not addressed to anyone)."
+                "description": "Declines the invitation for the current user (`200`, status becomes DECLINED). Applies to per-recipient invitations only — the Owner cannot decline their own link (`409 CANNOT_ACCEPT_OWN_INVITATION`). Generic share links cannot be declined (they are not addressed to anyone)."
               },
               "response": []
             },
@@ -1746,9 +1744,7 @@
             {
               "name": "Preview Share Link (using token)",
               "request": {
-                "auth": {
-                  "type": "noauth"
-                },
+                "auth": null,
                 "method": "GET",
                 "header": [],
                 "url": {
@@ -1761,7 +1757,7 @@
                     "{{shareLinkToken}}"
                   ]
                 },
-                "description": "Previews a generic share link anonymously (No Auth) using the `shareLinkToken` saved by a create-share-link request. Returns `type: share-link`, the `scope` (`project` or `scan`), the matching `project`/`scan` entity, and `status` (ACTIVE/EXPIRED/REVOKED). A valid Bearer token can be added to also receive `hasAccess`."
+                "description": "Previews a generic share link for the authenticated user (requires a valid Bearer token, inherited from the collection) using the `shareLinkToken` saved by a create-share-link request. Returns `type: share-link`, the `scope` (`project` or `scan`), the matching `project`/`scan` entity, and `status` (ACTIVE/EXPIRED/REVOKED) plus `hasAccess`."
               },
               "response": []
             },
