@@ -31,24 +31,30 @@ the new contract merely to make code and documentation agree.
    base64 encoding of exactly 32 random bytes and keep it stable for stored
    idempotency receipts and cursors.
 4. Run `yarn install --immutable` and `yarn prisma:generate`.
-5. Start PostgreSQL with `docker compose up db -d` when it is not already
-   running and healthy; leave an existing healthy container running.
+5. Start the local infrastructure with
+   `docker compose -f docker-compose.local.yml up -d --build` when it is not
+   already running and healthy; leave an existing healthy container running.
 6. Run `yarn prisma:migrate:deploy` to apply the committed schema migration.
 7. To use the local Apple-login shortcut, set
    `LOCAL_TEST_AUTH_ENABLED=true`, run `yarn seed:local`, and start the API with
    `yarn dev`.
 
 Docker supplies PostgreSQL (and optionally MinIO) in the standard local
-workflow. The default `STORAGE_PROVIDER=local` needs no extra service, so
-MinIO is not part of the routine setup. To exercise the real presigned-URL
-provider instead, run `docker compose up minio -d` (the MinIO service requires
-`MINIO_ROOT_USER` and `MINIO_ROOT_PASSWORD` from `.env`; its API and console
-ports publish on the loopback interface), set `STORAGE_PROVIDER=minio` with the
-matching `STORAGE_BUCKET`, `STORAGE_ENDPOINT`, `STORAGE_ACCESS_KEY_ID` and
-`STORAGE_SECRET_ACCESS_KEY` values from `.env.example`, and start the API. Run
-Prisma commands, seeds, the API, validation, tests, coverage and builds
-natively with Yarn. If the `db` service is already healthy, leave it running
-across tasks; do not restart or recreate it as part of final verification.
+workflow. `docker-compose.local.yml` holds the local-only services (the
+PostgreSQL `db` container and the MinIO `minio` container); the production
+`docker-compose.yml` stores the production `migrate`/`roomscan` API config and
+is not used for local development. The default `STORAGE_PROVIDER=local` needs no
+extra service, so MinIO is not part of the routine setup. To exercise the real
+presigned-URL provider instead, run
+`docker compose -f docker-compose.local.yml up minio -d` (the MinIO service
+requires `MINIO_ROOT_USER` and `MINIO_ROOT_PASSWORD` from `.env`; its API and
+console ports publish on the loopback interface), set
+`STORAGE_PROVIDER=minio` with the matching `STORAGE_BUCKET`,
+`STORAGE_ENDPOINT`, `STORAGE_ACCESS_KEY_ID` and `STORAGE_SECRET_ACCESS_KEY`
+values from `.env.example`, and start the API. Run Prisma commands, seeds, the
+API, validation, tests, coverage and builds natively with Yarn. If the `db`
+service is already healthy, leave it running across tasks; do not restart or
+recreate it as part of final verification.
 
 ### Public bucket access for thumbnails
 
@@ -142,9 +148,10 @@ in `packageManager`.
 
 The commands above are the routine final verification gate. Do not run
 `docker compose build`, start the Compose API/migrate services, or bring up the
-full stack during normal task verification. Start `docker compose up db -d`
-only when PostgreSQL is unavailable, then run any required migrations and
-endpoint checks against the natively started API.
+full stack during normal task verification. Start
+`docker compose -f docker-compose.local.yml up db -d` only when PostgreSQL is
+unavailable, then run any required migrations and endpoint checks against the
+natively started API.
 
 Docker-specific verification is outside the routine handoff gate. Run targeted
 Docker checks only when the user explicitly requests them or when the task's

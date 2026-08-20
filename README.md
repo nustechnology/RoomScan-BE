@@ -39,7 +39,7 @@ cp .env.example .env
 # SYNC_CRYPTO_KEY (base64 for exactly 32 random bytes).
 yarn install --immutable
 yarn prisma:generate
-docker compose up db -d
+docker compose -f docker-compose.local.yml up -d --build
 yarn prisma:migrate:deploy
 # Optional: set LOCAL_TEST_AUTH_ENABLED=true in .env, then:
 yarn seed:local
@@ -53,12 +53,19 @@ Committed Prisma migrations create the authentication, domain, sharing, sync,
 idempotency-receipt, and conflict-ledger storage. Local production-style
 startup applies them through the Compose `migrate` service.
 
-The standard local workflow uses Docker only for the PostgreSQL `db` service.
-Run migrations, seeds, the API, validation, tests, coverage and builds natively
+The standard local workflow uses Docker only for the PostgreSQL `db` service
+via `docker-compose.local.yml`, which holds the local-only services (the
+PostgreSQL `db` container and the optional MinIO `minio` container). Run
+migrations, seeds, the API, validation, tests, coverage and builds natively
 with Yarn. Keep a healthy database container running across tasks rather than
-restarting it during final verification.
+restarting it during final verification. The production `docker-compose.yml`
+stores the production `migrate`/`roomscan` API stack and is not used for local
+development.
 
 ## Optional production-style Docker stack
+
+`docker-compose.yml` stores the production configuration. Bring up that stack
+with:
 
 ```bash
 cp .env.example .env

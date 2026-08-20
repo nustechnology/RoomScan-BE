@@ -6,6 +6,7 @@ import {
   InvalidSyncCursorError,
   InvalidSyncTimestampError,
 } from '../src/modules/sync/sync.errors.js';
+import { SyncChangesResponseSchema } from '../src/modules/sync/sync.schemas.js';
 import { SyncService } from '../src/modules/sync/sync.service.js';
 import type { SyncChangeRecord, SyncRepository } from '../src/modules/sync/sync.types.js';
 
@@ -196,5 +197,45 @@ describe('SyncService', () => {
     await expect(service.getStatus(USER_ID, PROJECT_ID)).rejects.toBeInstanceOf(
       ProjectNotFoundError,
     );
+  });
+
+  it('accepts CYAN and GRAY notes in the sync changes response schema', () => {
+    const base = {
+      resourceId: SCAN_ID,
+      operation: 'UPSERT',
+      revision: 2,
+      syncStatus: 'SYNCED',
+      changedAt: NOW.toISOString(),
+      cursor: 'opaque',
+      deletedAt: null,
+    };
+    const noteFor = (color: string) => ({
+      ...base,
+      resourceType: 'NOTE',
+      data: {
+        id: SCAN_ID,
+        scanId: SCAN_ID,
+        createdById: USER_ID,
+        creatorEmail: null,
+        title: 'Hinge',
+        content: 'Loose',
+        color,
+        position: { x: 1, y: 2, z: 3 },
+        orientation: null,
+        modelVersion: '1',
+        createdAt: NOW.toISOString(),
+        updatedAt: NOW.toISOString(),
+      },
+    });
+
+    const parsed = SyncChangesResponseSchema.parse({
+      changes: [noteFor('CYAN'), noteFor('GRAY')],
+      nextCursor: 'opaque',
+    });
+
+    expect(parsed.changes.map((item) => (item as { data: { color: string } }).data.color)).toEqual([
+      'CYAN',
+      'GRAY',
+    ]);
   });
 });
