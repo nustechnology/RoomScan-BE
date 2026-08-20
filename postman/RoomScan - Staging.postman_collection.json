@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "aff34309-3dd8-4bb2-ab68-c177c4ffa8f6",
     "name": "RoomScan - Staging",
-    "description": "Postman collection covering the full RoomScan API surface at https://roomscan-be.onrender.com (all `/api/v1` routes plus the Swagger docs endpoints).\n\n## Setup\n1. Create an environment (or edit the collection variables) and fill in:\n   - `baseUrl` (default already set)\n   - `accessToken` + `refreshToken` from a working RoomScan session, or run **Auth > Apple Sign In** to mint a pair\n   - `projectId` (or run **Projects > Create Project** to populate it)\n2. For Apple Sign In on staging you need a real Apple identity token; for local development with `LOCAL_TEST_AUTH_ENABLED=true` use the sentinel `roomscan-local-test-user` as the `appleIdentityToken`.\n3. For model uploads, set these variables before running the upload requests:\n   - `contentType` (e.g. `model/usdz`)\n   - `sizeBytes` (exact file byte size: `stat -c%s model.usdz`)\n   - `checksum` (e.g. `sha256sum model.usdz | awk '{print $1}'`)\n   - `modelVersion`\n4. The thumbnail is optional. To upload one in the same call, set `thumbnailSizeBytes` (exact byte size) and `thumbnailContentType` (`image/jpeg` or `image/png`); otherwise delete the `thumbnail` block from the create-scan body.\n5. In **Upload Flow**, select your files in the Body tabs of the two PUT requests (`PUT model file to presigned URL` and `PUT thumbnail to presigned URL`).\n6. For the Sharing & Invitations flow, `recipientEmail` defaults to `recipient@example.com`; the **Create Invitation** request saves `invitationId` and the raw `invitationToken` automatically. Both *Sharing & Invitations* and *Share Links* are organized into *Projects*, *Scans*, and *General* subfolders. Scan-scope sharing is covered in the *Scans* subfolders (e.g. **Create Scan Invitation**, **List Scan Shares**, **Revoke Scan Viewer**, and the scan share-link create/list/revoke requests). Reusable generic links (no email) live in *Share Links* and save `shareLinkId` and the raw `shareLinkToken`. The *General* subfolders hold the token resolve endpoints (preview/accept/decline), which operate on both invitations and share links for both scopes. The **Shared With Me** folder covers accepted projects **and** scans (list, detail, and self-remove).\n7. The **RoomScan - Local** environment pre-fills `projectId`, `scanId`, `noteId`, and `invitationId` from the seeded data, but not `invitationToken`: the seed rotates it on every `yarn seed:local` run and stores only its SHA-256 hash. Copy the token from the seed's printed `Demo invitation link` (the part after `/invitations/`) or run **Create Invitation** to populate it.\n\nCollection-level **Bearer Token** auth ({{accessToken}}) is applied to every request except the presigned PUTs and the anonymous invitation preview, which deliberately override to No Auth. A collection pre-request script adds `Idempotency-Key: {{idempotencyKey}}` to the five retry-safe creates and `If-Match: \"{{revision}}\"` to revision-guarded mutations; response ETags refresh `revision`. Change `idempotencyKey` before intentionally creating a different payload in the same scope.\n\n## Gotchas\n- Each presigned PUT must use a **binary/file body** (not form-data) and the byte size must match the matching `sizeBytes` variable exactly.\n- `scanFile` size must be between 10 MB and 100 MB; thumbnails are capped at 10 MB.\n- `thumbnail` and `scanFile` are independent: one create call may include both, only the model, or only the thumbnail.\n- Each minted session is completed separately (`Complete model upload session` and `Complete thumbnail upload session`).\n- Presigned upload URLs expire after the configured TTL, so run the upload flow steps in sequence.\n- Retrying a selected create with the same key and payload replays its original status/body; changing the payload under the same key returns `409 IDEMPOTENCY_KEY_CONFLICT`.\n- Project/Scan/Note writes require the latest strong ETag. A stale revision returns `409 REVISION_CONFLICT`; run the relevant GET first to refresh `revision`.\n- The Sync folder saves and advances the opaque `syncCursor`; clear it to restart an initial snapshot.\n- `/auth/refresh` rotates tokens (old one is revoked) and is rate-limited (10 req / 15 min). Run it, then use the returned pair.\n- A project is shareable only after it has at least one non-deleted scan with an uploaded model (`assetStatus = UPLOADED`); otherwise creating an invitation returns `409 PROJECT_NOT_SHAREABLE`.\n- One pending invitation is allowed per `(project, recipientEmail)`; a duplicate returns `409 INVITATION_ALREADY_SENT`. An expired link does not block re-inviting the recipient.\n- `POST /invitations/:invitationId/resend` rotates the token \u2014 the previous link stops working and `invitationToken` is refreshed.\n- The project Owner cannot accept or decline their own invitation (`409 CANNOT_ACCEPT_OWN_INVITATION`) and cannot accept twice; use a second user's token (override the request auth) to exercise the accept/decline flow.\n- `DELETE` endpoints that return `204` have no response body.\n- `projectId` must be owned by your token's user, otherwise the API returns `403 NOT_OWNER` (share management) or `404 PROJECT_NOT_FOUND`.",
+    "description": "Postman collection covering the full RoomScan API surface at https://roomscan-be.onrender.com (all `/api/v1` routes plus the Swagger docs endpoints).\n\n## Setup\n1. Create an environment (or edit the collection variables) and fill in:\n   - `baseUrl` (default already set)\n   - `accessToken` + `refreshToken` from a working RoomScan session, or run **Auth > Apple Sign In** to mint a pair\n   - `projectId` (or run **Projects > Create Project** to populate it)\n2. For Apple Sign In on staging you need a real Apple identity token; for local development with `LOCAL_TEST_AUTH_ENABLED=true` use the sentinel `roomscan-local-test-user` as the `appleIdentityToken`.\n3. For model uploads, set these variables before running the upload requests:\n   - `contentType` (e.g. `model/usdz`)\n   - `sizeBytes` (exact file byte size: `stat -c%s model.usdz`)\n   - `checksum` (e.g. `sha256sum model.usdz | awk '{print $1}'`)\n   - `modelVersion`\n4. The thumbnail is optional. To upload one in the same call, set `thumbnailSizeBytes` (exact byte size) and `thumbnailContentType` (`image/jpeg` or `image/png`); otherwise delete the `thumbnail` block from the create-scan body.\n5. In **Upload Flow**, select your files in the Body tabs of the two PUT requests (`PUT model file to presigned URL` and `PUT thumbnail to presigned URL`).\n6. For the Sharing & Invitations flow, `recipientEmail` defaults to `recipient@example.com`; the **Create Invitation** request saves `invitationId` and the raw `invitationToken` automatically. Both *Sharing & Invitations* and *Share Links* are organized into *Projects*, *Scans*, and *General* subfolders. Scan-scope sharing is covered in the *Scans* subfolders (e.g. **Create Scan Invitation**, **List Scan Shares**, **Revoke Scan Viewer**, and the scan share-link create/list/revoke requests). Reusable generic links (no email) live in *Share Links* and save `shareLinkId` and the raw `shareLinkToken`. The *General* subfolders hold the token resolve endpoints (preview/accept/decline), which operate on both invitations and share links for both scopes. The **Shared With Me** folder covers accepted projects **and** scans (list, detail, and self-remove).\n7. The **RoomScan - Local** environment pre-fills `projectId`, `scanId`, `noteId`, and `invitationId` from the seeded data, but not `invitationToken`: the seed rotates it on every `yarn seed:local` run and stores only its SHA-256 hash. Copy the token from the seed's printed `Demo invitation link` (the part after `/invitations/`) or run **Create Invitation** to populate it.\n\nCollection-level **Bearer Token** auth ({{accessToken}}) is applied to every request except the presigned PUTs and the anonymous invitation preview, which deliberately override to No Auth. The retry-safe creates carry `Idempotency-Key: {{idempotencyKey}}` and the revision-guarded mutations carry `If-Match: {{revision}}`, where `revision` holds the quoted strong ETag from the resource (for example `\"1\"`). Every GET detail and every mutation (create/update/delete/move) reads the response `ETag` and, when it is a strong revision ETag (`\"N\"`), refreshes the `revision` variable automatically, so the next write always carries the current revision. A stale revision returns `409 REVISION_CONFLICT`; when that happens just re-run the request or a GET to refresh `revision`. Each create request generates a fresh random `idempotencyKey` on every run, so you can create new resources continuously. To test an idempotent retry, capture the generated key from the first response and reuse it with the same payload.\n\n## Gotchas\n- Each presigned PUT must use a **binary/file body** (not form-data) and the byte size must match the matching `sizeBytes` variable exactly.\n- `scanFile` size must be between 10 MB and 100 MB; thumbnails are capped at 10 MB.\n- `thumbnail` and `scanFile` are independent: one create call may include both, only the model, or only the thumbnail.\n- Each minted session is completed separately (`Complete model upload session` and `Complete thumbnail upload session`).\n- Presigned upload URLs expire after the configured TTL, so run the upload flow steps in sequence.\n- Retrying a selected create with the same key and payload replays its original status/body; changing the payload under the same key returns `409 IDEMPOTENCY_KEY_CONFLICT`.\n- Project/Scan/Note writes require the latest strong ETag. A stale revision returns `409 REVISION_CONFLICT`; the next mutation (or a GET) refreshes `revision` from its response `ETag`.\n- The Sync folder saves and advances the opaque `syncCursor`; clear it to restart an initial snapshot.\n- `/auth/refresh` rotates tokens (old one is revoked) and is rate-limited (10 req / 15 min). Run it, then use the returned pair.\n- A project is shareable only after it has at least one non-deleted scan with an uploaded model (`assetStatus = UPLOADED`); otherwise creating an invitation returns `409 PROJECT_NOT_SHAREABLE`.\n- One pending invitation is allowed per `(project, recipientEmail)`; a duplicate returns `409 INVITATION_ALREADY_SENT`. An expired link does not block re-inviting the recipient.\n- `POST /invitations/:invitationId/resend` rotates the token \u2014 the previous link stops working and `invitationToken` is refreshed.\n- The project Owner cannot accept or decline their own invitation (`409 CANNOT_ACCEPT_OWN_INVITATION`) and cannot accept twice; use a second user's token (override the request auth) to exercise the accept/decline flow.\n- `DELETE` endpoints that return `204` have no response body.\n- `projectId` must be owned by your token's user, otherwise the API returns `403 NOT_OWNER` (share management) or `404 PROJECT_NOT_FOUND`.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
     "_exporter_id": "12630530"
   },
@@ -202,12 +202,18 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "const json = pm.response.json();",
-                  "pm.test(\"Project created\", function () {",
-                  "  pm.response.to.have.status(201);",
-                  "  pm.expect(json.id).to.be.a('string').and.not.empty;",
-                  "});",
-                  "pm.environment.set(\"projectId\", json.id);"
+                  "const etag = pm.response.headers.get('ETag') || '';",
+                  "const strong = /^\"[1-9]\\d*\"$/.exec(etag);",
+                  "if (strong) { pm.environment.set('revision', strong[0]); }"
+                ]
+              }
+            },
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.environment.set('idempotencyKey', require('uuid').v4());"
                 ]
               }
             }
@@ -218,6 +224,10 @@
               {
                 "key": "Content-Type",
                 "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotencyKey}}"
               }
             ],
             "body": {
@@ -291,7 +301,20 @@
             },
             "description": "Returns full project detail (owner, scans, permissions) as the Owner or an active Viewer. `404 PROJECT_NOT_FOUND` when the project is missing, deleted, or inaccessible."
           },
-          "response": []
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const etag = pm.response.headers.get('ETag') || '';",
+                  "const strong = /^\"[1-9]\\d*\"$/.exec(etag);",
+                  "if (strong) { pm.environment.set('revision', strong[0]); }"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "Update Project",
@@ -301,6 +324,10 @@
               {
                 "key": "Content-Type",
                 "value": "application/json"
+              },
+              {
+                "key": "If-Match",
+                "value": "{{revision}}"
               }
             ],
             "body": {
@@ -324,13 +351,31 @@
             },
             "description": "Partially updates a project (Owner only). At least one of `name` or `description` is required; `\"description\": null` clears the stored description. Returns the updated project with `200`."
           },
-          "response": []
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const etag = pm.response.headers.get('ETag') || '';",
+                  "const strong = /^\"[1-9]\\d*\"$/.exec(etag);",
+                  "if (strong) { pm.environment.set('revision', strong[0]); }"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "Delete Project",
           "request": {
             "method": "DELETE",
-            "header": [],
+            "header": [
+              {
+                "key": "If-Match",
+                "value": "{{revision}}"
+              }
+            ],
             "url": {
               "raw": "{{baseUrl}}/projects/{{projectId}}",
               "host": [
@@ -343,7 +388,20 @@
             },
             "description": "Soft-deletes a project and revokes active Viewer access in one transaction (Owner only). Returns idempotent `204` (no body). Note: this request returns `204`, so no response-body test runs."
           },
-          "response": []
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const etag = pm.response.headers.get('ETag') || '';",
+                  "const strong = /^\"[1-9]\\d*\"$/.exec(etag);",
+                  "if (strong) { pm.environment.set('revision', strong[0]); }"
+                ]
+              }
+            }
+          ]
         }
       ]
     },
@@ -358,12 +416,18 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "const json = pm.response.json();",
-                  "pm.test(\"Scan created\", function () {",
-                  "  pm.response.to.have.status(201);",
-                  "  pm.expect(json.id).to.be.a('string').and.not.empty;",
-                  "});",
-                  "pm.environment.set(\"scanId\", json.id);"
+                  "const etag = pm.response.headers.get('ETag') || '';",
+                  "const strong = /^\"[1-9]\\d*\"$/.exec(etag);",
+                  "if (strong) { pm.environment.set('revision', strong[0]); }"
+                ]
+              }
+            },
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.environment.set('idempotencyKey', require('uuid').v4());"
                 ]
               }
             }
@@ -374,6 +438,10 @@
               {
                 "key": "Content-Type",
                 "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotencyKey}}"
               }
             ],
             "body": {
@@ -451,7 +519,20 @@
             },
             "description": "Scan detail by scan id. Owner or active Viewer. Requires `scanId` (populated by the create-scan step)."
           },
-          "response": []
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const etag = pm.response.headers.get('ETag') || '';",
+                  "const strong = /^\"[1-9]\\d*\"$/.exec(etag);",
+                  "if (strong) { pm.environment.set('revision', strong[0]); }"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "Update Scan",
@@ -461,6 +542,10 @@
               {
                 "key": "Content-Type",
                 "value": "application/json"
+              },
+              {
+                "key": "If-Match",
+                "value": "{{revision}}"
               }
             ],
             "body": {
@@ -484,13 +569,31 @@
             },
             "description": "Partially updates a scan's `name` and/or `description` (Owner only). At least one field is required; `\"description\": null` clears it. Returns the updated scan with `200`."
           },
-          "response": []
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const etag = pm.response.headers.get('ETag') || '';",
+                  "const strong = /^\"[1-9]\\d*\"$/.exec(etag);",
+                  "if (strong) { pm.environment.set('revision', strong[0]); }"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "Delete Scan",
           "request": {
             "method": "DELETE",
-            "header": [],
+            "header": [
+              {
+                "key": "If-Match",
+                "value": "{{revision}}"
+              }
+            ],
             "url": {
               "raw": "{{baseUrl}}/scans/{{scanId}}",
               "host": [
@@ -503,7 +606,20 @@
             },
             "description": "Soft-deletes a scan (Owner only). Returns idempotent `204` (no body)."
           },
-          "response": []
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const etag = pm.response.headers.get('ETag') || '';",
+                  "const strong = /^\"[1-9]\\d*\"$/.exec(etag);",
+                  "if (strong) { pm.environment.set('revision', strong[0]); }"
+                ]
+              }
+            }
+          ]
         }
       ]
     },
@@ -536,7 +652,8 @@
                   "}",
                   "pm.request.body.mode = \"raw\";",
                   "pm.request.body.raw = JSON.stringify(body, null, 2);",
-                  "pm.request.body.options = { raw: { language: \"json\" } };"
+                  "pm.request.body.options = { raw: { language: \"json\" } };",
+                  "pm.environment.set('idempotencyKey', require('uuid').v4());"
                 ]
               }
             },
@@ -545,24 +662,9 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "const json = pm.response.json();",
-                  "pm.test(\"Scan created with model upload session\", function () {",
-                  "  pm.response.to.have.status(201);",
-                  "  pm.expect(json.id).to.be.a('string').and.not.empty;",
-                  "  pm.expect(json.uploads).to.be.an('object');",
-                  "  pm.expect(json.uploads.scanFile).to.be.an('object');",
-                  "  pm.expect(json.uploads.scanFile.uploadUrl).to.be.a('string').and.not.empty;",
-                  "  pm.expect(json.uploads.scanFile.uploadSessionId).to.be.a('string').and.not.empty;",
-                  "});",
-                  "pm.environment.set(\"scanId\", json.id);",
-                  "pm.environment.set(\"uploadUrl\", json.uploads.scanFile.uploadUrl);",
-                  "pm.environment.set(\"uploadSessionId\", json.uploads.scanFile.uploadSessionId);",
-                  "pm.environment.set(\"assetId\", json.uploads.scanFile.assetId);",
-                  "if (json.uploads && json.uploads.thumbnail) {",
-                  "  pm.environment.set(\"thumbnailUploadUrl\", json.uploads.thumbnail.uploadUrl);",
-                  "  pm.environment.set(\"thumbnailUploadSessionId\", json.uploads.thumbnail.uploadSessionId);",
-                  "  pm.environment.set(\"thumbnailAssetId\", json.uploads.thumbnail.assetId);",
-                  "}"
+                  "const etag = pm.response.headers.get('ETag') || '';",
+                  "const strong = /^\"[1-9]\\d*\"$/.exec(etag);",
+                  "if (strong) { pm.environment.set('revision', strong[0]); }"
                 ]
               }
             }
@@ -573,6 +675,10 @@
               {
                 "key": "Content-Type",
                 "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotencyKey}}"
               }
             ],
             "body": {
@@ -768,15 +874,18 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "const json = pm.response.json();",
-                  "pm.test(\"Model upload session created\", function () {",
-                  "  pm.expect(pm.response.code).to.be.oneOf([200, 201]);",
-                  "  pm.expect(json.uploadSessionId).to.be.a('string').and.not.empty;",
-                  "  pm.expect(json.uploadUrl).to.be.a('string').and.not.empty;",
-                  "});",
-                  "pm.environment.set(\"uploadSessionId\", json.uploadSessionId);",
-                  "pm.environment.set(\"uploadUrl\", json.uploadUrl);",
-                  "pm.environment.set(\"assetId\", json.assetId);"
+                  "const etag = pm.response.headers.get('ETag') || '';",
+                  "const strong = /^\"[1-9]\\d*\"$/.exec(etag);",
+                  "if (strong) { pm.environment.set('revision', strong[0]); }"
+                ]
+              }
+            },
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.environment.set('idempotencyKey', require('uuid').v4());"
                 ]
               }
             }
@@ -787,6 +896,10 @@
               {
                 "key": "Content-Type",
                 "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotencyKey}}"
               }
             ],
             "body": {
@@ -822,15 +935,18 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "const json = pm.response.json();",
-                  "pm.test(\"Thumbnail upload session created\", function () {",
-                  "  pm.expect(pm.response.code).to.be.oneOf([200, 201]);",
-                  "  pm.expect(json.uploadSessionId).to.be.a('string').and.not.empty;",
-                  "  pm.expect(json.uploadUrl).to.be.a('string').and.not.empty;",
-                  "});",
-                  "pm.environment.set(\"thumbnailUploadSessionId\", json.uploadSessionId);",
-                  "pm.environment.set(\"thumbnailUploadUrl\", json.uploadUrl);",
-                  "pm.environment.set(\"thumbnailAssetId\", json.assetId);"
+                  "const etag = pm.response.headers.get('ETag') || '';",
+                  "const strong = /^\"[1-9]\\d*\"$/.exec(etag);",
+                  "if (strong) { pm.environment.set('revision', strong[0]); }"
+                ]
+              }
+            },
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.environment.set('idempotencyKey', require('uuid').v4());"
                 ]
               }
             }
@@ -841,6 +957,10 @@
               {
                 "key": "Content-Type",
                 "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotencyKey}}"
               }
             ],
             "body": {
@@ -1013,12 +1133,18 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "const json = pm.response.json();",
-                  "pm.test(\"Note created\", function () {",
-                  "  pm.response.to.have.status(201);",
-                  "  pm.expect(json.id).to.be.a('string').and.not.empty;",
-                  "});",
-                  "pm.environment.set(\"noteId\", json.id);"
+                  "const etag = pm.response.headers.get('ETag') || '';",
+                  "const strong = /^\"[1-9]\\d*\"$/.exec(etag);",
+                  "if (strong) { pm.environment.set('revision', strong[0]); }"
+                ]
+              }
+            },
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.environment.set('idempotencyKey', require('uuid').v4());"
                 ]
               }
             }
@@ -1029,11 +1155,15 @@
               {
                 "key": "Content-Type",
                 "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotencyKey}}"
               }
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"content\": \"Postman note {{$timestamp}}\",\n  \"color\": \"YELLOW\",\n  \"position\": { \"x\": 1.5, \"y\": -2, \"z\": 3.25 },\n  \"orientation\": { \"x\": 0, \"y\": 0, \"z\": 1 },\n  \"modelVersion\": \"1\"\n}",
+              "raw": "{\n  \"title\": \"Postman note {{$timestamp}}\",\n  \"content\": \"Postman note {{$timestamp}}\",\n  \"color\": \"YELLOW\",\n  \"position\": { \"x\": 1.5, \"y\": -2, \"z\": 3.25 },\n  \"orientation\": { \"x\": 0, \"y\": 0, \"z\": 1 },\n  \"modelVersion\": \"1\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1106,7 +1236,20 @@
             },
             "description": "Note detail by note id. Owner or active Viewer of the parent project."
           },
-          "response": []
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const etag = pm.response.headers.get('ETag') || '';",
+                  "const strong = /^\"[1-9]\\d*\"$/.exec(etag);",
+                  "if (strong) { pm.environment.set('revision', strong[0]); }"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "Update Note",
@@ -1116,6 +1259,10 @@
               {
                 "key": "Content-Type",
                 "value": "application/json"
+              },
+              {
+                "key": "If-Match",
+                "value": "{{revision}}"
               }
             ],
             "body": {
@@ -1139,7 +1286,20 @@
             },
             "description": "Partially updates a note's `content` and/or `color` (Owner only). At least one field is required."
           },
-          "response": []
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const etag = pm.response.headers.get('ETag') || '';",
+                  "const strong = /^\"[1-9]\\d*\"$/.exec(etag);",
+                  "if (strong) { pm.environment.set('revision', strong[0]); }"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "Move Note",
@@ -1149,6 +1309,10 @@
               {
                 "key": "Content-Type",
                 "value": "application/json"
+              },
+              {
+                "key": "If-Match",
+                "value": "{{revision}}"
               }
             ],
             "body": {
@@ -1173,13 +1337,31 @@
             },
             "description": "Moves a note to a new 3D `position` (Owner only). `orientation` is optional; `modelVersion` must match the parent scan's current version, otherwise `409 MODEL_VERSION_MISMATCH`."
           },
-          "response": []
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const etag = pm.response.headers.get('ETag') || '';",
+                  "const strong = /^\"[1-9]\\d*\"$/.exec(etag);",
+                  "if (strong) { pm.environment.set('revision', strong[0]); }"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "Delete Note",
           "request": {
             "method": "DELETE",
-            "header": [],
+            "header": [
+              {
+                "key": "If-Match",
+                "value": "{{revision}}"
+              }
+            ],
             "url": {
               "raw": "{{baseUrl}}/notes/{{noteId}}",
               "host": [
@@ -1192,7 +1374,20 @@
             },
             "description": "Physically deletes a note (Owner only). Returns `204` (no body)."
           },
-          "response": []
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const etag = pm.response.headers.get('ETag') || '';",
+                  "const strong = /^\"[1-9]\\d*\"$/.exec(etag);",
+                  "if (strong) { pm.environment.set('revision', strong[0]); }"
+                ]
+              }
+            }
+          ]
         }
       ]
     },
@@ -1210,17 +1405,18 @@
                   "script": {
                     "type": "text/javascript",
                     "exec": [
-                      "const json = pm.response.json();",
-                      "pm.test(\"Invitation created\", function () {",
-                      "  pm.response.to.have.status(201);",
-                      "  pm.expect(json.invitationId).to.be.a('string').and.not.empty;",
-                      "  pm.expect(json.invitationUrl).to.be.a('string').and.not.empty;",
-                      "  pm.expect(json.status).to.eql(\"PENDING\");",
-                      "});",
-                      "pm.environment.set(\"invitationId\", json.invitationId);",
-                      "pm.environment.set(\"recipientEmail\", json.recipientEmail);",
-                      "const token = (json.invitationUrl || \"\").split(\"/invitations/\")[1] || \"\";",
-                      "pm.environment.set(\"invitationToken\", token);"
+                      "const etag = pm.response.headers.get('ETag') || '';",
+                      "const strong = /^\"[1-9]\\d*\"$/.exec(etag);",
+                      "if (strong) { pm.environment.set('revision', strong[0]); }"
+                    ]
+                  }
+                },
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.environment.set('idempotencyKey', require('uuid').v4());"
                     ]
                   }
                 }
@@ -1231,6 +1427,10 @@
                   {
                     "key": "Content-Type",
                     "value": "application/json"
+                  },
+                  {
+                    "key": "Idempotency-Key",
+                    "value": "{{idempotencyKey}}"
                   }
                 ],
                 "body": {

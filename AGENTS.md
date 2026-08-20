@@ -70,10 +70,12 @@ yarn test:coverage
 yarn build
 ```
 
-Local development uses Docker only for PostgreSQL. Run the API, Prisma
-commands, seeds, validation, tests, coverage and builds natively with Yarn.
-Start the database with `docker compose up db -d` only when it is not already
-running, and do not restart or recreate it as a routine final check.
+Local development uses Docker only for PostgreSQL, via the local-only
+`docker-compose.local.yml`. Run the API, Prisma commands, seeds, validation,
+tests, coverage and builds natively with Yarn.
+Start the database with `docker compose -f docker-compose.local.yml up db -d`
+only when it is not already running, and do not restart or recreate it as a
+routine final check.
 
 Do not run `docker compose build`, start the Compose API/migrate services, or
 bring up the full stack during normal task verification. Docker-specific
