@@ -6,22 +6,25 @@
 -- row with deletedAt so it disappears from the Viewer's list while the Owner
 -- keeps the (non-revoked) access visible in their share management.
 --
--- Existing viewer self-removals were historically stored via revokedAt and are
--- indistinguishable from Owner revokes; those rows are left unchanged. Only new
--- removals write deletedAt.
+-- No backfill is needed: self-removal is a new capability introduced by this
+-- migration, so no pre-existing project_accesses/scan_accesses row represents
+-- a Viewer's own self-removal. Every revokedAt value written before this
+-- migration was set by an Owner-only path (the revoke-viewer endpoint or
+-- project/scan deletion cascade); only rows created going forward through the
+-- new remove endpoints write deletedAt. This is documented in
+-- document/development.md.
 
 -- CreateEnum none.
-
--- Replace list/status indexes to include the viewer-removal tombstone predicate.
-DROP INDEX "project_accesses_userId_revokedAt_projectId_idx";
-DROP INDEX "scan_accesses_userId_revokedAt_scanId_idx";
 
 ALTER TABLE "project_accesses"
   ADD COLUMN "deletedAt" TIMESTAMP(3);
 ALTER TABLE "scan_accesses"
   ADD COLUMN "deletedAt" TIMESTAMP(3);
 
-CREATE INDEX "project_accesses_userId_deletedAt_revokedAt_projectId_idx"
-  ON "project_accesses"("userId", "deletedAt", "revokedAt", "projectId");
-CREATE INDEX "scan_accesses_userId_deletedAt_revokedAt_scanId_idx"
-  ON "scan_accesses"("userId", "deletedAt", "revokedAt", "scanId");
+-- The list/status indexes that add the "deletedAt" predicate are replaced by
+-- the four follow-up migrations (20260820000001-20260820000004). Postgres
+-- treats CREATE/DROP INDEX CONCURRENTLY as invalid inside a transaction
+-- block, and Prisma Migrate applies every multi-statement migration.sql as an
+-- implicit transaction, so each CONCURRENTLY statement must be the only
+-- statement in its migration to run non-transactionally and avoid blocking
+-- live reads/writes on project_accesses and scan_accesses.

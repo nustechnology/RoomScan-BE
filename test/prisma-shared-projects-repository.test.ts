@@ -33,7 +33,7 @@ function createClient() {
     findMany: vi.fn().mockResolvedValue([createAccessRow()]),
     count: vi.fn().mockResolvedValue(1),
     findFirst: vi.fn().mockResolvedValue(createAccessRow()),
-    findUnique: vi.fn().mockResolvedValue({ revokedAt: null }),
+    findUnique: vi.fn().mockResolvedValue({ deletedAt: null }),
     updateMany: vi.fn().mockResolvedValue({ count: 1 }),
   };
   const project = {
@@ -257,7 +257,7 @@ describe('PrismaSharedProjectsRepository', () => {
       },
       data: { deletedAt: NOW, revision: { increment: 1 }, updatedAt: NOW },
     });
-    expect(result).toBe(true);
+    expect(result).toEqual({ removedAt: NOW });
   });
 
   it('removeFromShared is idempotent when already removed', async () => {
@@ -271,7 +271,7 @@ describe('PrismaSharedProjectsRepository', () => {
     );
 
     expect(projectAccess.updateMany).not.toHaveBeenCalled();
-    expect(result).toBe(true);
+    expect(result).toEqual({ removedAt: NOW });
   });
 
   it('removeFromShared marks an owner-revoked access row as removed', async () => {
@@ -285,7 +285,7 @@ describe('PrismaSharedProjectsRepository', () => {
     );
 
     expect(projectAccess.updateMany).toHaveBeenCalledOnce();
-    expect(result).toBe(true);
+    expect(result).toEqual({ removedAt: NOW });
   });
 
   it('removeFromShared never removes an OWNER access row', async () => {
@@ -299,12 +299,13 @@ describe('PrismaSharedProjectsRepository', () => {
     );
 
     expect(projectAccess.updateMany).toHaveBeenCalledOnce();
-    expect(result).toBe(false);
+    expect(result).toBeNull();
   });
 
-  it('removeFromShared returns false when the concurrent update fails', async () => {
+  it('removeFromShared returns null when the concurrent update failed while still active', async () => {
     const { client, projectAccess } = createClient();
     projectAccess.updateMany.mockResolvedValue({ count: 0 });
+    projectAccess.findUnique.mockResolvedValue({ deletedAt: null });
 
     const result = await new PrismaSharedProjectsRepository(client).removeFromShared(
       PROJECT_ID,
@@ -312,10 +313,29 @@ describe('PrismaSharedProjectsRepository', () => {
       NOW,
     );
 
-    expect(result).toBe(false);
+    expect(projectAccess.findUnique).toHaveBeenCalledWith({
+      where: { id: 'access-id' },
+      select: { deletedAt: true },
+    });
+    expect(result).toBeNull();
   });
 
-  it('removeFromShared returns false when no access row exists', async () => {
+  it('removeFromShared preserves the persisted tombstone on a concurrent removal race', async () => {
+    const { client, projectAccess } = createClient();
+    const persisted = new Date('2026-07-29T09:00:00.000Z');
+    projectAccess.updateMany.mockResolvedValue({ count: 0 });
+    projectAccess.findUnique.mockResolvedValue({ deletedAt: persisted });
+
+    const result = await new PrismaSharedProjectsRepository(client).removeFromShared(
+      PROJECT_ID,
+      USER_ID,
+      NOW,
+    );
+
+    expect(result).toEqual({ removedAt: persisted });
+  });
+
+  it('removeFromShared returns null when no access row exists', async () => {
     const { client, projectAccess } = createClient();
     projectAccess.findFirst.mockResolvedValue(null);
 
@@ -325,7 +345,7 @@ describe('PrismaSharedProjectsRepository', () => {
       NOW,
     );
 
-    expect(result).toBe(false);
+    expect(result).toBeNull();
     expect(projectAccess.updateMany).not.toHaveBeenCalled();
   });
 });

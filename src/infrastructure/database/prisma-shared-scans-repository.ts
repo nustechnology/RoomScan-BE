@@ -169,19 +169,33 @@ export class PrismaSharedScansRepository implements SharedScansRepository {
     return scan?.project?.ownerId ?? null;
   }
 
-  async removeFromShared(scanId: string, userId: string, removedAt: Date): Promise<boolean> {
+  async removeFromShared(
+    scanId: string,
+    userId: string,
+    removedAt: Date,
+  ): Promise<{ removedAt: Date } | null> {
     const access = await this.#client.scanAccess.findFirst({
       where: { scanId, userId, role: PrismaProjectRole.VIEWER },
       select: { id: true, deletedAt: true },
     });
-    if (access === null) return false;
-    if (access.deletedAt !== null) return true;
+    if (access === null) return null;
+    if (access.deletedAt !== null) return { removedAt: access.deletedAt };
 
     const updated = await this.#client.scanAccess.updateMany({
       where: { scanId, userId, role: PrismaProjectRole.VIEWER, deletedAt: null },
       data: { deletedAt: removedAt, updatedAt: removedAt },
     });
+    if (updated.count === 0) {
+      const latest = await this.#client.scanAccess.findUnique({
+        where: { id: access.id },
+        select: { deletedAt: true },
+      });
+      if (latest !== null && latest.deletedAt !== null) {
+        return { removedAt: latest.deletedAt };
+      }
+      return null;
+    }
 
-    return updated.count > 0;
+    return { removedAt };
   }
 }

@@ -236,11 +236,24 @@ snapshots for existing active resources/access. The follow-up
 to existing NOTE UPSERT rows in `sync_changes` that were created without it.
 The `add_access_viewer_removal` migration adds a `deletedAt` column to
 `project_accesses` and `scan_accesses` so a Viewer can remove an item from
-their own Shared With Me list (independent of the Owner's `revokedAt`) and
-replaces the `(userId, revokedAt, <resource>Id)` indexes with
-`(userId, deletedAt, revokedAt, <resource>Id)` to match the list predicate.
-Deploy migrations with `yarn prisma:migrate:deploy`; never rewrite older
-migrations or generated Prisma Client.
+their own Shared With Me list (independent of the Owner's `revokedAt`). No
+backfill runs: self-removal is a new capability, so no pre-existing access row
+represents a Viewer's own removal, and every `revokedAt` value written before
+this migration came from an Owner-only path (the revoke-viewer endpoint or a
+project/scan deletion cascade). The four follow-up migrations
+(`drop_project_accesses_status_idx_concurrently`,
+`drop_scan_accesses_status_idx_concurrently`,
+`create_project_accesses_status_idx_concurrently`,
+`create_scan_accesses_status_idx_concurrently`) replace the
+`(userId, revokedAt, <resource>Id)` indexes with
+`(userId, deletedAt, revokedAt, <resource>Id)` to match the list predicate,
+using `DROP`/`CREATE INDEX CONCURRENTLY` so the swap does not block live reads
+or writes. Each of those four migrations contains exactly one statement:
+Postgres rejects `CONCURRENTLY` inside a transaction block, and Prisma Migrate
+applies a multi-statement `migration.sql` as one implicit transaction, so a
+`CONCURRENTLY` statement must be the only statement in its migration to run
+non-transactionally. Deploy migrations with `yarn prisma:migrate:deploy`;
+never rewrite older migrations or generated Prisma Client.
 
 `SYNC_CRYPTO_KEY` must be configured before the migrated application starts and
 must remain unchanged. V1 ciphertext/cursor formats are versioned but do not

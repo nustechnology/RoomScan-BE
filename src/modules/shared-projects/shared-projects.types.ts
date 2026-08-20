@@ -86,5 +86,9 @@ export interface SharedProjectsRepository {
     userId: string,
   ): Promise<{ revokedAt: Date | null; deletedAt: Date | null } | null>;
   findProjectOwner(projectId: string): Promise<string | null>;
-  removeFromShared(projectId: string, userId: string, removedAt: Date): Promise<boolean>;
+  removeFromShared(
+    projectId: string,
+    userId: string,
+    removedAt: Date,
+  ): Promise<{ removedAt: Date } | null>;
 }

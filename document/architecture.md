@@ -437,15 +437,20 @@ lookup to `VIEWER` rows with `deletedAt: null`: list filters by `userId`,
 `VIEWER` role, and `deletedAt`, detail and access-status checks match on
 `(projectId, userId)` with the same role and removal filter, and removal runs a
 transactionally guarded update on the access row (`role: VIEWER`,
-`deletedAt: null`). Removal sets `deletedAt`, works on any status (including an
-Owner-revoked entry), is idempotent on retry, increments the access revision,
-and emits Owner plus targeted Viewer tombstones, so owner records are never
-returned or removed and a concurrent removal or Owner revocation resolves to
-`409 NOT_IN_SHARED_WITH_ME` instead of succeeding. Lookups apply
-case-insensitive name search against the parent project, sort by a to-one
-relation field with a stable project `id` tie-breaker, and paginate with an
-offset. Owners never appear in the list, and a removal attempt by the project
-Owner returns `403 NOT_SHARED_PROJECT`.
+`deletedAt: null`, and the access's own `revision` compare-and-set). Removal
+sets `deletedAt`, works on any status (including an Owner-revoked entry), is
+idempotent on retry, increments the access revision, and emits Owner plus
+targeted Viewer tombstones, so owner records are never returned or removed. A
+concurrent Owner revocation (which also increments `revision`) wins the guarded
+update against a same-time removal; the repository re-reads the row and, since
+revocation alone never sets `deletedAt`, finds no tombstone and resolves to
+`409 NOT_IN_SHARED_WITH_ME`. A concurrent second removal request instead loses
+the update but finds the tombstone the winner already persisted, so it returns
+`200` with that stored `deletedAt` rather than surfacing a conflict. Lookups
+apply case-insensitive name search against the parent project, sort by a
+to-one relation field with a stable project `id` tie-breaker, and paginate with
+an offset. Owners never appear in the list, and a removal attempt by the
+project Owner returns `403 NOT_SHARED_PROJECT`.
 
 ## Shared Scans module
 
@@ -476,8 +481,14 @@ to `VIEWER` rows with `deletedAt: null`: list filters by `userId`, the `VIEWER`
 role, and `deletedAt`, detail and access-status checks match on `(scanId, userId)`
 with the same role and removal filter, and removal runs a guarded `updateMany` on
 the access row (`role: VIEWER`, `deletedAt: null`) that sets `deletedAt`, works
-on any status, and is idempotent. Owner records are never returned or removed and
-a concurrent removal or Owner revocation resolves to `409 NOT_IN_SHARED_WITH_ME`.
+on any status, and is idempotent: a losing concurrent removal request re-reads
+the row and returns `200` with the tombstone the winner already persisted
+instead of failing. `ScanAccess` carries no `revision` column, so unlike
+`ProjectAccess` a concurrent Owner revocation cannot contend with this update at
+all — revocation only sets `revokedAt`, which self-removal never inspects — so
+the two proceed independently and removal only resolves to
+`409 NOT_IN_SHARED_WITH_ME` when the access row is missing entirely (never
+granted, or owned by the caller). Owner records are never returned or removed.
 Lookups apply case-insensitive name search against the parent scan, sort by a
 to-one relation field with a stable scan `id` tie-breaker, and paginate with an
 offset. The "owner" check for removal resolves the scan's project owner; owners

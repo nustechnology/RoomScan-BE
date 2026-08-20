@@ -223,7 +223,11 @@ export class PrismaSharedProjectsRepository implements SharedProjectsRepository 
     return project?.ownerId ?? null;
   }
 
-  async removeFromShared(projectId: string, userId: string, removedAt: Date): Promise<boolean> {
+  async removeFromShared(
+    projectId: string,
+    userId: string,
+    removedAt: Date,
+  ): Promise<{ removedAt: Date } | null> {
     return await this.#client.$transaction(async (transaction) => {
       const access = await transaction.projectAccess.findFirst({
         where: { projectId, userId, role: PrismaProjectRole.VIEWER },
@@ -235,8 +239,8 @@ export class PrismaSharedProjectsRepository implements SharedProjectsRepository 
           project: { select: { ownerId: true } },
         },
       });
-      if (access === null) return false;
-      if (access.deletedAt !== null) return true;
+      if (access === null) return null;
+      if (access.deletedAt !== null) return { removedAt: access.deletedAt };
 
       const updated = await transaction.projectAccess.updateMany({
         where: {
@@ -248,7 +252,16 @@ export class PrismaSharedProjectsRepository implements SharedProjectsRepository 
         },
         data: { deletedAt: removedAt, revision: { increment: 1 }, updatedAt: removedAt },
       });
-      if (updated.count === 0) return false;
+      if (updated.count === 0) {
+        const latest = await transaction.projectAccess.findUnique({
+          where: { id: access.id },
+          select: { deletedAt: true },
+        });
+        if (latest !== null && latest.deletedAt !== null) {
+          return { removedAt: latest.deletedAt };
+        }
+        return null;
+      }
 
       const change = {
         projectId,
@@ -261,7 +274,7 @@ export class PrismaSharedProjectsRepository implements SharedProjectsRepository 
       await writeDeleteChange(transaction, change);
       await writeDeleteChange(transaction, { ...change, targetUserId: userId });
       await refreshProjectRollup(transaction, projectId, removedAt);
-      return true;
+      return { removedAt };
     });
   }
 }

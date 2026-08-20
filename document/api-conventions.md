@@ -1130,8 +1130,9 @@ Error behavior:
 ## Shared With Me
 
 Every Shared With Me endpoint requires a valid Bearer access token. The list
-contains every project the current user accepted an invitation for, each with a
-computed `status`; projects owned by the current user never appear. Removing a
+result is every non-deleted project the current user accepted an invitation
+for — the access row's own `deletedAt` is unset — each with a computed
+`status`; projects owned by the current user never appear. Removing a
 project marks only the current user's own access row as removed (a separate
 `deletedAt`, distinct from the Owner's `revokedAt`), so the original project,
 the Owner, and other Viewers are never affected.
@@ -1240,7 +1241,8 @@ Business rules:
   never appear, so the Owner of a project cannot open or remove it here.
 - An active Viewer can open a shared project read-only. Deeper navigation
   (scans, notes, assets) uses the canonical project and scan endpoints, which
-  already authorize active Viewers.
+  already authorize active Viewers by requiring both `revokedAt` and
+  `deletedAt` unset on the access row.
 - Revoking a Viewer (Owner action) or deleting the project leaves the entry in
   the Viewer's list with `status` `REVOKED` or `PROJECT_DELETED`, but the
   project can no longer be opened.
@@ -1272,9 +1274,10 @@ Error behavior:
 ## Shared Scans
 
 Every Shared Scans endpoint requires a valid Bearer access token and mirrors the
-project-level Shared With Me surface, but at scan granularity. The list contains
-every scan the current user accepted a scan-level invitation or share link for,
-each with a computed `status`; scans owned by the current user never appear.
+project-level Shared With Me surface, but at scan granularity. The list result
+is every non-deleted scan the current user accepted a scan-level invitation or
+share link for — the access row's own `deletedAt` is unset — each with a
+computed `status`; scans owned by the current user never appear.
 Removing a scan marks only the current user's own `scan_accesses` row as removed
 (a separate `deletedAt`, distinct from the Owner's `revokedAt`): the original
 scan, the Owner, and other Viewers are never affected.
@@ -1377,7 +1380,8 @@ Business rules:
   here.
 - An active Viewer can open a shared scan read-only. Deeper navigation (notes,
   assets) uses the canonical scan endpoints, which already authorize active
-  Viewers.
+  Viewers by requiring both `revokedAt` and `deletedAt` unset on the access
+  row.
 - Revoking a Viewer (Owner action) or deleting the scan leaves the entry in the
   Viewer's list with `status` `REVOKED` or `SCAN_DELETED`, but the scan can no
   longer be opened.

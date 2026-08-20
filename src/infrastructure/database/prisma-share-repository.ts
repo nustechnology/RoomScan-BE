@@ -961,36 +961,46 @@ export class PrismaShareRepository implements ShareRepository {
     shareLinkId: string,
     acceptedAt: Date,
   ): Promise<{ id: string }> {
-    const existingRevoked = await this.#client.projectAccess.findFirst({
-      where: { projectId, userId, revokedAt: { not: null } },
-      select: { id: true },
-    });
+    return await this.#client.$transaction(async (transaction) => {
+      const existingRevoked = await transaction.projectAccess.findFirst({
+        where: { projectId, userId, revokedAt: { not: null } },
+        select: { id: true },
+      });
 
-    if (existingRevoked !== null) {
-      throw new AccessAlreadyExistsError();
-    }
+      if (existingRevoked !== null) {
+        throw new AccessAlreadyExistsError();
+      }
 
-    const access = await this.#client.projectAccess.upsert({
-      where: { projectId_userId: { projectId, userId } },
-      create: {
-        projectId,
-        userId,
-        role: PrismaProjectRole.VIEWER,
-        shareLinkId,
-        acceptedAt,
-        revokedAt: null,
-        deletedAt: null,
-      },
-      update: {
-        role: PrismaProjectRole.VIEWER,
-        shareLinkId,
-        acceptedAt,
-        revokedAt: null,
-        deletedAt: null,
-      },
-      select: { id: true },
+      const access = await transaction.projectAccess.upsert({
+        where: { projectId_userId: { projectId, userId } },
+        create: {
+          projectId,
+          userId,
+          role: PrismaProjectRole.VIEWER,
+          shareLinkId,
+          acceptedAt,
+          revokedAt: null,
+          deletedAt: null,
+        },
+        update: {
+          role: PrismaProjectRole.VIEWER,
+          shareLinkId,
+          acceptedAt,
+          revokedAt: null,
+          deletedAt: null,
+          revision: { increment: 1 },
+          updatedAt: acceptedAt,
+        },
+        select: { id: true },
+      });
+
+      await writeAccessUpsert(transaction, access.id, { changedAt: acceptedAt });
+      await writeAccessUpsert(transaction, access.id, {
+        targetUserId: userId,
+        changedAt: acceptedAt,
+      });
+      return { id: access.id };
     });
-    return { id: access.id };
   }
 
   async grantScanAccess(

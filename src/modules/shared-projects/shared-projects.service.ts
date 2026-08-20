@@ -120,15 +120,15 @@ export class SharedProjectsService {
     }
 
     const removedAt = this.#clock();
-    const removed = await this.#repository.removeFromShared(projectId, userId, removedAt);
+    const result = await this.#repository.removeFromShared(projectId, userId, removedAt);
 
-    if (!removed) {
+    if (result === null) {
       throw new SharedProjectNotInListError();
     }
 
     return {
       projectId,
-      removedAt: removedAt.toISOString(),
+      removedAt: result.removedAt.toISOString(),
     };
   }
 }

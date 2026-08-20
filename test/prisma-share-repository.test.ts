@@ -117,7 +117,10 @@ function createClient() {
           create: typeof invitation.create;
           findUnique: typeof invitation.findUnique;
         };
-        projectAccess: { upsert: typeof projectAccess.upsert };
+        projectAccess: {
+          upsert: typeof projectAccess.upsert;
+          findFirst: typeof projectAccess.findFirst;
+        };
         scanAccess: { upsert: typeof scanAccess.upsert };
       }) => Promise<unknown>
     )({
@@ -126,7 +129,7 @@ function createClient() {
         create: invitation.create,
         findUnique: invitation.findUnique,
       },
-      projectAccess: { upsert: projectAccess.upsert },
+      projectAccess: { upsert: projectAccess.upsert, findFirst: projectAccess.findFirst },
       scanAccess: { upsert: scanAccess.upsert },
     });
   });
@@ -1061,6 +1064,8 @@ describe('PrismaShareRepository', () => {
         acceptedAt: NOW,
         revokedAt: null,
         deletedAt: null,
+        revision: { increment: 1 },
+        updatedAt: NOW,
       },
       select: { id: true },
     });

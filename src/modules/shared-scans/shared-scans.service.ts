@@ -101,15 +101,15 @@ export class SharedScansService {
     }
 
     const removedAt = this.#clock();
-    const removed = await this.#repository.removeFromShared(scanId, userId, removedAt);
+    const result = await this.#repository.removeFromShared(scanId, userId, removedAt);
 
-    if (!removed) {
+    if (result === null) {
       throw new SharedScanNotInListError();
     }
 
     return {
       scanId,
-      removedAt: removedAt.toISOString(),
+      removedAt: result.removedAt.toISOString(),
     };
   }
 }

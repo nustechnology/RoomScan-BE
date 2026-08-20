@@ -219,7 +219,7 @@ describe('SharedScansService', () => {
   describe('remove', () => {
     it('removes the current viewer access and confirms removal', async () => {
       findAccessStatus.mockResolvedValue({ revokedAt: null, deletedAt: null });
-      removeFromShared.mockResolvedValue(true);
+      removeFromShared.mockResolvedValue({ removedAt: NOW });
 
       const result = await service.remove(USER_ID, SCAN_ID);
 
@@ -230,7 +230,7 @@ describe('SharedScansService', () => {
 
     it('removes an owner-revoked scan from the list', async () => {
       findAccessStatus.mockResolvedValue({ revokedAt: NOW, deletedAt: null });
-      removeFromShared.mockResolvedValue(true);
+      removeFromShared.mockResolvedValue({ removedAt: NOW });
 
       const result = await service.remove(USER_ID, SCAN_ID);
 
@@ -266,7 +266,7 @@ describe('SharedScansService', () => {
 
     it('rejects when the concurrent update fails', async () => {
       findAccessStatus.mockResolvedValue({ revokedAt: null, deletedAt: null });
-      removeFromShared.mockResolvedValue(false);
+      removeFromShared.mockResolvedValue(null);
 
       await expect(service.remove(USER_ID, SCAN_ID)).rejects.toBeInstanceOf(
         SharedScanNotInListError,

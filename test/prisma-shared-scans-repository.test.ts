@@ -11,6 +11,7 @@ const NOW = new Date('2026-07-29T10:00:00.000Z');
 
 function createAccessRow(overrides: Record<string, unknown> = {}) {
   return {
+    id: 'access-id',
     revokedAt: null,
     deletedAt: null,
     scan: {
@@ -36,6 +37,7 @@ function createClient() {
     findMany: vi.fn().mockResolvedValue([createAccessRow()]),
     count: vi.fn().mockResolvedValue(1),
     findFirst: vi.fn().mockResolvedValue(createAccessRow()),
+    findUnique: vi.fn().mockResolvedValue({ deletedAt: null }),
     updateMany: vi.fn().mockResolvedValue({ count: 1 }),
   };
   const scan = {
@@ -218,7 +220,7 @@ describe('PrismaSharedScansRepository', () => {
       where: { scanId: SCAN_ID, userId: USER_ID, role: 'VIEWER', deletedAt: null },
       data: { deletedAt: NOW, updatedAt: NOW },
     });
-    expect(result).toBe(true);
+    expect(result).toEqual({ removedAt: NOW });
   });
 
   it('removeFromShared is idempotent when already removed', async () => {
@@ -232,7 +234,7 @@ describe('PrismaSharedScansRepository', () => {
     );
 
     expect(scanAccess.updateMany).not.toHaveBeenCalled();
-    expect(result).toBe(true);
+    expect(result).toEqual({ removedAt: NOW });
   });
 
   it('removeFromShared marks an owner-revoked access row as removed', async () => {
@@ -246,12 +248,13 @@ describe('PrismaSharedScansRepository', () => {
     );
 
     expect(scanAccess.updateMany).toHaveBeenCalledOnce();
-    expect(result).toBe(true);
+    expect(result).toEqual({ removedAt: NOW });
   });
 
-  it('removeFromShared returns false when the concurrent update fails', async () => {
+  it('removeFromShared returns null when the concurrent update failed while still active', async () => {
     const { client, scanAccess } = createClient();
     scanAccess.updateMany.mockResolvedValue({ count: 0 });
+    scanAccess.findUnique.mockResolvedValue({ deletedAt: null });
 
     const result = await new PrismaSharedScansRepository(client).removeFromShared(
       SCAN_ID,
@@ -259,10 +262,29 @@ describe('PrismaSharedScansRepository', () => {
       NOW,
     );
 
-    expect(result).toBe(false);
+    expect(scanAccess.findUnique).toHaveBeenCalledWith({
+      where: { id: 'access-id' },
+      select: { deletedAt: true },
+    });
+    expect(result).toBeNull();
   });
 
-  it('removeFromShared returns false when no access row exists', async () => {
+  it('removeFromShared preserves the persisted tombstone on a concurrent removal race', async () => {
+    const { client, scanAccess } = createClient();
+    const persisted = new Date('2026-07-29T09:00:00.000Z');
+    scanAccess.updateMany.mockResolvedValue({ count: 0 });
+    scanAccess.findUnique.mockResolvedValue({ deletedAt: persisted });
+
+    const result = await new PrismaSharedScansRepository(client).removeFromShared(
+      SCAN_ID,
+      USER_ID,
+      NOW,
+    );
+
+    expect(result).toEqual({ removedAt: persisted });
+  });
+
+  it('removeFromShared returns null when no access row exists', async () => {
     const { client, scanAccess } = createClient();
     scanAccess.findFirst.mockResolvedValue(null);
 
@@ -272,7 +294,7 @@ describe('PrismaSharedScansRepository', () => {
       NOW,
     );
 
-    expect(result).toBe(false);
+    expect(result).toBeNull();
     expect(scanAccess.updateMany).not.toHaveBeenCalled();
   });
 });

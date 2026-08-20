@@ -79,5 +79,9 @@ export interface SharedScansRepository {
     userId: string,
   ): Promise<{ revokedAt: Date | null; deletedAt: Date | null } | null>;
   findScanOwner(scanId: string): Promise<string | null>;
-  removeFromShared(scanId: string, userId: string, removedAt: Date): Promise<boolean>;
+  removeFromShared(
+    scanId: string,
+    userId: string,
+    removedAt: Date,
+  ): Promise<{ removedAt: Date } | null>;
 }
