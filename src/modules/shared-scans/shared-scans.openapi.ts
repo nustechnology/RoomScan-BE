@@ -180,7 +180,7 @@ sharedScansOpenApiRegistry.registerPath({
   tags: ['Shared With Me'],
   summary: 'Remove a scan from the current user’s Shared With Me list',
   description:
-    'Viewer only. Revokes only the current user’s own scan access; the original scan, the Owner, and other Viewers are unaffected.',
+    'Viewer only. Removes the scan from the current user’s Shared With Me list by marking their own access as removed, regardless of its current status; it is idempotent on retry. The original scan, the Owner, and other Viewers are unaffected.',
   security: [{ [bearerAuth.name]: [] }],
   request: {
     params: SharedScanIdParamSchema,

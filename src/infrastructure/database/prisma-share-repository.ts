@@ -517,12 +517,14 @@ export class PrismaShareRepository implements ShareRepository {
           invitationId,
           acceptedAt,
           revokedAt: null,
+          deletedAt: null,
         },
         update: {
           role: PrismaProjectRole.VIEWER,
           invitationId,
           acceptedAt,
           revokedAt: null,
+          deletedAt: null,
           revision: { increment: 1 },
           updatedAt: acceptedAt,
         },
@@ -579,12 +581,14 @@ export class PrismaShareRepository implements ShareRepository {
           invitationId,
           acceptedAt,
           revokedAt: null,
+          deletedAt: null,
         },
         update: {
           role: PrismaProjectRole.VIEWER,
           invitationId,
           acceptedAt,
           revokedAt: null,
+          deletedAt: null,
         },
       });
 
@@ -683,14 +687,14 @@ export class PrismaShareRepository implements ShareRepository {
 
   async findActiveViewerAccess(projectId: string, userId: string): Promise<{ id: string } | null> {
     return await this.#client.projectAccess.findFirst({
-      where: { projectId, userId, revokedAt: null },
+      where: { projectId, userId, revokedAt: null, deletedAt: null },
       select: { id: true },
     });
   }
 
   async findActiveScanAccess(scanId: string, userId: string): Promise<{ id: string } | null> {
     return await this.#client.scanAccess.findFirst({
-      where: { scanId, userId, revokedAt: null },
+      where: { scanId, userId, revokedAt: null, deletedAt: null },
       select: { id: true },
     });
   }
@@ -704,7 +708,7 @@ export class PrismaShareRepository implements ShareRepository {
     }>
   > {
     const rows = await this.#client.projectAccess.findMany({
-      where: { projectId, role: PrismaProjectRole.VIEWER, revokedAt: null },
+      where: { projectId, role: PrismaProjectRole.VIEWER, revokedAt: null, deletedAt: null },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       select: {
         userId: true,
@@ -734,7 +738,7 @@ export class PrismaShareRepository implements ShareRepository {
     Array<{ userId: string; user: { id: string; email: string | null }; grantedAt: Date }>
   > {
     const rows = await this.#client.scanAccess.findMany({
-      where: { scanId, role: PrismaProjectRole.VIEWER, revokedAt: null },
+      where: { scanId, role: PrismaProjectRole.VIEWER, revokedAt: null, deletedAt: null },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       select: {
         userId: true,
@@ -975,11 +979,14 @@ export class PrismaShareRepository implements ShareRepository {
         shareLinkId,
         acceptedAt,
         revokedAt: null,
+        deletedAt: null,
       },
       update: {
         role: PrismaProjectRole.VIEWER,
         shareLinkId,
         acceptedAt,
+        revokedAt: null,
+        deletedAt: null,
       },
       select: { id: true },
     });
@@ -1010,11 +1017,14 @@ export class PrismaShareRepository implements ShareRepository {
         shareLinkId,
         acceptedAt,
         revokedAt: null,
+        deletedAt: null,
       },
       update: {
         role: PrismaProjectRole.VIEWER,
         shareLinkId,
         acceptedAt,
+        revokedAt: null,
+        deletedAt: null,
       },
       select: { id: true },
     });

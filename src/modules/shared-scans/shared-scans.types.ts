@@ -19,6 +19,7 @@ export interface SharedScanRecord {
   updatedAt: Date;
   scanDeletedAt: Date | null;
   accessRevokedAt: Date | null;
+  accessDeletedAt: Date | null;
 }
 
 export interface SharedScanResult {
@@ -73,7 +74,10 @@ export interface SharedScansRepository {
     options: SharedScansListOptions,
   ): Promise<{ items: SharedScanRecord[]; total: number }>;
   findSharedForUser(scanId: string, userId: string): Promise<SharedScanRecord | null>;
-  findAccessStatus(scanId: string, userId: string): Promise<{ revokedAt: Date | null } | null>;
+  findAccessStatus(
+    scanId: string,
+    userId: string,
+  ): Promise<{ revokedAt: Date | null; deletedAt: Date | null } | null>;
   findScanOwner(scanId: string): Promise<string | null>;
   removeFromShared(scanId: string, userId: string, removedAt: Date): Promise<boolean>;
 }

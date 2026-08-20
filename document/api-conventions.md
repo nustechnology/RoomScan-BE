@@ -1132,7 +1132,8 @@ Error behavior:
 Every Shared With Me endpoint requires a valid Bearer access token. The list
 contains every project the current user accepted an invitation for, each with a
 computed `status`; projects owned by the current user never appear. Removing a
-project revokes only the current user's own access row: the original project,
+project marks only the current user's own access row as removed (a separate
+`deletedAt`, distinct from the Owner's `revokedAt`), so the original project,
 the Owner, and other Viewers are never affected.
 
 | Method   | Endpoint                             | Result                                                |
@@ -1181,8 +1182,7 @@ only while the project is `ACTIVE`. `status` is one of:
 
 - `ACTIVE`: the access row is active and the project is not deleted; the project
   can be opened.
-- `REVOKED`: the Owner revoked the Viewer, or the Viewer removed the project;
-  the project cannot be opened.
+- `REVOKED`: the Owner revoked the Viewer; the project cannot be opened.
 - `PROJECT_DELETED`: the project was soft-deleted and its access rows were
   revoked; the project cannot be opened.
 - `TEMPORARILY_UNAVAILABLE`: a defensive state for an inconsistent access record
@@ -1244,12 +1244,16 @@ Business rules:
 - Revoking a Viewer (Owner action) or deleting the project leaves the entry in
   the Viewer's list with `status` `REVOKED` or `PROJECT_DELETED`, but the
   project can no longer be opened.
-- Removing a project is a Viewer-only self-service action: it sets `revokedAt`
+- Removing a project is a Viewer-only self-service action: it sets `deletedAt`
   on the current user's access row only, never the Owner's project, and never
-  other Viewers' access. The access revision, project revision, Owner event,
-  and targeted self-access tombstone commit in the same transaction.
-- Removing an entry that is not in Shared With Me (already removed, Owner-revoked,
-  or never shared) returns `409`.
+  other Viewers' access. It works regardless of the current status (including an
+  Owner-revoked entry) and is idempotent: repeating it on an already-removed
+  entry returns `200` with the stored `removedAt`. Once removed, the project no
+  longer appears in the Viewer's list. The access revision, Owner event, and
+  targeted self-access tombstone commit in the same transaction.
+- Removing an entry the current user never had access to, or that is owned by
+  the current user, returns an error; an empty/absent access row for a
+  non-owner returns `409`.
 
 Error behavior:
 
@@ -1271,8 +1275,9 @@ Every Shared Scans endpoint requires a valid Bearer access token and mirrors the
 project-level Shared With Me surface, but at scan granularity. The list contains
 every scan the current user accepted a scan-level invitation or share link for,
 each with a computed `status`; scans owned by the current user never appear.
-Removing a scan revokes only the current user's own `scan_accesses` row: the
-original scan, the Owner, and other Viewers are never affected.
+Removing a scan marks only the current user's own `scan_accesses` row as removed
+(a separate `deletedAt`, distinct from the Owner's `revokedAt`): the original
+scan, the Owner, and other Viewers are never affected.
 
 | Method   | Endpoint                       | Result                                             |
 | -------- | ------------------------------ | -------------------------------------------------- |
@@ -1314,8 +1319,7 @@ is always `VIEWER` and read-only; `canView` is `true` only while the scan is
 
 - `ACTIVE`: the access row is active and the scan is not deleted; the scan can
   be opened.
-- `REVOKED`: the Owner revoked the Viewer, or the Viewer removed the scan; the
-  scan cannot be opened.
+- `REVOKED`: the Owner revoked the Viewer; the scan cannot be opened.
 - `SCAN_DELETED`: the scan was soft-deleted and its access rows were revoked;
   the scan cannot be opened.
 - `TEMPORARILY_UNAVAILABLE`: a defensive state for an inconsistent access record
@@ -1377,11 +1381,15 @@ Business rules:
 - Revoking a Viewer (Owner action) or deleting the scan leaves the entry in the
   Viewer's list with `status` `REVOKED` or `SCAN_DELETED`, but the scan can no
   longer be opened.
-- Removing a scan is a Viewer-only self-service action: it sets `revokedAt` on
+- Removing a scan is a Viewer-only self-service action: it sets `deletedAt` on
   the current user's `scan_accesses` row only, never the Owner's scan, and never
-  other Viewers' access.
-- Removing an entry that is not in Shared Scans (already removed, Owner-revoked,
-  or never shared) returns `409`.
+  other Viewers' access. It works regardless of the current status (including an
+  Owner-revoked entry) and is idempotent: repeating it on an already-removed
+  entry returns `200` with the stored `removedAt`. Once removed, the scan no
+  longer appears in the Viewer's list.
+- Removing an entry the current user never had access to, or that is owned by
+  the current user, returns an error; an empty/absent access row for a
+  non-owner returns `409`.
 
 Error behavior:
 

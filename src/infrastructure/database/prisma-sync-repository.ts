@@ -66,6 +66,7 @@ function visibilitySql(userId: string): Prisma.Sql {
             AND pa."userId" = ${userId}::uuid
             AND pa.role = 'VIEWER'::"ProjectRole"
             AND pa."revokedAt" IS NULL
+            AND pa."deletedAt" IS NULL
         )
       )
     )
@@ -201,11 +202,12 @@ async function writeResolvedConflictSnapshot(
     select: {
       revision: true,
       revokedAt: true,
+      deletedAt: true,
       project: { select: { ownerId: true } },
     },
   });
   if (access === null) return;
-  if (access.revokedAt === null) {
+  if (access.revokedAt === null && access.deletedAt === null) {
     await writeAccessUpsert(transaction, conflict.resourceId, {
       targetUserId: userId,
       changedAt,
@@ -218,7 +220,7 @@ async function writeResolvedConflictSnapshot(
       resourceType: 'PROJECT_ACCESS',
       resourceId: conflict.resourceId,
       revision: access.revision,
-      deletedAt: access.revokedAt,
+      deletedAt: (access.deletedAt ?? access.revokedAt)!,
     });
   }
 }
@@ -388,7 +390,7 @@ export class PrismaSyncRepository implements SyncRepository {
           { ownerId: userId },
           {
             accesses: {
-              some: { userId, role: 'VIEWER', revokedAt: null },
+              some: { userId, role: 'VIEWER', revokedAt: null, deletedAt: null },
             },
           },
         ],

@@ -234,6 +234,11 @@ idempotency receipts; the append-only `sync_changes` feed; and per-user
 snapshots for existing active resources/access. The follow-up
 `backfill_note_title_in_sync_changes` migration adds the note `title` field
 to existing NOTE UPSERT rows in `sync_changes` that were created without it.
+The `add_access_viewer_removal` migration adds a `deletedAt` column to
+`project_accesses` and `scan_accesses` so a Viewer can remove an item from
+their own Shared With Me list (independent of the Owner's `revokedAt`) and
+replaces the `(userId, revokedAt, <resource>Id)` indexes with
+`(userId, deletedAt, revokedAt, <resource>Id)` to match the list predicate.
 Deploy migrations with `yarn prisma:migrate:deploy`; never rewrite older
 migrations or generated Prisma Client.
 

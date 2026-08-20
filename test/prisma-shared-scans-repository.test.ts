@@ -12,6 +12,7 @@ const NOW = new Date('2026-07-29T10:00:00.000Z');
 function createAccessRow(overrides: Record<string, unknown> = {}) {
   return {
     revokedAt: null,
+    deletedAt: null,
     scan: {
       id: SCAN_ID,
       projectId: PROJECT_ID,
@@ -68,14 +69,14 @@ describe('PrismaSharedScansRepository', () => {
 
     expect(scanAccess.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { userId: USER_ID, role: 'VIEWER' },
+        where: { userId: USER_ID, role: 'VIEWER', deletedAt: null },
         orderBy: [{ scan: { updatedAt: 'desc' } }, { scan: { id: 'desc' } }],
         skip: 5,
         take: 5,
       }),
     );
     expect(scanAccess.count).toHaveBeenCalledWith({
-      where: { userId: USER_ID, role: 'VIEWER' },
+      where: { userId: USER_ID, role: 'VIEWER', deletedAt: null },
     });
     expect(transaction).toHaveBeenCalledOnce();
     expect(result.total).toBe(1);
@@ -94,6 +95,7 @@ describe('PrismaSharedScansRepository', () => {
         updatedAt: NOW,
         scanDeletedAt: null,
         accessRevokedAt: null,
+        accessDeletedAt: null,
       },
     ]);
   });
@@ -113,6 +115,7 @@ describe('PrismaSharedScansRepository', () => {
         where: {
           userId: USER_ID,
           role: 'VIEWER',
+          deletedAt: null,
           scan: { name: { contains: 'living', mode: 'insensitive' } },
         },
         orderBy: [{ scan: { name: 'asc' } }, { scan: { id: 'asc' } }],
@@ -125,6 +128,7 @@ describe('PrismaSharedScansRepository', () => {
     scanAccess.findFirst.mockResolvedValue(
       createAccessRow({
         revokedAt: NOW,
+        deletedAt: null,
         scan: { ...createAccessRow().scan, deletedAt: null },
       }),
     );
@@ -136,10 +140,11 @@ describe('PrismaSharedScansRepository', () => {
 
     expect(scanAccess.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { scanId: SCAN_ID, userId: USER_ID, role: 'VIEWER' },
+        where: { scanId: SCAN_ID, userId: USER_ID, role: 'VIEWER', deletedAt: null },
       }),
     );
     expect(result?.accessRevokedAt).toEqual(NOW);
+    expect(result?.accessDeletedAt).toBeNull();
     expect(result?.scanDeletedAt).toBeNull();
   });
 
@@ -152,22 +157,22 @@ describe('PrismaSharedScansRepository', () => {
     ).resolves.toBeNull();
     expect(scanAccess.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { scanId: SCAN_ID, userId: USER_ID, role: 'VIEWER' },
+        where: { scanId: SCAN_ID, userId: USER_ID, role: 'VIEWER', deletedAt: null },
       }),
     );
   });
 
-  it('findAccessStatus reads the revocation state of the access row', async () => {
+  it('findAccessStatus reads the revocation and removal state of the access row', async () => {
     const { client, scanAccess } = createClient();
-    scanAccess.findFirst.mockResolvedValue({ revokedAt: NOW });
+    scanAccess.findFirst.mockResolvedValue({ revokedAt: NOW, deletedAt: null });
 
     const result = await new PrismaSharedScansRepository(client).findAccessStatus(SCAN_ID, USER_ID);
 
     expect(scanAccess.findFirst).toHaveBeenCalledWith({
       where: { scanId: SCAN_ID, userId: USER_ID, role: 'VIEWER' },
-      select: { revokedAt: true },
+      select: { revokedAt: true, deletedAt: true },
     });
-    expect(result).toEqual({ revokedAt: NOW });
+    expect(result).toEqual({ revokedAt: NOW, deletedAt: null });
   });
 
   it('findAccessStatus returns null when the access row is missing', async () => {
@@ -200,7 +205,7 @@ describe('PrismaSharedScansRepository', () => {
     ).resolves.toBeNull();
   });
 
-  it('removeFromShared revokes only the active access row', async () => {
+  it('removeFromShared marks only the current viewer access as removed', async () => {
     const { client, scanAccess } = createClient();
 
     const result = await new PrismaSharedScansRepository(client).removeFromShared(
@@ -210,13 +215,41 @@ describe('PrismaSharedScansRepository', () => {
     );
 
     expect(scanAccess.updateMany).toHaveBeenCalledWith({
-      where: { scanId: SCAN_ID, userId: USER_ID, role: 'VIEWER', revokedAt: null },
-      data: { revokedAt: NOW },
+      where: { scanId: SCAN_ID, userId: USER_ID, role: 'VIEWER', deletedAt: null },
+      data: { deletedAt: NOW, updatedAt: NOW },
     });
     expect(result).toBe(true);
   });
 
-  it('removeFromShared returns false when nothing active was revoked', async () => {
+  it('removeFromShared is idempotent when already removed', async () => {
+    const { client, scanAccess } = createClient();
+    scanAccess.findFirst.mockResolvedValue({ id: 'access-id', deletedAt: NOW });
+
+    const result = await new PrismaSharedScansRepository(client).removeFromShared(
+      SCAN_ID,
+      USER_ID,
+      NOW,
+    );
+
+    expect(scanAccess.updateMany).not.toHaveBeenCalled();
+    expect(result).toBe(true);
+  });
+
+  it('removeFromShared marks an owner-revoked access row as removed', async () => {
+    const { client, scanAccess } = createClient();
+    scanAccess.findFirst.mockResolvedValue(createAccessRow({ revokedAt: NOW, deletedAt: null }));
+
+    const result = await new PrismaSharedScansRepository(client).removeFromShared(
+      SCAN_ID,
+      USER_ID,
+      NOW,
+    );
+
+    expect(scanAccess.updateMany).toHaveBeenCalledOnce();
+    expect(result).toBe(true);
+  });
+
+  it('removeFromShared returns false when the concurrent update fails', async () => {
     const { client, scanAccess } = createClient();
     scanAccess.updateMany.mockResolvedValue({ count: 0 });
 
@@ -227,5 +260,19 @@ describe('PrismaSharedScansRepository', () => {
     );
 
     expect(result).toBe(false);
+  });
+
+  it('removeFromShared returns false when no access row exists', async () => {
+    const { client, scanAccess } = createClient();
+    scanAccess.findFirst.mockResolvedValue(null);
+
+    const result = await new PrismaSharedScansRepository(client).removeFromShared(
+      SCAN_ID,
+      USER_ID,
+      NOW,
+    );
+
+    expect(result).toBe(false);
+    expect(scanAccess.updateMany).not.toHaveBeenCalled();
   });
 });

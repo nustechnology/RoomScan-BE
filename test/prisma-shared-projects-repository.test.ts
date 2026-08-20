@@ -13,6 +13,7 @@ function createAccessRow(overrides: Record<string, unknown> = {}) {
     id: 'access-id',
     revision: 1,
     revokedAt: null,
+    deletedAt: null,
     project: {
       id: PROJECT_ID,
       ownerId: OWNER_ID,
@@ -70,14 +71,14 @@ describe('PrismaSharedProjectsRepository', () => {
 
     expect(projectAccess.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { userId: USER_ID, role: 'VIEWER' },
+        where: { userId: USER_ID, role: 'VIEWER', deletedAt: null },
         orderBy: [{ project: { updatedAt: 'desc' } }, { project: { id: 'desc' } }],
         skip: 5,
         take: 5,
       }),
     );
     expect(projectAccess.count).toHaveBeenCalledWith({
-      where: { userId: USER_ID, role: 'VIEWER' },
+      where: { userId: USER_ID, role: 'VIEWER', deletedAt: null },
     });
     expect(transaction).toHaveBeenCalledOnce();
     expect(result.total).toBe(1);
@@ -92,6 +93,7 @@ describe('PrismaSharedProjectsRepository', () => {
         updatedAt: NOW,
         projectDeletedAt: null,
         accessRevokedAt: null,
+        accessDeletedAt: null,
       },
     ]);
   });
@@ -111,6 +113,7 @@ describe('PrismaSharedProjectsRepository', () => {
         where: {
           userId: USER_ID,
           role: 'VIEWER',
+          deletedAt: null,
           project: { name: { contains: 'garden', mode: 'insensitive' } },
         },
         orderBy: [{ project: { name: 'asc' } }, { project: { id: 'asc' } }],
@@ -123,6 +126,7 @@ describe('PrismaSharedProjectsRepository', () => {
     projectAccess.findFirst.mockResolvedValue(
       createAccessRow({
         revokedAt: NOW,
+        deletedAt: null,
         project: {
           ...createAccessRow().project,
           deletedAt: null,
@@ -149,10 +153,11 @@ describe('PrismaSharedProjectsRepository', () => {
 
     expect(projectAccess.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { projectId: PROJECT_ID, userId: USER_ID, role: 'VIEWER' },
+        where: { projectId: PROJECT_ID, userId: USER_ID, role: 'VIEWER', deletedAt: null },
       }),
     );
     expect(result?.accessRevokedAt).toEqual(NOW);
+    expect(result?.accessDeletedAt).toBeNull();
     expect(result?.projectDeletedAt).toBeNull();
     expect(result?.scans).toEqual([
       {
@@ -177,14 +182,14 @@ describe('PrismaSharedProjectsRepository', () => {
     ).resolves.toBeNull();
     expect(projectAccess.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { projectId: PROJECT_ID, userId: USER_ID, role: 'VIEWER' },
+        where: { projectId: PROJECT_ID, userId: USER_ID, role: 'VIEWER', deletedAt: null },
       }),
     );
   });
 
-  it('findAccessStatus reads the revocation state of the access row', async () => {
+  it('findAccessStatus reads the revocation and removal state of the access row', async () => {
     const { client, projectAccess } = createClient();
-    projectAccess.findFirst.mockResolvedValue({ revokedAt: NOW });
+    projectAccess.findFirst.mockResolvedValue({ revokedAt: NOW, deletedAt: null });
 
     const result = await new PrismaSharedProjectsRepository(client).findAccessStatus(
       PROJECT_ID,
@@ -193,9 +198,9 @@ describe('PrismaSharedProjectsRepository', () => {
 
     expect(projectAccess.findFirst).toHaveBeenCalledWith({
       where: { projectId: PROJECT_ID, userId: USER_ID, role: 'VIEWER' },
-      select: { revokedAt: true },
+      select: { revokedAt: true, deletedAt: true },
     });
-    expect(result).toEqual({ revokedAt: NOW });
+    expect(result).toEqual({ revokedAt: NOW, deletedAt: null });
   });
 
   it('findAccessStatus returns null when the access row is missing', async () => {
@@ -233,7 +238,7 @@ describe('PrismaSharedProjectsRepository', () => {
     ).resolves.toBeNull();
   });
 
-  it('removeFromShared revokes only the active access row', async () => {
+  it('removeFromShared marks only the current viewer access as removed', async () => {
     const { client, projectAccess } = createClient();
 
     const result = await new PrismaSharedProjectsRepository(client).removeFromShared(
@@ -247,15 +252,43 @@ describe('PrismaSharedProjectsRepository', () => {
         id: 'access-id',
         userId: USER_ID,
         role: 'VIEWER',
-        revokedAt: null,
+        deletedAt: null,
         revision: 1,
       },
-      data: { revokedAt: NOW, revision: { increment: 1 }, updatedAt: NOW },
+      data: { deletedAt: NOW, revision: { increment: 1 }, updatedAt: NOW },
     });
     expect(result).toBe(true);
   });
 
-  it('removeFromShared never revokes an OWNER access row', async () => {
+  it('removeFromShared is idempotent when already removed', async () => {
+    const { client, projectAccess } = createClient();
+    projectAccess.findFirst.mockResolvedValue(createAccessRow({ deletedAt: NOW }));
+
+    const result = await new PrismaSharedProjectsRepository(client).removeFromShared(
+      PROJECT_ID,
+      USER_ID,
+      NOW,
+    );
+
+    expect(projectAccess.updateMany).not.toHaveBeenCalled();
+    expect(result).toBe(true);
+  });
+
+  it('removeFromShared marks an owner-revoked access row as removed', async () => {
+    const { client, projectAccess } = createClient();
+    projectAccess.findFirst.mockResolvedValue(createAccessRow({ revokedAt: NOW, deletedAt: null }));
+
+    const result = await new PrismaSharedProjectsRepository(client).removeFromShared(
+      PROJECT_ID,
+      USER_ID,
+      NOW,
+    );
+
+    expect(projectAccess.updateMany).toHaveBeenCalledOnce();
+    expect(result).toBe(true);
+  });
+
+  it('removeFromShared never removes an OWNER access row', async () => {
     const { client, projectAccess } = createClient();
     projectAccess.updateMany.mockResolvedValue({ count: 0 });
 
@@ -269,7 +302,7 @@ describe('PrismaSharedProjectsRepository', () => {
     expect(result).toBe(false);
   });
 
-  it('removeFromShared returns false when nothing active was revoked', async () => {
+  it('removeFromShared returns false when the concurrent update fails', async () => {
     const { client, projectAccess } = createClient();
     projectAccess.updateMany.mockResolvedValue({ count: 0 });
 
@@ -280,5 +313,19 @@ describe('PrismaSharedProjectsRepository', () => {
     );
 
     expect(result).toBe(false);
+  });
+
+  it('removeFromShared returns false when no access row exists', async () => {
+    const { client, projectAccess } = createClient();
+    projectAccess.findFirst.mockResolvedValue(null);
+
+    const result = await new PrismaSharedProjectsRepository(client).removeFromShared(
+      PROJECT_ID,
+      USER_ID,
+      NOW,
+    );
+
+    expect(result).toBe(false);
+    expect(projectAccess.updateMany).not.toHaveBeenCalled();
   });
 });

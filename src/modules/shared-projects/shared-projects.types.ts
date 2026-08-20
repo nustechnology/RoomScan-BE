@@ -20,6 +20,7 @@ export interface SharedProjectRecord {
   updatedAt: Date;
   projectDeletedAt: Date | null;
   accessRevokedAt: Date | null;
+  accessDeletedAt: Date | null;
 }
 
 export interface SharedProjectResult {
@@ -80,7 +81,10 @@ export interface SharedProjectsRepository {
     options: SharedProjectsListOptions,
   ): Promise<{ items: SharedProjectRecord[]; total: number }>;
   findSharedForUser(projectId: string, userId: string): Promise<SharedProjectDetailRecord | null>;
-  findAccessStatus(projectId: string, userId: string): Promise<{ revokedAt: Date | null } | null>;
+  findAccessStatus(
+    projectId: string,
+    userId: string,
+  ): Promise<{ revokedAt: Date | null; deletedAt: Date | null } | null>;
   findProjectOwner(projectId: string): Promise<string | null>;
   removeFromShared(projectId: string, userId: string, removedAt: Date): Promise<boolean>;
 }

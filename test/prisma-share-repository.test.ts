@@ -458,12 +458,14 @@ describe('PrismaShareRepository', () => {
         invitationId: INVITATION_ID,
         acceptedAt: NOW,
         revokedAt: null,
+        deletedAt: null,
       },
       update: {
         role: 'VIEWER',
         invitationId: INVITATION_ID,
         acceptedAt: NOW,
         revokedAt: null,
+        deletedAt: null,
         revision: { increment: 1 },
         updatedAt: NOW,
       },
@@ -595,7 +597,7 @@ describe('PrismaShareRepository', () => {
       new PrismaShareRepository(client).findActiveViewerAccess(PROJECT_ID, VIEWER_ID),
     ).resolves.toEqual({ id: 'access-id' });
     expect(projectAccess.findFirst).toHaveBeenCalledWith({
-      where: { projectId: PROJECT_ID, userId: VIEWER_ID, revokedAt: null },
+      where: { projectId: PROJECT_ID, userId: VIEWER_ID, revokedAt: null, deletedAt: null },
       select: { id: true },
     });
   });
@@ -637,7 +639,7 @@ describe('PrismaShareRepository', () => {
     ]);
     expect(projectAccess.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { projectId: PROJECT_ID, role: 'VIEWER', revokedAt: null },
+        where: { projectId: PROJECT_ID, role: 'VIEWER', revokedAt: null, deletedAt: null },
         orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       }),
     );
@@ -798,12 +800,14 @@ describe('PrismaShareRepository', () => {
         invitationId: INVITATION_ID,
         acceptedAt: NOW,
         revokedAt: null,
+        deletedAt: null,
       },
       update: {
         role: 'VIEWER',
         invitationId: INVITATION_ID,
         acceptedAt: NOW,
         revokedAt: null,
+        deletedAt: null,
       },
     });
   });
@@ -844,7 +848,7 @@ describe('PrismaShareRepository', () => {
       new PrismaShareRepository(client).findActiveScanAccess(SCAN_ID, VIEWER_ID),
     ).resolves.toEqual({ id: 'scan-access-id' });
     expect(scanAccess.findFirst).toHaveBeenCalledWith({
-      where: { scanId: SCAN_ID, userId: VIEWER_ID, revokedAt: null },
+      where: { scanId: SCAN_ID, userId: VIEWER_ID, revokedAt: null, deletedAt: null },
       select: { id: true },
     });
   });
@@ -863,7 +867,7 @@ describe('PrismaShareRepository', () => {
     ]);
     expect(scanAccess.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { scanId: SCAN_ID, role: 'VIEWER', revokedAt: null },
+        where: { scanId: SCAN_ID, role: 'VIEWER', revokedAt: null, deletedAt: null },
       }),
     );
   });
@@ -1049,11 +1053,14 @@ describe('PrismaShareRepository', () => {
         shareLinkId: SHARE_LINK_ID,
         acceptedAt: NOW,
         revokedAt: null,
+        deletedAt: null,
       },
       update: {
         role: 'VIEWER',
         shareLinkId: SHARE_LINK_ID,
         acceptedAt: NOW,
+        revokedAt: null,
+        deletedAt: null,
       },
       select: { id: true },
     });
@@ -1098,11 +1105,14 @@ describe('PrismaShareRepository', () => {
         shareLinkId: SHARE_LINK_ID,
         acceptedAt: NOW,
         revokedAt: null,
+        deletedAt: null,
       },
       update: {
         role: 'VIEWER',
         shareLinkId: SHARE_LINK_ID,
         acceptedAt: NOW,
+        revokedAt: null,
+        deletedAt: null,
       },
       select: { id: true },
     });
