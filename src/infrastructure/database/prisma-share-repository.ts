@@ -962,44 +962,54 @@ export class PrismaShareRepository implements ShareRepository {
     acceptedAt: Date,
   ): Promise<{ id: string }> {
     return await this.#client.$transaction(async (transaction) => {
-      const existingRevoked = await transaction.projectAccess.findFirst({
-        where: { projectId, userId, revokedAt: { not: null } },
-        select: { id: true },
-      });
-
-      if (existingRevoked !== null) {
-        throw new AccessAlreadyExistsError();
-      }
-
-      const access = await transaction.projectAccess.upsert({
-        where: { projectId_userId: { projectId, userId } },
-        create: {
-          projectId,
-          userId,
+      const claimed = await transaction.projectAccess.updateMany({
+        where: { projectId, userId, revokedAt: null },
+        data: {
           role: PrismaProjectRole.VIEWER,
           shareLinkId,
           acceptedAt,
-          revokedAt: null,
-          deletedAt: null,
-        },
-        update: {
-          role: PrismaProjectRole.VIEWER,
-          shareLinkId,
-          acceptedAt,
-          revokedAt: null,
           deletedAt: null,
           revision: { increment: 1 },
           updatedAt: acceptedAt,
         },
-        select: { id: true },
       });
 
-      await writeAccessUpsert(transaction, access.id, { changedAt: acceptedAt });
-      await writeAccessUpsert(transaction, access.id, {
+      let accessId: string;
+      if (claimed.count > 0) {
+        const row = await transaction.projectAccess.findUniqueOrThrow({
+          where: { projectId_userId: { projectId, userId } },
+          select: { id: true },
+        });
+        accessId = row.id;
+      } else {
+        try {
+          const created = await transaction.projectAccess.create({
+            data: {
+              projectId,
+              userId,
+              role: PrismaProjectRole.VIEWER,
+              shareLinkId,
+              acceptedAt,
+              revokedAt: null,
+              deletedAt: null,
+            },
+            select: { id: true },
+          });
+          accessId = created.id;
+        } catch (error) {
+          if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+            throw new AccessAlreadyExistsError();
+          }
+          throw error;
+        }
+      }
+
+      await writeAccessUpsert(transaction, accessId, { changedAt: acceptedAt });
+      await writeAccessUpsert(transaction, accessId, {
         targetUserId: userId,
         changedAt: acceptedAt,
       });
-      return { id: access.id };
+      return { id: accessId };
     });
   }
 
@@ -1009,35 +1019,43 @@ export class PrismaShareRepository implements ShareRepository {
     shareLinkId: string,
     acceptedAt: Date,
   ): Promise<{ id: string }> {
-    const existingRevoked = await this.#client.scanAccess.findFirst({
-      where: { scanId, userId, revokedAt: { not: null } },
-      select: { id: true },
+    const claimed = await this.#client.scanAccess.updateMany({
+      where: { scanId, userId, revokedAt: null },
+      data: {
+        role: PrismaProjectRole.VIEWER,
+        shareLinkId,
+        acceptedAt,
+        deletedAt: null,
+      },
     });
 
-    if (existingRevoked !== null) {
-      throw new AccessAlreadyExistsError();
+    if (claimed.count > 0) {
+      const row = await this.#client.scanAccess.findUniqueOrThrow({
+        where: { scanId_userId: { scanId, userId } },
+        select: { id: true },
+      });
+      return { id: row.id };
     }
 
-    const access = await this.#client.scanAccess.upsert({
-      where: { scanId_userId: { scanId, userId } },
-      create: {
-        scanId,
-        userId,
-        role: PrismaProjectRole.VIEWER,
-        shareLinkId,
-        acceptedAt,
-        revokedAt: null,
-        deletedAt: null,
-      },
-      update: {
-        role: PrismaProjectRole.VIEWER,
-        shareLinkId,
-        acceptedAt,
-        revokedAt: null,
-        deletedAt: null,
-      },
-      select: { id: true },
-    });
-    return { id: access.id };
+    try {
+      const created = await this.#client.scanAccess.create({
+        data: {
+          scanId,
+          userId,
+          role: PrismaProjectRole.VIEWER,
+          shareLinkId,
+          acceptedAt,
+          revokedAt: null,
+          deletedAt: null,
+        },
+        select: { id: true },
+      });
+      return { id: created.id };
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new AccessAlreadyExistsError();
+      }
+      throw error;
+    }
   }
 }
