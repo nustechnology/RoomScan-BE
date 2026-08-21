@@ -17,10 +17,18 @@ export interface MinioStorageAdapterOptions {
   useSSL?: boolean;
   region?: string;
   displayBaseUrl?: string;
+  /**
+   * Endpoint/SSL used only to sign presigned PUT/GET URLs, when it must
+   * differ from `endPoint` (e.g. `endPoint` is a Docker-internal hostname
+   * used for bucket/stat calls, while presigned URLs need a public hostname
+   * reachable by upload/download clients). Defaults to `endPoint`/`useSSL`.
+   */
+  publicEndPoint?: string;
+  publicUseSSL?: boolean;
   client?: MinioClient;
+  publicClient?: MinioClient;
 }
 
-const DEFAULT_PORT = 9000;
 const OBJECT_NOT_FOUND_CODES = new Set(['NoSuchKey', 'NotFound']);
 
 function splitEndpoint(endPoint: string): { endPoint: string; port?: number } {
@@ -61,6 +69,7 @@ export class MinioStorageAdapter implements StorageAdapter {
   readonly provider = 'minio';
 
   readonly #client: MinioClient;
+  readonly #publicClient: MinioClient;
   readonly #bucket: string;
   readonly #region: string | undefined;
   readonly #displayBaseUrl: string;
@@ -73,16 +82,40 @@ export class MinioStorageAdapter implements StorageAdapter {
       options.client ??
       new MinioClient({
         endPoint,
-        port: port ?? DEFAULT_PORT,
         useSSL,
         accessKey: options.accessKey,
         secretKey: options.secretKey,
+        ...(port === undefined ? {} : { port }),
         ...(options.region === undefined ? {} : { region: options.region }),
       });
+
+    const publicEndPointInput = options.publicEndPoint ?? options.endPoint;
+    const publicUseSSL = options.publicUseSSL ?? useSSL;
+    const isSamePublicEndpoint =
+      options.publicClient === undefined &&
+      publicEndPointInput === options.endPoint &&
+      publicUseSSL === useSSL;
+    this.#publicClient =
+      options.publicClient ??
+      (isSamePublicEndpoint
+        ? this.#client
+        : (() => {
+            const { endPoint: publicHost, port: publicPort } = splitEndpoint(publicEndPointInput);
+            return new MinioClient({
+              endPoint: publicHost,
+              useSSL: publicUseSSL,
+              accessKey: options.accessKey,
+              secretKey: options.secretKey,
+              ...(publicPort === undefined ? {} : { port: publicPort }),
+              ...(options.region === undefined ? {} : { region: options.region }),
+            });
+          })());
+
     this.#bucket = options.bucket;
     this.#region = options.region;
     this.#displayBaseUrl = (
-      options.displayBaseUrl ?? `${useSSL ? 'https' : 'http'}://${endPoint}:${port ?? DEFAULT_PORT}`
+      options.displayBaseUrl ??
+      `${useSSL ? 'https' : 'http'}://${endPoint}${port === undefined ? '' : `:${port}`}`
     ).replace(/\/+$/, '');
   }
 
@@ -118,7 +151,7 @@ export class MinioStorageAdapter implements StorageAdapter {
     options: StorageUploadOptions,
   ): Promise<StorageUploadUrl> {
     await this.#ensureBucket();
-    const url = await this.#client.presignedPutObject(
+    const url = await this.#publicClient.presignedPutObject(
       this.#bucket,
       objectKey,
       this.#expirySeconds(options.expiresAt),
@@ -131,7 +164,7 @@ export class MinioStorageAdapter implements StorageAdapter {
     options: StorageDownloadOptions,
   ): Promise<StorageDownloadUrl> {
     await this.#ensureBucket();
-    const url = await this.#client.presignedGetObject(
+    const url = await this.#publicClient.presignedGetObject(
       this.#bucket,
       objectKey,
       this.#expirySeconds(options.expiresAt),

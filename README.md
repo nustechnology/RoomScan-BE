@@ -90,12 +90,53 @@ Useful commands:
 
 ```bash
 docker compose ps
-docker compose logs -f api
+docker compose logs -f roomscan
 docker compose down
 ```
 
 Use `docker compose down --volumes` only when you intentionally want to delete
 the local PostgreSQL and MinIO data volumes.
+
+## Production deployment (VM)
+
+This deploys `docker-compose.yml` on a host that already has the repository
+checked out, `.env` populated, and the `roomscan` and `migrate` services'
+images buildable. `migrate` (target `migration`) applies committed Prisma
+migrations as a one-shot job; `roomscan` (target `runtime`) runs the API.
+Choose the flow that matches whether the branch being deployed adds a new
+migration under `prisma/migrations/`.
+
+**Without new Prisma migrations:**
+
+```bash
+git pull
+docker compose up -d --build roomscan
+```
+
+**With new Prisma migrations:**
+
+```bash
+git pull
+docker compose build migrate roomscan
+docker compose run --rm migrate
+docker compose up -d roomscan
+```
+
+The `migrate` run must finish successfully before `roomscan` starts on the new
+version — never skip straight to `docker compose up -d roomscan` when the
+branch adds a migration.
+
+Either way, confirm the container came up healthy:
+
+```bash
+docker logs -f roomscan
+```
+
+**Restart only** (redeploy nothing, just restart the currently running image):
+
+```bash
+docker restart roomscan
+```
 
 ## HTTP endpoints
 
