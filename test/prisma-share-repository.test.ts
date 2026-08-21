@@ -50,8 +50,11 @@ function createClient() {
   const projectAccess = {
     findFirst: vi.fn().mockResolvedValue({ id: 'access-id' }),
     findUnique: vi.fn().mockResolvedValue({ id: 'access-id', revision: 1, revokedAt: null }),
+    findUniqueOrThrow: vi.fn().mockResolvedValue({ id: 'access-id' }),
     upsert: vi.fn().mockResolvedValue({ id: 'access-id' }),
     update: vi.fn().mockResolvedValue({ revokedAt: NOW, revision: 2 }),
+    updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+    create: vi.fn().mockResolvedValue({ id: 'access-id' }),
     findMany: vi.fn().mockResolvedValue([
       {
         userId: VIEWER_ID,
@@ -65,8 +68,11 @@ function createClient() {
   const scanAccess = {
     findFirst: vi.fn().mockResolvedValue({ id: 'scan-access-id' }),
     findUnique: vi.fn().mockResolvedValue({ id: 'scan-access-id', revokedAt: null }),
+    findUniqueOrThrow: vi.fn().mockResolvedValue({ id: 'scan-access-id' }),
     upsert: vi.fn().mockResolvedValue({ id: 'scan-access-id' }),
     update: vi.fn().mockResolvedValue({ revokedAt: NOW }),
+    updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+    create: vi.fn().mockResolvedValue({ id: 'scan-access-id' }),
     findMany: vi.fn().mockResolvedValue([
       {
         userId: VIEWER_ID,
@@ -117,7 +123,13 @@ function createClient() {
           create: typeof invitation.create;
           findUnique: typeof invitation.findUnique;
         };
-        projectAccess: { upsert: typeof projectAccess.upsert };
+        projectAccess: {
+          upsert: typeof projectAccess.upsert;
+          findFirst: typeof projectAccess.findFirst;
+          updateMany: typeof projectAccess.updateMany;
+          create: typeof projectAccess.create;
+          findUniqueOrThrow: typeof projectAccess.findUniqueOrThrow;
+        };
         scanAccess: { upsert: typeof scanAccess.upsert };
       }) => Promise<unknown>
     )({
@@ -126,7 +138,13 @@ function createClient() {
         create: invitation.create,
         findUnique: invitation.findUnique,
       },
-      projectAccess: { upsert: projectAccess.upsert },
+      projectAccess: {
+        upsert: projectAccess.upsert,
+        findFirst: projectAccess.findFirst,
+        updateMany: projectAccess.updateMany,
+        create: projectAccess.create,
+        findUniqueOrThrow: projectAccess.findUniqueOrThrow,
+      },
       scanAccess: { upsert: scanAccess.upsert },
     });
   });
@@ -458,12 +476,14 @@ describe('PrismaShareRepository', () => {
         invitationId: INVITATION_ID,
         acceptedAt: NOW,
         revokedAt: null,
+        deletedAt: null,
       },
       update: {
         role: 'VIEWER',
         invitationId: INVITATION_ID,
         acceptedAt: NOW,
         revokedAt: null,
+        deletedAt: null,
         revision: { increment: 1 },
         updatedAt: NOW,
       },
@@ -595,7 +615,7 @@ describe('PrismaShareRepository', () => {
       new PrismaShareRepository(client).findActiveViewerAccess(PROJECT_ID, VIEWER_ID),
     ).resolves.toEqual({ id: 'access-id' });
     expect(projectAccess.findFirst).toHaveBeenCalledWith({
-      where: { projectId: PROJECT_ID, userId: VIEWER_ID, revokedAt: null },
+      where: { projectId: PROJECT_ID, userId: VIEWER_ID, revokedAt: null, deletedAt: null },
       select: { id: true },
     });
   });
@@ -637,7 +657,7 @@ describe('PrismaShareRepository', () => {
     ]);
     expect(projectAccess.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { projectId: PROJECT_ID, role: 'VIEWER', revokedAt: null },
+        where: { projectId: PROJECT_ID, role: 'VIEWER', revokedAt: null, deletedAt: null },
         orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       }),
     );
@@ -798,12 +818,14 @@ describe('PrismaShareRepository', () => {
         invitationId: INVITATION_ID,
         acceptedAt: NOW,
         revokedAt: null,
+        deletedAt: null,
       },
       update: {
         role: 'VIEWER',
         invitationId: INVITATION_ID,
         acceptedAt: NOW,
         revokedAt: null,
+        deletedAt: null,
       },
     });
   });
@@ -844,7 +866,7 @@ describe('PrismaShareRepository', () => {
       new PrismaShareRepository(client).findActiveScanAccess(SCAN_ID, VIEWER_ID),
     ).resolves.toEqual({ id: 'scan-access-id' });
     expect(scanAccess.findFirst).toHaveBeenCalledWith({
-      where: { scanId: SCAN_ID, userId: VIEWER_ID, revokedAt: null },
+      where: { scanId: SCAN_ID, userId: VIEWER_ID, revokedAt: null, deletedAt: null },
       select: { id: true },
     });
   });
@@ -863,7 +885,7 @@ describe('PrismaShareRepository', () => {
     ]);
     expect(scanAccess.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { scanId: SCAN_ID, role: 'VIEWER', revokedAt: null },
+        where: { scanId: SCAN_ID, role: 'VIEWER', revokedAt: null, deletedAt: null },
       }),
     );
   });
@@ -1028,9 +1050,9 @@ describe('PrismaShareRepository', () => {
     ).resolves.toBeNull();
   });
 
-  it('grantProjectAccess upserts a share-link-granted ProjectAccess', async () => {
+  it('grantProjectAccess creates a fresh ProjectAccess when none exists', async () => {
     const { client, projectAccess } = createClient();
-    projectAccess.findFirst.mockResolvedValue(null);
+    projectAccess.updateMany.mockResolvedValue({ count: 0 });
 
     const result = await new PrismaShareRepository(client).grantProjectAccess(
       PROJECT_ID,
@@ -1040,27 +1062,59 @@ describe('PrismaShareRepository', () => {
     );
 
     expect(result).toEqual({ id: 'access-id' });
-    expect(projectAccess.upsert).toHaveBeenCalledWith({
-      where: { projectId_userId: { projectId: PROJECT_ID, userId: VIEWER_ID } },
-      create: {
+    expect(projectAccess.updateMany).toHaveBeenCalledWith({
+      where: { projectId: PROJECT_ID, userId: VIEWER_ID, revokedAt: null },
+      data: {
+        role: 'VIEWER',
+        shareLinkId: SHARE_LINK_ID,
+        acceptedAt: NOW,
+        deletedAt: null,
+        revision: { increment: 1 },
+        updatedAt: NOW,
+      },
+    });
+    expect(projectAccess.create).toHaveBeenCalledWith({
+      data: {
         projectId: PROJECT_ID,
         userId: VIEWER_ID,
         role: 'VIEWER',
         shareLinkId: SHARE_LINK_ID,
         acceptedAt: NOW,
         revokedAt: null,
-      },
-      update: {
-        role: 'VIEWER',
-        shareLinkId: SHARE_LINK_ID,
-        acceptedAt: NOW,
+        deletedAt: null,
       },
       select: { id: true },
     });
   });
 
-  it('grantProjectAccess rejects when a previously revoked access exists', async () => {
+  it('grantProjectAccess reactivates a non-revoked (e.g. self-removed) ProjectAccess row', async () => {
     const { client, projectAccess } = createClient();
+    projectAccess.updateMany.mockResolvedValue({ count: 1 });
+
+    const result = await new PrismaShareRepository(client).grantProjectAccess(
+      PROJECT_ID,
+      VIEWER_ID,
+      SHARE_LINK_ID,
+      NOW,
+    );
+
+    expect(result).toEqual({ id: 'access-id' });
+    expect(projectAccess.findUniqueOrThrow).toHaveBeenCalledWith({
+      where: { projectId_userId: { projectId: PROJECT_ID, userId: VIEWER_ID } },
+      select: { id: true },
+    });
+    expect(projectAccess.create).not.toHaveBeenCalled();
+  });
+
+  it('grantProjectAccess rejects when a concurrent revocation wins the race', async () => {
+    const { client, projectAccess } = createClient();
+    projectAccess.updateMany.mockResolvedValue({ count: 0 });
+    const conflict = new Prisma.PrismaClientKnownRequestError('unique constraint', {
+      code: 'P2002',
+      clientVersion: 'test',
+      meta: { target: ['projectId', 'userId'] },
+    });
+    projectAccess.create.mockRejectedValue(conflict);
 
     await expect(
       new PrismaShareRepository(client).grantProjectAccess(
@@ -1070,16 +1124,11 @@ describe('PrismaShareRepository', () => {
         NOW,
       ),
     ).rejects.toBeInstanceOf(AccessAlreadyExistsError);
-    expect(projectAccess.findFirst).toHaveBeenCalledWith({
-      where: { projectId: PROJECT_ID, userId: VIEWER_ID, revokedAt: { not: null } },
-      select: { id: true },
-    });
-    expect(projectAccess.upsert).not.toHaveBeenCalled();
   });
 
-  it('grantScanAccess upserts a share-link-granted ScanAccess', async () => {
+  it('grantScanAccess creates a fresh ScanAccess when none exists', async () => {
     const { client, scanAccess } = createClient();
-    scanAccess.findFirst.mockResolvedValue(null);
+    scanAccess.updateMany.mockResolvedValue({ count: 0 });
 
     const result = await new PrismaShareRepository(client).grantScanAccess(
       SCAN_ID,
@@ -1089,36 +1138,61 @@ describe('PrismaShareRepository', () => {
     );
 
     expect(result).toEqual({ id: 'scan-access-id' });
-    expect(scanAccess.upsert).toHaveBeenCalledWith({
-      where: { scanId_userId: { scanId: SCAN_ID, userId: VIEWER_ID } },
-      create: {
+    expect(scanAccess.updateMany).toHaveBeenCalledWith({
+      where: { scanId: SCAN_ID, userId: VIEWER_ID, revokedAt: null },
+      data: {
+        role: 'VIEWER',
+        shareLinkId: SHARE_LINK_ID,
+        acceptedAt: NOW,
+        deletedAt: null,
+      },
+    });
+    expect(scanAccess.create).toHaveBeenCalledWith({
+      data: {
         scanId: SCAN_ID,
         userId: VIEWER_ID,
         role: 'VIEWER',
         shareLinkId: SHARE_LINK_ID,
         acceptedAt: NOW,
         revokedAt: null,
-      },
-      update: {
-        role: 'VIEWER',
-        shareLinkId: SHARE_LINK_ID,
-        acceptedAt: NOW,
+        deletedAt: null,
       },
       select: { id: true },
     });
   });
 
-  it('grantScanAccess rejects when a previously revoked access exists', async () => {
+  it('grantScanAccess reactivates a non-revoked (e.g. self-removed) ScanAccess row', async () => {
     const { client, scanAccess } = createClient();
+    scanAccess.updateMany.mockResolvedValue({ count: 1 });
+
+    const result = await new PrismaShareRepository(client).grantScanAccess(
+      SCAN_ID,
+      VIEWER_ID,
+      SHARE_LINK_ID,
+      NOW,
+    );
+
+    expect(result).toEqual({ id: 'scan-access-id' });
+    expect(scanAccess.findUniqueOrThrow).toHaveBeenCalledWith({
+      where: { scanId_userId: { scanId: SCAN_ID, userId: VIEWER_ID } },
+      select: { id: true },
+    });
+    expect(scanAccess.create).not.toHaveBeenCalled();
+  });
+
+  it('grantScanAccess rejects when a concurrent revocation wins the race', async () => {
+    const { client, scanAccess } = createClient();
+    scanAccess.updateMany.mockResolvedValue({ count: 0 });
+    const conflict = new Prisma.PrismaClientKnownRequestError('unique constraint', {
+      code: 'P2002',
+      clientVersion: 'test',
+      meta: { target: ['scanId', 'userId'] },
+    });
+    scanAccess.create.mockRejectedValue(conflict);
 
     await expect(
       new PrismaShareRepository(client).grantScanAccess(SCAN_ID, VIEWER_ID, SHARE_LINK_ID, NOW),
     ).rejects.toBeInstanceOf(AccessAlreadyExistsError);
-    expect(scanAccess.findFirst).toHaveBeenCalledWith({
-      where: { scanId: SCAN_ID, userId: VIEWER_ID, revokedAt: { not: null } },
-      select: { id: true },
-    });
-    expect(scanAccess.upsert).not.toHaveBeenCalled();
   });
 
   it('createInvitationIdempotently stores the invitation and rolls up the project', async () => {

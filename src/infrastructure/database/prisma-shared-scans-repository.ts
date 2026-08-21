@@ -9,6 +9,7 @@ import type { ScanSort } from '../../modules/scan/scan.types.js';
 
 const sharedScanSelect = {
   revokedAt: true,
+  deletedAt: true,
   scan: {
     select: {
       id: true,
@@ -38,6 +39,7 @@ const sharedScanSelect = {
 
 interface SharedScanRow {
   revokedAt: Date | null;
+  deletedAt: Date | null;
   scan: {
     id: string;
     projectId: string;
@@ -76,6 +78,7 @@ function toSharedScanRecord(row: SharedScanRow): SharedScanRecord {
     updatedAt: row.scan.updatedAt,
     scanDeletedAt: row.scan.deletedAt,
     accessRevokedAt: row.revokedAt,
+    accessDeletedAt: row.deletedAt,
   };
 }
 
@@ -101,6 +104,7 @@ export class PrismaSharedScansRepository implements SharedScansRepository {
     const where = {
       userId,
       role: PrismaProjectRole.VIEWER,
+      deletedAt: null,
       ...(options.search === undefined
         ? {}
         : {
@@ -131,7 +135,7 @@ export class PrismaSharedScansRepository implements SharedScansRepository {
 
   async findSharedForUser(scanId: string, userId: string): Promise<SharedScanRecord | null> {
     const row = await this.#client.scanAccess.findFirst({
-      where: { scanId, userId, role: PrismaProjectRole.VIEWER },
+      where: { scanId, userId, role: PrismaProjectRole.VIEWER, deletedAt: null },
       select: sharedScanSelect,
     });
 
@@ -141,13 +145,13 @@ export class PrismaSharedScansRepository implements SharedScansRepository {
   async findAccessStatus(
     scanId: string,
     userId: string,
-  ): Promise<{ revokedAt: Date | null } | null> {
+  ): Promise<{ revokedAt: Date | null; deletedAt: Date | null } | null> {
     const access = await this.#client.scanAccess.findFirst({
       where: { scanId, userId, role: PrismaProjectRole.VIEWER },
-      select: { revokedAt: true },
+      select: { revokedAt: true, deletedAt: true },
     });
 
-    return access === null ? null : { revokedAt: access.revokedAt };
+    return access === null ? null : { revokedAt: access.revokedAt, deletedAt: access.deletedAt };
   }
 
   async findScanOwner(scanId: string): Promise<string | null> {
@@ -165,12 +169,33 @@ export class PrismaSharedScansRepository implements SharedScansRepository {
     return scan?.project?.ownerId ?? null;
   }
 
-  async removeFromShared(scanId: string, userId: string, removedAt: Date): Promise<boolean> {
-    const updated = await this.#client.scanAccess.updateMany({
-      where: { scanId, userId, role: PrismaProjectRole.VIEWER, revokedAt: null },
-      data: { revokedAt: removedAt },
+  async removeFromShared(
+    scanId: string,
+    userId: string,
+    removedAt: Date,
+  ): Promise<{ removedAt: Date } | null> {
+    const access = await this.#client.scanAccess.findFirst({
+      where: { scanId, userId, role: PrismaProjectRole.VIEWER },
+      select: { id: true, deletedAt: true },
     });
+    if (access === null) return null;
+    if (access.deletedAt !== null) return { removedAt: access.deletedAt };
 
-    return updated.count > 0;
+    const updated = await this.#client.scanAccess.updateMany({
+      where: { scanId, userId, role: PrismaProjectRole.VIEWER, deletedAt: null },
+      data: { deletedAt: removedAt, updatedAt: removedAt },
+    });
+    if (updated.count === 0) {
+      const latest = await this.#client.scanAccess.findUnique({
+        where: { id: access.id },
+        select: { deletedAt: true },
+      });
+      if (latest !== null && latest.deletedAt !== null) {
+        return { removedAt: latest.deletedAt };
+      }
+      return null;
+    }
+
+    return { removedAt };
   }
 }

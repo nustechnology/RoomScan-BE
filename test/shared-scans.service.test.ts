@@ -35,6 +35,7 @@ function createRecord(overrides: Partial<SharedScanRecord> = {}): SharedScanReco
     updatedAt: NOW,
     scanDeletedAt: null,
     accessRevokedAt: null,
+    accessDeletedAt: null,
     ...overrides,
   };
 }
@@ -216,15 +217,34 @@ describe('SharedScansService', () => {
   });
 
   describe('remove', () => {
-    it('revokes only the current viewer access and confirms removal', async () => {
-      findAccessStatus.mockResolvedValue({ revokedAt: null });
-      removeFromShared.mockResolvedValue(true);
+    it('removes the current viewer access and confirms removal', async () => {
+      findAccessStatus.mockResolvedValue({ revokedAt: null, deletedAt: null });
+      removeFromShared.mockResolvedValue({ removedAt: NOW });
 
       const result = await service.remove(USER_ID, SCAN_ID);
 
       expect(findAccessStatus).toHaveBeenCalledWith(SCAN_ID, USER_ID);
       expect(removeFromShared).toHaveBeenCalledWith(SCAN_ID, USER_ID, NOW);
       expect(result).toEqual({ scanId: SCAN_ID, removedAt: NOW.toISOString() });
+    });
+
+    it('removes an owner-revoked scan from the list', async () => {
+      findAccessStatus.mockResolvedValue({ revokedAt: NOW, deletedAt: null });
+      removeFromShared.mockResolvedValue({ removedAt: NOW });
+
+      const result = await service.remove(USER_ID, SCAN_ID);
+
+      expect(removeFromShared).toHaveBeenCalledWith(SCAN_ID, USER_ID, NOW);
+      expect(result).toEqual({ scanId: SCAN_ID, removedAt: NOW.toISOString() });
+    });
+
+    it('is idempotent when the scan was already removed', async () => {
+      findAccessStatus.mockResolvedValue({ revokedAt: null, deletedAt: NOW });
+
+      const result = await service.remove(USER_ID, SCAN_ID);
+
+      expect(result).toEqual({ scanId: SCAN_ID, removedAt: NOW.toISOString() });
+      expect(removeFromShared).not.toHaveBeenCalled();
     });
 
     it('rejects the owner, whose scans are never in Shared With Me', async () => {
@@ -244,18 +264,9 @@ describe('SharedScansService', () => {
       );
     });
 
-    it('rejects an already-removed or owner-revoked scan', async () => {
-      findAccessStatus.mockResolvedValue({ revokedAt: NOW });
-
-      await expect(service.remove(USER_ID, SCAN_ID)).rejects.toBeInstanceOf(
-        SharedScanNotInListError,
-      );
-      expect(removeFromShared).not.toHaveBeenCalled();
-    });
-
-    it('rejects when the concurrent revoke wins the update', async () => {
-      findAccessStatus.mockResolvedValue({ revokedAt: null });
-      removeFromShared.mockResolvedValue(false);
+    it('rejects when the concurrent update fails', async () => {
+      findAccessStatus.mockResolvedValue({ revokedAt: null, deletedAt: null });
+      removeFromShared.mockResolvedValue(null);
 
       await expect(service.remove(USER_ID, SCAN_ID)).rejects.toBeInstanceOf(
         SharedScanNotInListError,

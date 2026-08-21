@@ -184,7 +184,7 @@ sharedProjectsOpenApiRegistry.registerPath({
   tags: ['Shared With Me'],
   summary: 'Remove a project from the current user’s Shared With Me list',
   description:
-    'Viewer only. Revokes only the current user’s own access; the original project, the Owner, and other Viewers are unaffected.',
+    'Viewer only. Removes the project from the current user’s Shared With Me list by marking their own access as removed, regardless of its current status; it is idempotent on retry. The original project, the Owner, and other Viewers are unaffected.',
   security: [{ [bearerAuth.name]: [] }],
   request: {
     params: SharedProjectIdParamSchema,

@@ -11,6 +11,7 @@ import { refreshProjectRollup, writeDeleteChange } from './prisma-sync-writer.js
 
 const sharedProjectSelect = {
   revokedAt: true,
+  deletedAt: true,
   project: {
     select: {
       id: true,
@@ -39,6 +40,7 @@ const sharedProjectSelect = {
 
 interface SharedProjectRow {
   revokedAt: Date | null;
+  deletedAt: Date | null;
   project: {
     id: string;
     name: string;
@@ -85,6 +87,7 @@ function toSharedProjectRecord(row: SharedProjectRow): SharedProjectRecord {
     updatedAt: row.project.updatedAt,
     projectDeletedAt: row.project.deletedAt,
     accessRevokedAt: row.revokedAt,
+    accessDeletedAt: row.deletedAt,
   };
 }
 
@@ -158,6 +161,7 @@ export class PrismaSharedProjectsRepository implements SharedProjectsRepository 
     const where = {
       userId,
       role: PrismaProjectRole.VIEWER,
+      deletedAt: null,
       ...(options.search === undefined
         ? {}
         : {
@@ -191,7 +195,7 @@ export class PrismaSharedProjectsRepository implements SharedProjectsRepository 
     userId: string,
   ): Promise<SharedProjectDetailRecord | null> {
     const row = await this.#client.projectAccess.findFirst({
-      where: { projectId, userId, role: PrismaProjectRole.VIEWER },
+      where: { projectId, userId, role: PrismaProjectRole.VIEWER, deletedAt: null },
       select: sharedProjectDetailSelect,
     });
 
@@ -201,13 +205,13 @@ export class PrismaSharedProjectsRepository implements SharedProjectsRepository 
   async findAccessStatus(
     projectId: string,
     userId: string,
-  ): Promise<{ revokedAt: Date | null } | null> {
+  ): Promise<{ revokedAt: Date | null; deletedAt: Date | null } | null> {
     const access = await this.#client.projectAccess.findFirst({
       where: { projectId, userId, role: PrismaProjectRole.VIEWER },
-      select: { revokedAt: true },
+      select: { revokedAt: true, deletedAt: true },
     });
 
-    return access === null ? null : { revokedAt: access.revokedAt };
+    return access === null ? null : { revokedAt: access.revokedAt, deletedAt: access.deletedAt };
   }
 
   async findProjectOwner(projectId: string): Promise<string | null> {
@@ -219,7 +223,11 @@ export class PrismaSharedProjectsRepository implements SharedProjectsRepository 
     return project?.ownerId ?? null;
   }
 
-  async removeFromShared(projectId: string, userId: string, removedAt: Date): Promise<boolean> {
+  async removeFromShared(
+    projectId: string,
+    userId: string,
+    removedAt: Date,
+  ): Promise<{ removedAt: Date } | null> {
     return await this.#client.$transaction(async (transaction) => {
       const access = await transaction.projectAccess.findFirst({
         where: { projectId, userId, role: PrismaProjectRole.VIEWER },
@@ -227,22 +235,33 @@ export class PrismaSharedProjectsRepository implements SharedProjectsRepository 
           id: true,
           revision: true,
           revokedAt: true,
+          deletedAt: true,
           project: { select: { ownerId: true } },
         },
       });
-      if (access === null || access.revokedAt !== null) return false;
+      if (access === null) return null;
+      if (access.deletedAt !== null) return { removedAt: access.deletedAt };
 
       const updated = await transaction.projectAccess.updateMany({
         where: {
           id: access.id,
           userId,
           role: PrismaProjectRole.VIEWER,
-          revokedAt: null,
+          deletedAt: null,
           revision: access.revision,
         },
-        data: { revokedAt: removedAt, revision: { increment: 1 }, updatedAt: removedAt },
+        data: { deletedAt: removedAt, revision: { increment: 1 }, updatedAt: removedAt },
       });
-      if (updated.count === 0) return false;
+      if (updated.count === 0) {
+        const latest = await transaction.projectAccess.findUnique({
+          where: { id: access.id },
+          select: { deletedAt: true },
+        });
+        if (latest !== null && latest.deletedAt !== null) {
+          return { removedAt: latest.deletedAt };
+        }
+        return null;
+      }
 
       const change = {
         projectId,
@@ -255,7 +274,7 @@ export class PrismaSharedProjectsRepository implements SharedProjectsRepository 
       await writeDeleteChange(transaction, change);
       await writeDeleteChange(transaction, { ...change, targetUserId: userId });
       await refreshProjectRollup(transaction, projectId, removedAt);
-      return true;
+      return { removedAt };
     });
   }
 }
