@@ -95,6 +95,8 @@ const config: AppConfig = {
   storageAccessKeyId: '',
   storageSecretAccessKey: '',
   storageUseSsl: false,
+  storagePublicEndpoint: '',
+  storagePublicUseSsl: false,
   storageUploadUrlTtlSeconds: 900,
   storageDownloadUrlTtlSeconds: 60,
   assetMinModelSizeBytes: 10_000_000,

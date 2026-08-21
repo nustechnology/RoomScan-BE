@@ -541,6 +541,20 @@ overridable via `displayBaseUrl`), so it requires the bucket or objects to be
 publicly readable or a CDN/reverse proxy in front of MinIO; it is used to
 persist scan thumbnails.
 
+`STORAGE_ENDPOINT` is used both for internal calls (`bucketExists`,
+`makeBucket`, `statObject`) and, by default, to sign presigned PUT/GET URLs.
+When the client that receives those presigned URLs (a mobile app, a browser)
+cannot reach `STORAGE_ENDPOINT` directly — for example it is a Docker-internal
+hostname reachable only by the API process itself — the optional
+`STORAGE_PUBLIC_ENDPOINT`/`STORAGE_PUBLIC_USE_SSL` pair lets presigned URLs be
+signed against a different, externally-reachable endpoint while internal
+bucket/stat calls keep using `STORAGE_ENDPOINT`. Both default to
+`STORAGE_ENDPOINT`/`STORAGE_USE_SSL` when unset, so setting neither is a
+no-op. `MinioStorageAdapter` builds one `MinioClient` per distinct endpoint
+(reusing the internal client when the public one is unset or identical), so
+the API process never needs outbound reachability to its own public hostname
+to perform internal calls.
+
 ## Nonce binding
 
 The endpoint supports nonce binding to prevent identity-token replay. Clients

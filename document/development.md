@@ -78,7 +78,13 @@ defaults to `roomscan-assets`. `anonymous set download` grants unauthenticated
 Anonymous reads apply to the whole bucket, so prefer a CDN/reverse proxy in
 front of MinIO when the bucket holds non-public data, and use a stable public
 `STORAGE_ENDPOINT` (never a local tunnel host) so persisted thumbnail URLs
-remain reachable.
+remain reachable. If `STORAGE_ENDPOINT` itself can't be reachable by upload
+clients (for example it's a Docker-internal hostname such as `minio:9000`,
+resolvable only by the API container), set `STORAGE_PUBLIC_ENDPOINT` (and
+`STORAGE_PUBLIC_USE_SSL` if needed) to the externally-reachable hostname
+instead — presigned PUT/GET URLs are then signed against that endpoint while
+internal bucket/stat calls keep using `STORAGE_ENDPOINT`, so the API process
+itself never needs to route out to its own public endpoint.
 
 The local seed is idempotent and refuses to run unless
 `NODE_ENV=development`. It creates (or refreshes) the fixed local Apple user,

@@ -65,6 +65,8 @@ function createStorageAdapter(): StorageAdapter {
       accessKey: config.storageAccessKeyId,
       secretKey: config.storageSecretAccessKey,
       useSSL: config.storageUseSsl,
+      publicEndPoint: config.storagePublicEndpoint,
+      publicUseSSL: config.storagePublicUseSsl,
       ...(config.storageRegion === '' ? {} : { region: config.storageRegion }),
     });
   }

@@ -46,6 +46,8 @@ describe('loadConfig', () => {
       storageAccessKeyId: '',
       storageSecretAccessKey: '',
       storageUseSsl: false,
+      storagePublicEndpoint: '',
+      storagePublicUseSsl: false,
       storageUploadUrlTtlSeconds: 900,
       storageDownloadUrlTtlSeconds: 60,
       assetMinModelSizeBytes: 0,
@@ -135,7 +137,43 @@ describe('loadConfig', () => {
       storageAccessKeyId: 'minio-access-key',
       storageSecretAccessKey: 'minio-secret-key',
       storageUseSsl: true,
+      storagePublicEndpoint: 'localhost:9000',
+      storagePublicUseSsl: true,
     });
+  });
+
+  it('defaults the public storage endpoint/SSL to the internal ones when unset', () => {
+    const config = loadConfig({
+      ...validEnvironment,
+      STORAGE_PROVIDER: 'minio',
+      STORAGE_BUCKET: 'roomscan-assets',
+      STORAGE_ENDPOINT: 'minio:9000',
+      STORAGE_ACCESS_KEY_ID: 'minio-access-key',
+      STORAGE_SECRET_ACCESS_KEY: 'minio-secret-key',
+      STORAGE_USE_SSL: 'false',
+    });
+
+    expect(config.storagePublicEndpoint).toBe('minio:9000');
+    expect(config.storagePublicUseSsl).toBe(false);
+  });
+
+  it('overrides the public storage endpoint/SSL independently of the internal ones', () => {
+    const config = loadConfig({
+      ...validEnvironment,
+      STORAGE_PROVIDER: 'minio',
+      STORAGE_BUCKET: 'roomscan-assets',
+      STORAGE_ENDPOINT: 'minio:9000',
+      STORAGE_ACCESS_KEY_ID: 'minio-access-key',
+      STORAGE_SECRET_ACCESS_KEY: 'minio-secret-key',
+      STORAGE_USE_SSL: 'false',
+      STORAGE_PUBLIC_ENDPOINT: 'storage.roomscan.example',
+      STORAGE_PUBLIC_USE_SSL: 'true',
+    });
+
+    expect(config.storageEndpoint).toBe('minio:9000');
+    expect(config.storageUseSsl).toBe(false);
+    expect(config.storagePublicEndpoint).toBe('storage.roomscan.example');
+    expect(config.storagePublicUseSsl).toBe(true);
   });
 
   it.each([

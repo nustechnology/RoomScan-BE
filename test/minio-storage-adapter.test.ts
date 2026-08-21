@@ -42,6 +42,33 @@ function createAdapter(client: MinioClient = createClient().client) {
 }
 
 describe('MinioStorageAdapter', () => {
+  it('constructs real internal and public MinIO clients when none are injected', () => {
+    const adapter = new MinioStorageAdapter({
+      bucket: 'roomscan-assets',
+      endPoint: 'localhost:9000',
+      accessKey: 'access-key',
+      secretKey: 'secret-key',
+    });
+
+    expect(adapter).toBeInstanceOf(MinioStorageAdapter);
+  });
+
+  it('constructs a dedicated public client when only the public endpoint override is given', () => {
+    const adapter = new MinioStorageAdapter({
+      bucket: 'roomscan-assets',
+      endPoint: 'minio:9000',
+      accessKey: 'access-key',
+      secretKey: 'secret-key',
+      useSSL: false,
+      region: 'us-east-1',
+      publicEndPoint: 'storage.roomscan.example',
+      publicUseSSL: true,
+      client: createClient().client,
+    });
+
+    expect(adapter).toBeInstanceOf(MinioStorageAdapter);
+  });
+
   it('builds a namespaced object key per scan and asset type', () => {
     const adapter = createAdapter();
 
@@ -187,6 +214,63 @@ describe('MinioStorageAdapter', () => {
     await expect(adapter.createDisplayUrl('scans/scan-1/thumbnail')).resolves.toBe(
       'http://localhost:9000/roomscan-assets/scans/scan-1/thumbnail',
     );
+  });
+
+  it('signs presigned URLs against a separate public endpoint, keeping bucket/stat calls on the internal one', async () => {
+    const internal = createClient();
+    const publicSide = createClient();
+    const adapter = new MinioStorageAdapter({
+      bucket: 'roomscan-assets',
+      endPoint: 'minio:9000',
+      accessKey: 'access-key',
+      secretKey: 'secret-key',
+      useSSL: false,
+      publicEndPoint: 'storage.roomscan.example',
+      publicUseSSL: true,
+      client: internal.client,
+      publicClient: publicSide.client,
+    });
+    const expiresAt = new Date(Date.now() + 60_000);
+
+    await adapter.createUploadUrl('scans/scan-1/model', {
+      contentType: 'model/gltf-binary',
+      sizeBytes: 1024,
+      expiresAt,
+    });
+    await adapter.createDownloadUrl('scans/scan-1/model', { expiresAt });
+    await adapter.verifyObject('scans/scan-1/model', EXPECTED);
+
+    expect(internal.bucketExists).toHaveBeenCalled();
+    expect(internal.statObject).toHaveBeenCalled();
+    expect(internal.presignedPutObject).not.toHaveBeenCalled();
+    expect(internal.presignedGetObject).not.toHaveBeenCalled();
+
+    expect(publicSide.presignedPutObject).toHaveBeenCalledWith(
+      'roomscan-assets',
+      'scans/scan-1/model',
+      expect.any(Number),
+    );
+    expect(publicSide.presignedGetObject).toHaveBeenCalledWith(
+      'roomscan-assets',
+      'scans/scan-1/model',
+      expect.any(Number),
+    );
+    expect(publicSide.bucketExists).not.toHaveBeenCalled();
+    expect(publicSide.statObject).not.toHaveBeenCalled();
+  });
+
+  it('reuses the same client for presigned URLs when no public endpoint override is given', async () => {
+    const { client, presignedPutObject, bucketExists } = createClient();
+    const adapter = createAdapter(client);
+
+    await adapter.createUploadUrl('scans/scan-1/model', {
+      contentType: 'model/gltf-binary',
+      sizeBytes: 1024,
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+
+    expect(bucketExists).toHaveBeenCalled();
+    expect(presignedPutObject).toHaveBeenCalled();
   });
 
   it('honors a configured display base URL and HTTPS', async () => {
