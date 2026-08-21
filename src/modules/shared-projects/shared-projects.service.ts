@@ -112,20 +112,23 @@ export class SharedProjectsService {
       }
       throw new SharedProjectNotInListError();
     }
-    if (access.revokedAt !== null) {
-      throw new SharedProjectNotInListError();
+    if (access.deletedAt !== null) {
+      return {
+        projectId,
+        removedAt: access.deletedAt.toISOString(),
+      };
     }
 
     const removedAt = this.#clock();
-    const removed = await this.#repository.removeFromShared(projectId, userId, removedAt);
+    const result = await this.#repository.removeFromShared(projectId, userId, removedAt);
 
-    if (!removed) {
+    if (result === null) {
       throw new SharedProjectNotInListError();
     }
 
     return {
       projectId,
-      removedAt: removedAt.toISOString(),
+      removedAt: result.removedAt.toISOString(),
     };
   }
 }

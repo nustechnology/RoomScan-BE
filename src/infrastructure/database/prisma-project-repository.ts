@@ -67,6 +67,7 @@ const projectSelect = {
         where: {
           role: PrismaProjectRole.VIEWER,
           revokedAt: null,
+          deletedAt: null,
         },
       },
       scans: {
@@ -194,6 +195,7 @@ function viewableProjectWhere(id: string, userId: string) {
             userId,
             role: PrismaProjectRole.VIEWER,
             revokedAt: null,
+            deletedAt: null,
           },
         },
       },
@@ -428,7 +430,7 @@ export class PrismaProjectRepository implements ProjectRepository {
             },
           },
           accesses: {
-            where: { revokedAt: null },
+            where: { revokedAt: null, deletedAt: null },
             select: { id: true, userId: true, revision: true },
           },
         },

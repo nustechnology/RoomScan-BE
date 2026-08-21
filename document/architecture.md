@@ -397,7 +397,13 @@ SCAN_NOT_SHAREABLE`. Revoking a Viewer simply sets `revokedAt`; downstream
 enforcement that revoked Viewers lose project, scan, note, and asset download
 access is inherited from the shared `ProjectPermissionService` and
 `ScanPermissionService` access lookups, which filter on active (`revokedAt:
-null`) access on every request.
+null`) access on every request. A Viewer who removes an item from their Shared
+With Me list has `deletedAt` on their access row instead and is treated the same
+way: every active-access lookup excludes `deletedAt`-non-null access, so a
+self-removed Viewer loses project, scan, note, and asset-download access just
+like an Owner-revoked one. Re-accepting an invitation or re-granting a share
+link on a previously self-removed access resets `deletedAt: null` so the Viewer
+is re-activated.
 
 ## Shared With Me module
 
@@ -405,32 +411,46 @@ The Shared With Me module is the Viewer-facing read side of sharing. It lists
 the projects the current user accepted as a Viewer, opens an active shared
 project read-only, and lets the user remove a project from their own list. It
 depends on a narrow `SharedProjectsRepository` interface and derives everything
-from existing rows: `ProjectAccess` membership, the `Project` row (including
-`deletedAt` and `updatedAt`), the `owner` relation, and a non-deleted scan
-count. No schema change was required for this phase.
+from existing rows. `ProjectAccess` rows distinguish lifecycle state with two
+independent timestamps: `revokedAt` (set only when the Owner revokes a Viewer)
+and `deletedAt` (set only when the Viewer removes the project from their own
+Shared With Me list). The module reads `ProjectAccess` membership, the `Project`
+row (including `deletedAt` and `updatedAt`), the `owner` relation, and a
+non-deleted scan count. The migration
+that introduced `ProjectAccess.deletedAt` also keeps the access-row list index
+(`userId, deletedAt, revokedAt, projectId`) aligned with the list predicate.
 
-`SharedProjectsService` computes a `status` for each entry:
-`ACTIVE` (live project, active access), `REVOKED` (live project, revoked
+`SharedProjectsService` computes a `status` for each listed entry:
+`ACTIVE` (live project, active access), `REVOKED` (live project, owner-revoked
 access), `PROJECT_DELETED` (deleted project whose access was revoked), and
 `TEMPORARILY_UNAVAILABLE` (a defensive state for an inconsistent record, such as
-a deleted project whose access is still active). List and detail map to a
+a deleted project whose access is still active). A Viewer-removed entry has
+`deletedAt` set and is filtered out of the list entirely, so it has no status.
+List and detail map to a
 read-only response whose `permissions` always has `role: VIEWER` with `canView`
 true only for `ACTIVE`. Detail only returns a project while it is `ACTIVE`;
-revoked, deleted, and never-shared projects are hidden behind the standard
-`404 PROJECT_NOT_FOUND`.
+revoked, deleted, removed, and never-shared projects are hidden behind the
+standard `404 PROJECT_NOT_FOUND`.
 
-`PrismaSharedProjectsRepository` restricts every `project_accesses` lookup to
-`VIEWER` rows: list filters by `userId` and the `VIEWER` role, detail and
-access-status checks match on `(projectId, userId)` with the same role filter,
-and removal runs a transactionally guarded revision update on the access row
-(`role: VIEWER`, `revokedAt: null`). That transaction increments the access
-revision and emits Owner plus targeted Viewer tombstones, so owner
-records are never returned or revoked and a concurrent removal or Owner revocation resolves to
-`409 NOT_IN_SHARED_WITH_ME` instead of succeeding. Lookups apply
-case-insensitive name search against the parent project, sort by a to-one
-relation field with a stable project `id` tie-breaker, and paginate with an
-offset. Owners never appear in the list, and a removal attempt by the project
-Owner returns `403 NOT_SHARED_PROJECT`.
+`PrismaSharedProjectsRepository` restricts every `project_accesses` list/detail
+lookup to `VIEWER` rows with `deletedAt: null`: list filters by `userId`,
+`VIEWER` role, and `deletedAt`, detail and access-status checks match on
+`(projectId, userId)` with the same role and removal filter, and removal runs a
+transactionally guarded update on the access row (`role: VIEWER`,
+`deletedAt: null`, and the access's own `revision` compare-and-set). Removal
+sets `deletedAt`, works on any status (including an Owner-revoked entry), is
+idempotent on retry, increments the access revision, and emits Owner plus
+targeted Viewer tombstones, so owner records are never returned or removed. A
+concurrent Owner revocation (which also increments `revision`) wins the guarded
+update against a same-time removal; the repository re-reads the row and, since
+revocation alone never sets `deletedAt`, finds no tombstone and resolves to
+`409 NOT_IN_SHARED_WITH_ME`. A concurrent second removal request instead loses
+the update but finds the tombstone the winner already persisted, so it returns
+`200` with that stored `deletedAt` rather than surfacing a conflict. Lookups
+apply case-insensitive name search against the parent project, sort by a
+to-one relation field with a stable project `id` tie-breaker, and paginate with
+an offset. Owners never appear in the list, and a removal attempt by the
+project Owner returns `403 NOT_SHARED_PROJECT`.
 
 ## Shared Scans module
 
@@ -439,29 +459,41 @@ Me module. It lists the scans the current user accepted as a Viewer (via a
 scan-level invitation or share link), opens an active shared scan read-only, and
 lets the user remove a scan from their own list. It depends on a narrow
 `SharedScansRepository` interface and derives everything from existing rows:
-`ScanAccess` membership, the `Scan` row (including `deletedAt`, `updatedAt`, and
-the creator relation), and a non-deleted note count. Because `ScanAccess`
-already existed from the scan-sharing phase, no schema change was required.
+`ScanAccess` membership (using the same two-timestamp lifecycle as
+`ProjectAccess`, with `revokedAt` for Owner revocation and `deletedAt` for
+Viewer self-removal), the `Scan` row (including `deletedAt`, `updatedAt`, and
+the creator relation), and a non-deleted note count. The migration that added
+`ScanAccess.deletedAt` also aligns the access-row list index
+(`userId, deletedAt, revokedAt, scanId`).
 
 `SharedScansService` computes a `status` for each entry, mirroring the project
 surface but at scan granularity: `ACTIVE` (live scan, active access), `REVOKED`
 (live scan, revoked access), `SCAN_DELETED` (deleted scan whose access was
 revoked), and `TEMPORARILY_UNAVAILABLE` (a defensive state for an inconsistent
-record). List and detail map to a read-only response whose `permissions` always
-has `role: VIEWER` with `canView` true only for `ACTIVE`. Detail only returns a
-scan while it is `ACTIVE`; revoked, deleted, and never-shared scans are hidden
-behind the standard `404 SCAN_NOT_FOUND`.
+record). A Viewer-removed entry has `deletedAt` set and is filtered out of the
+list, so it has no status. List and detail map to a read-only response whose
+`permissions` always has `role: VIEWER` with `canView` true only for `ACTIVE`.
+Detail only returns a scan while it is `ACTIVE`; revoked, deleted, removed, and
+never-shared scans are hidden behind the standard `404 SCAN_NOT_FOUND`.
 
-`PrismaSharedScansRepository` restricts every `scan_accesses` lookup to `VIEWER`
-rows: list filters by `userId` and the `VIEWER` role, detail and access-status
-checks match on `(scanId, userId)` with the same role filter, and removal runs a
-guarded `updateMany` on the access row (`role: VIEWER`, `revokedAt: null`), so
-owner records are never returned or revoked and a concurrent removal or Owner
-revocation resolves to `409 NOT_IN_SHARED_WITH_ME`. Lookups apply case-insensitive
-name search against the parent scan, sort by a to-one relation field with a
-stable scan `id` tie-breaker, and paginate with an offset. The "owner" check for
-removal resolves the scan's project owner; owners never appear in the list, and a
-removal attempt by the scan Owner returns `403 NOT_SHARED_SCAN`.
+`PrismaSharedScansRepository` restricts every `scan_accesses` list/detail lookup
+to `VIEWER` rows with `deletedAt: null`: list filters by `userId`, the `VIEWER`
+role, and `deletedAt`, detail and access-status checks match on `(scanId, userId)`
+with the same role and removal filter, and removal runs a guarded `updateMany` on
+the access row (`role: VIEWER`, `deletedAt: null`) that sets `deletedAt`, works
+on any status, and is idempotent: a losing concurrent removal request re-reads
+the row and returns `200` with the tombstone the winner already persisted
+instead of failing. `ScanAccess` carries no `revision` column, so unlike
+`ProjectAccess` a concurrent Owner revocation cannot contend with this update at
+all — revocation only sets `revokedAt`, which self-removal never inspects — so
+the two proceed independently and removal only resolves to
+`409 NOT_IN_SHARED_WITH_ME` when the access row is missing entirely (never
+granted, or owned by the caller). Owner records are never returned or removed.
+Lookups apply case-insensitive name search against the parent scan, sort by a
+to-one relation field with a stable scan `id` tie-breaker, and paginate with an
+offset. The "owner" check for removal resolves the scan's project owner; owners
+never appear in the list, and a removal attempt by the scan Owner returns
+`403 NOT_SHARED_SCAN`.
 
 ## Mail
 
@@ -567,7 +599,9 @@ Apple logins idempotent at the database boundary. The projects table has a
 foreign key to users with `onDelete: Restrict`; project access has unique
 `(projectId, userId)` membership, revocation state, and an optional
 `invitationId` or `shareLinkId` with an acceptance timestamp. Scan access has
-unique `(scanId, userId)` membership with the same lifecycle. Notes belong to a
+unique `(scanId, userId)` membership with the same lifecycle, and both access
+models carry an independent viewer-removal `deletedAt` plus a `revokedAt` for
+Owner revocation. Notes belong to a
 scan with `onDelete: Cascade` and to a creator with `onDelete: Restrict`.
 Invitations belong to a project or scan with `onDelete: Cascade` and to a
 creator with `onDelete: Restrict`; their `tokenHash` is unique, their

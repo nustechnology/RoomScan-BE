@@ -421,6 +421,7 @@ describe('PrismaScanRepository', () => {
                       userId: OWNER_ID,
                       role: 'VIEWER',
                       revokedAt: null,
+                      deletedAt: null,
                     },
                   },
                 },
@@ -434,6 +435,7 @@ describe('PrismaScanRepository', () => {
                 userId: OWNER_ID,
                 role: 'VIEWER',
                 revokedAt: null,
+                deletedAt: null,
               },
             },
           },
@@ -490,7 +492,7 @@ describe('PrismaScanRepository', () => {
                 { ownerId: VIEWER_ID },
                 {
                   accesses: {
-                    some: { userId: VIEWER_ID, role: 'VIEWER', revokedAt: null },
+                    some: { userId: VIEWER_ID, role: 'VIEWER', revokedAt: null, deletedAt: null },
                   },
                 },
               ],
@@ -499,7 +501,7 @@ describe('PrismaScanRepository', () => {
           {
             project: { deletedAt: null },
             accesses: {
-              some: { userId: VIEWER_ID, role: 'VIEWER', revokedAt: null },
+              some: { userId: VIEWER_ID, role: 'VIEWER', revokedAt: null, deletedAt: null },
             },
           },
         ],

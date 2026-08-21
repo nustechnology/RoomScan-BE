@@ -51,6 +51,7 @@ const expectedProjectSelect = {
         where: {
           role: 'VIEWER',
           revokedAt: null,
+          deletedAt: null,
         },
       },
       scans: {
@@ -278,6 +279,7 @@ describe('PrismaProjectRepository', () => {
                 userId: OWNER_ID,
                 role: 'VIEWER',
                 revokedAt: null,
+                deletedAt: null,
               },
             },
           },
@@ -324,6 +326,7 @@ describe('PrismaProjectRepository', () => {
                 userId: OWNER_ID,
                 role: 'VIEWER',
                 revokedAt: null,
+                deletedAt: null,
               },
             },
           },

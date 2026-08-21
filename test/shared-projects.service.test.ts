@@ -32,6 +32,7 @@ function createRecord(
     updatedAt: NOW,
     projectDeletedAt: null,
     accessRevokedAt: null,
+    accessDeletedAt: null,
     scans: [],
     ...overrides,
   };
@@ -257,15 +258,34 @@ describe('SharedProjectsService', () => {
   });
 
   describe('remove', () => {
-    it('revokes only the current viewer access and confirms removal', async () => {
-      findAccessStatus.mockResolvedValue({ revokedAt: null });
-      removeFromShared.mockResolvedValue(true);
+    it('removes the current viewer access and confirms removal', async () => {
+      findAccessStatus.mockResolvedValue({ revokedAt: null, deletedAt: null });
+      removeFromShared.mockResolvedValue({ removedAt: NOW });
 
       const result = await service.remove(USER_ID, PROJECT_ID);
 
       expect(findAccessStatus).toHaveBeenCalledWith(PROJECT_ID, USER_ID);
       expect(removeFromShared).toHaveBeenCalledWith(PROJECT_ID, USER_ID, NOW);
       expect(result).toEqual({ projectId: PROJECT_ID, removedAt: NOW.toISOString() });
+    });
+
+    it('removes an owner-revoked project from the list', async () => {
+      findAccessStatus.mockResolvedValue({ revokedAt: NOW, deletedAt: null });
+      removeFromShared.mockResolvedValue({ removedAt: NOW });
+
+      const result = await service.remove(USER_ID, PROJECT_ID);
+
+      expect(removeFromShared).toHaveBeenCalledWith(PROJECT_ID, USER_ID, NOW);
+      expect(result).toEqual({ projectId: PROJECT_ID, removedAt: NOW.toISOString() });
+    });
+
+    it('is idempotent when the project was already removed', async () => {
+      findAccessStatus.mockResolvedValue({ revokedAt: null, deletedAt: NOW });
+
+      const result = await service.remove(USER_ID, PROJECT_ID);
+
+      expect(result).toEqual({ projectId: PROJECT_ID, removedAt: NOW.toISOString() });
+      expect(removeFromShared).not.toHaveBeenCalled();
     });
 
     it('rejects the owner, whose projects are never in Shared With Me', async () => {
@@ -287,18 +307,9 @@ describe('SharedProjectsService', () => {
       );
     });
 
-    it('rejects an already-removed or owner-revoked project', async () => {
-      findAccessStatus.mockResolvedValue({ revokedAt: NOW });
-
-      await expect(service.remove(USER_ID, PROJECT_ID)).rejects.toBeInstanceOf(
-        SharedProjectNotInListError,
-      );
-      expect(removeFromShared).not.toHaveBeenCalled();
-    });
-
-    it('rejects when the concurrent revoke wins the update', async () => {
-      findAccessStatus.mockResolvedValue({ revokedAt: null });
-      removeFromShared.mockResolvedValue(false);
+    it('rejects when the concurrent update fails', async () => {
+      findAccessStatus.mockResolvedValue({ revokedAt: null, deletedAt: null });
+      removeFromShared.mockResolvedValue(null);
 
       await expect(service.remove(USER_ID, PROJECT_ID)).rejects.toBeInstanceOf(
         SharedProjectNotInListError,
