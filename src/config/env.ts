@@ -136,7 +136,13 @@ export const environmentSchema = z
     STORAGE_SECRET_ACCESS_KEY: z.string().trim().default(''),
     STORAGE_USE_SSL: environmentBooleanSchema,
     STORAGE_PUBLIC_ENDPOINT: z.string().trim().default(''),
-    STORAGE_PUBLIC_USE_SSL: z.enum(['true', 'false']).optional(),
+    STORAGE_PUBLIC_USE_SSL: z
+      .string()
+      .trim()
+      .default('')
+      .refine((value) => value === '' || value === 'true' || value === 'false', {
+        message: 'STORAGE_PUBLIC_USE_SSL must be "true" or "false"',
+      }),
     STORAGE_UPLOAD_URL_TTL_SECONDS: z.coerce.number().int().positive().default(900),
     STORAGE_DOWNLOAD_URL_TTL_SECONDS: z.coerce.number().int().positive().default(60),
     ASSET_MIN_MODEL_SIZE_BYTES: z.coerce.number().int().nonnegative().default(0),
@@ -325,7 +331,7 @@ export function loadConfig(input: NodeJS.ProcessEnv = process.env): AppConfig {
         ? environment.STORAGE_ENDPOINT
         : environment.STORAGE_PUBLIC_ENDPOINT,
     storagePublicUseSsl:
-      environment.STORAGE_PUBLIC_USE_SSL === undefined
+      environment.STORAGE_PUBLIC_USE_SSL === ''
         ? environment.STORAGE_USE_SSL
         : environment.STORAGE_PUBLIC_USE_SSL === 'true',
     storageUploadUrlTtlSeconds: environment.STORAGE_UPLOAD_URL_TTL_SECONDS,

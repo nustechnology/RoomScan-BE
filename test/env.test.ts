@@ -176,6 +176,35 @@ describe('loadConfig', () => {
     expect(config.storagePublicUseSsl).toBe(true);
   });
 
+  it('treats an explicit empty STORAGE_PUBLIC_USE_SSL as unset (Docker Compose passthrough)', () => {
+    const config = loadConfig({
+      ...validEnvironment,
+      STORAGE_PROVIDER: 'minio',
+      STORAGE_BUCKET: 'roomscan-assets',
+      STORAGE_ENDPOINT: 'minio:9000',
+      STORAGE_ACCESS_KEY_ID: 'minio-access-key',
+      STORAGE_SECRET_ACCESS_KEY: 'minio-secret-key',
+      STORAGE_USE_SSL: 'true',
+      STORAGE_PUBLIC_USE_SSL: '',
+    });
+
+    expect(config.storagePublicUseSsl).toBe(true);
+  });
+
+  it('rejects an invalid STORAGE_PUBLIC_USE_SSL value', () => {
+    expect(() =>
+      loadConfig({
+        ...validEnvironment,
+        STORAGE_PROVIDER: 'minio',
+        STORAGE_BUCKET: 'roomscan-assets',
+        STORAGE_ENDPOINT: 'minio:9000',
+        STORAGE_ACCESS_KEY_ID: 'minio-access-key',
+        STORAGE_SECRET_ACCESS_KEY: 'minio-secret-key',
+        STORAGE_PUBLIC_USE_SSL: 'yes',
+      }),
+    ).toThrow(/STORAGE_PUBLIC_USE_SSL must be/);
+  });
+
   it.each([
     ['STORAGE_BUCKET', ''],
     ['STORAGE_ENDPOINT', ''],
