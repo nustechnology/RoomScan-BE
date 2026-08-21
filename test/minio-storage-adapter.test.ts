@@ -216,6 +216,21 @@ describe('MinioStorageAdapter', () => {
     );
   });
 
+  it('does not invent a port for an endpoint that has none', async () => {
+    const adapter = new MinioStorageAdapter({
+      bucket: 'roomscan-assets',
+      endPoint: 'storage.roomscan.example',
+      accessKey: 'access-key',
+      secretKey: 'secret-key',
+      useSSL: true,
+      client: createClient().client,
+    });
+
+    await expect(adapter.createDisplayUrl('scans/scan-1/thumbnail')).resolves.toBe(
+      'https://storage.roomscan.example/roomscan-assets/scans/scan-1/thumbnail',
+    );
+  });
+
   it('signs presigned URLs against a separate public endpoint, keeping bucket/stat calls on the internal one', async () => {
     const internal = createClient();
     const publicSide = createClient();
