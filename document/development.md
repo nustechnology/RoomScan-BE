@@ -109,7 +109,18 @@ Shared Scans surface is demoable locally too. With the shortcut enabled, use:
 ```
 
 at `POST /api/v1/auth/apple`. The response contains normally signed RoomScan
-access and refresh JWTs for `local-test@roomscan.dev`. Other identity tokens
+access and refresh JWTs for `local-test@roomscan.dev`. A second sentinel maps to
+the seeded pending-invitation recipient so the accept flow is testable locally:
+
+```json
+{
+  "identityToken": "roomscan-local-pending-invite-user"
+}
+```
+
+This returns JWTs for `pending-invite@roomscan.dev`, the recipient of the
+seed's demo invitation, so `POST /invitations/{token}/accept` can be exercised
+with the printed `invitationUrl` instead of as the owner. Other identity tokens
 continue through Apple verification. The production-style Compose API sets
 `NODE_ENV=production`, so it never enables this shortcut and it also rejects
 `STORAGE_PROVIDER=local`; the Compose stack starts MinIO and wires the API to it
