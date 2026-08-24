@@ -91,6 +91,7 @@ export class MinioStorageAdapter implements StorageAdapter {
 
     const publicEndPointInput = options.publicEndPoint ?? options.endPoint;
     const publicUseSSL = options.publicUseSSL ?? useSSL;
+    const { endPoint: displayHost, port: displayPort } = splitEndpoint(publicEndPointInput);
     const isSamePublicEndpoint =
       options.publicClient === undefined &&
       publicEndPointInput === options.endPoint &&
@@ -115,7 +116,7 @@ export class MinioStorageAdapter implements StorageAdapter {
     this.#region = options.region;
     this.#displayBaseUrl = (
       options.displayBaseUrl ??
-      `${useSSL ? 'https' : 'http'}://${endPoint}${port === undefined ? '' : `:${port}`}`
+      `${publicUseSSL ? 'https' : 'http'}://${displayHost}${displayPort === undefined ? '' : `:${displayPort}`}`
     ).replace(/\/+$/, '');
   }
 

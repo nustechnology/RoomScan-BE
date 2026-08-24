@@ -303,4 +303,21 @@ describe('MinioStorageAdapter', () => {
       'https://cdn.roomscan.dev/roomscan-assets/scans/scan-1/thumbnail',
     );
   });
+
+  it('derives the display URL from the public endpoint when one is configured', async () => {
+    const adapter = new MinioStorageAdapter({
+      bucket: 'roomscan-assets',
+      endPoint: 'minio:9000',
+      accessKey: 'access-key',
+      secretKey: 'secret-key',
+      useSSL: false,
+      publicEndPoint: 'storage.roomscan.example',
+      publicUseSSL: true,
+      client: createClient().client,
+    });
+
+    await expect(adapter.createDisplayUrl('scans/scan-1/thumbnail')).resolves.toBe(
+      'https://storage.roomscan.example/roomscan-assets/scans/scan-1/thumbnail',
+    );
+  });
 });

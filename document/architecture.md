@@ -539,10 +539,16 @@ completion time through this stored-object comparison. `createDisplayUrl`
 returns a stable, non-expiring object URL (`[scheme]://[endpoint]/[bucket]/[key]`,
 overridable via `displayBaseUrl`), so it requires the bucket or objects to be
 publicly readable or a CDN/reverse proxy in front of MinIO; it is used to
-persist scan thumbnails.
+persist scan thumbnails. Like the presigned PUT/GET URLs, its default
+`[scheme]://[endpoint]` base follows the public endpoint
+(`STORAGE_PUBLIC_ENDPOINT`/`STORAGE_PUBLIC_USE_SSL`) when configured, falling
+back to `STORAGE_ENDPOINT`/`STORAGE_USE_SSL` otherwise, so thumbnails persisted
+onto scans and returned by project/scan/shared APIs carry an
+externally-reachable host instead of an internal one.
 
 `STORAGE_ENDPOINT` is used both for internal calls (`bucketExists`,
-`makeBucket`, `statObject`) and, by default, to sign presigned PUT/GET URLs.
+`makeBucket`, `statObject`) and, by default, to sign presigned PUT/GET URLs and
+to derive the default display-URL base.
 When the client that receives those presigned URLs (a mobile app, a browser)
 cannot reach `STORAGE_ENDPOINT` directly — for example it is a Docker-internal
 hostname reachable only by the API process itself — the optional
