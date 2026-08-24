@@ -12,3 +12,6 @@ export const LOCAL_TEST_USER_ID = '00000000-0000-4000-8000-000000000001';
 export const LOCAL_TEST_USER_EMAIL = 'local-test@roomscan.dev';
 export const LOCAL_TEST_VIEWER_ID = '00000000-0000-4000-8000-000000000002';
 export const LOCAL_TEST_VIEWER_EMAIL = 'local-viewer@roomscan.dev';
+export const LOCAL_TEST_PENDING_INVITE_APPLE_IDENTITY_TOKEN = 'roomscan-local-pending-invite-user';
+export const LOCAL_TEST_PENDING_INVITE_PROVIDER_ID = 'roomscan-local-pending-invite-user';
+export const LOCAL_TEST_PENDING_INVITE_EMAIL = 'pending-invite@roomscan.dev';

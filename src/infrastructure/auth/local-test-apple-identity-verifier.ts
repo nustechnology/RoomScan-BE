@@ -1,6 +1,9 @@
 import {
   LOCAL_TEST_APPLE_IDENTITY_TOKEN,
   LOCAL_TEST_APPLE_PROVIDER_ID,
+  LOCAL_TEST_PENDING_INVITE_APPLE_IDENTITY_TOKEN,
+  LOCAL_TEST_PENDING_INVITE_PROVIDER_ID,
+  LOCAL_TEST_PENDING_INVITE_EMAIL,
   LOCAL_TEST_USER_EMAIL,
 } from '../../config/constants.js';
 import type {
@@ -27,6 +30,13 @@ export class LocalTestAppleIdentityVerifier implements AppleIdentityVerifier {
       return {
         providerId: LOCAL_TEST_APPLE_PROVIDER_ID,
         email: LOCAL_TEST_USER_EMAIL,
+        emailVerified: true,
+      };
+    }
+    if (this.#enabled && identityToken === LOCAL_TEST_PENDING_INVITE_APPLE_IDENTITY_TOKEN) {
+      return {
+        providerId: LOCAL_TEST_PENDING_INVITE_PROVIDER_ID,
+        email: LOCAL_TEST_PENDING_INVITE_EMAIL,
         emailVerified: true,
       };
     }

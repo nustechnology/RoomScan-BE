@@ -3,6 +3,9 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   LOCAL_TEST_APPLE_IDENTITY_TOKEN,
   LOCAL_TEST_APPLE_PROVIDER_ID,
+  LOCAL_TEST_PENDING_INVITE_APPLE_IDENTITY_TOKEN,
+  LOCAL_TEST_PENDING_INVITE_PROVIDER_ID,
+  LOCAL_TEST_PENDING_INVITE_EMAIL,
   LOCAL_TEST_USER_EMAIL,
 } from '../src/config/constants.js';
 import { LocalTestAppleIdentityVerifier } from '../src/infrastructure/auth/local-test-apple-identity-verifier.js';
@@ -21,6 +24,23 @@ describe('LocalTestAppleIdentityVerifier', () => {
     ).resolves.toEqual({
       providerId: LOCAL_TEST_APPLE_PROVIDER_ID,
       email: LOCAL_TEST_USER_EMAIL,
+      emailVerified: true,
+    });
+    expect(verify).not.toHaveBeenCalled();
+  });
+
+  it('returns the pending-invite recipient identity for its local sentinel', async () => {
+    const verify = vi.fn<AppleIdentityVerifier['verify']>();
+    const verifier = new LocalTestAppleIdentityVerifier({
+      delegate: { verify },
+      enabled: true,
+    });
+
+    await expect(
+      verifier.verify(LOCAL_TEST_PENDING_INVITE_APPLE_IDENTITY_TOKEN, 'ignored-local-nonce'),
+    ).resolves.toEqual({
+      providerId: LOCAL_TEST_PENDING_INVITE_PROVIDER_ID,
+      email: LOCAL_TEST_PENDING_INVITE_EMAIL,
       emailVerified: true,
     });
     expect(verify).not.toHaveBeenCalled();

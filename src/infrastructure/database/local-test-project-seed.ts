@@ -1,7 +1,11 @@
 import { AssetStatus, SyncStatus } from '../../generated/prisma/enums.js';
 import { Prisma } from '../../generated/prisma/client.js';
 import type { PrismaClient } from '../../generated/prisma/client.js';
-import { LOCAL_TEST_USER_ID, LOCAL_TEST_VIEWER_ID } from '../../config/constants.js';
+import {
+  LOCAL_TEST_PENDING_INVITE_EMAIL,
+  LOCAL_TEST_USER_ID,
+  LOCAL_TEST_VIEWER_ID,
+} from '../../config/constants.js';
 import { generateInvitationToken, hashInvitationToken } from '../../modules/share/share.service.js';
 import {
   hasProjectSyncState,
@@ -13,7 +17,6 @@ import {
 export const LOCAL_TEST_PROJECT_ID = '00000000-0000-4000-8000-000000000101';
 export const LOCAL_TEST_PROJECT_NAME = 'District 2 Apartment';
 export const LOCAL_TEST_INVITATION_ID = '00000000-0000-4000-8000-000000000401';
-export const LOCAL_TEST_PENDING_INVITE_EMAIL = 'pending-invite@roomscan.dev';
 export const LOCAL_TEST_SHARED_PROJECT_ID = '00000000-0000-4000-8000-000000000104';
 export const LOCAL_TEST_SHARED_PROJECT_NAME = 'Garden House';
 export const LOCAL_TEST_SHARED_SCAN_ID = '00000000-0000-4000-8000-000000000208';
