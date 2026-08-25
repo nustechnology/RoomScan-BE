@@ -402,12 +402,14 @@ and the resource Owner cannot accept or decline
 Reusable share links behave differently: acceptance never transitions the link —
 a `ShareLink` row retains its status (`ACTIVE`, `EXPIRED`, or `REVOKED`) and
 remains redeemable by any other signed-in user until it expires or the Owner
-revokes it; accepting only creates the access row (via `acceptedAt`) and never a
-second access. A revoked or expired share link cannot be accepted
-(`409 SHARE_LINK_REVOKED` or `409 SHARE_LINK_EXPIRED`), has no decline
-operation, and newly created access via a revoked or expired link is rejected —
-`grantProjectAccess`/`grantScanAccess` refuse to re-grant once the user has a
-previously revoked access record, and re-granting an active user is blocked by
+revokes it; accepting only creates or revives the access row (via `acceptedAt`)
+and never a second access row per user. A revoked share link cannot be accepted
+(`404 SHARE_NO_LONGER_AVAILABLE`), an expired one cannot either
+(`409 SHARE_LINK_EXPIRED`), and neither has a decline operation. Granting access
+from a share link always upserts the accepting user's `ProjectAccess`/
+`ScanAccess` row keyed on `(projectId|scanId, userId)` — reviving it from any
+prior state (Owner-revoked or Viewer-self-removed) by clearing `revokedAt` and
+`deletedAt` — so only a user who currently has _active_ access is blocked, with
 `409 ACCESS_ALREADY_EXISTS`.
 
 Revoked (`409 INVITATION_REVOKED`), expired (`409 INVITATION_EXPIRED`), accepted
@@ -434,8 +436,8 @@ With Me list has `deletedAt` on their access row instead and is treated the same
 way: every active-access lookup excludes `deletedAt`-non-null access, so a
 self-removed Viewer loses project, scan, note, and asset-download access just
 like an Owner-revoked one. Re-accepting an invitation or re-granting a share
-link on a previously self-removed access resets `deletedAt: null` so the Viewer
-is re-activated.
+link on a previously self-removed _or_ Owner-revoked access resets both
+`revokedAt: null` and `deletedAt: null` so the Viewer is re-activated.
 
 ## Shared With Me module
 
