@@ -15,6 +15,11 @@ export interface PaginationMeta {
 }
 
 export function paginationQuerySchema(defaultLimit: number) {
+  if (!Number.isInteger(defaultLimit) || defaultLimit < 1 || defaultLimit > 100) {
+    throw new Error(
+      `paginationQuerySchema: defaultLimit must be an integer between 1 and 100, got ${defaultLimit}`,
+    );
+  }
   return z.object({
     page: z.coerce.number().int().min(1).default(1),
     limit: z.coerce.number().int().min(1).max(100).default(defaultLimit),

@@ -31,6 +31,13 @@ describe('paginationQuerySchema', () => {
     const schema = paginationQuerySchema(20);
     expect(() => schema.parse({ page: 0 })).toThrow();
   });
+
+  it.each([0, 101, 1.5, -5])(
+    'throws when constructed with an invalid defaultLimit (%s) instead of silently accepting it',
+    (defaultLimit) => {
+      expect(() => paginationQuerySchema(defaultLimit)).toThrow();
+    },
+  );
 });
 
 describe('searchQuerySchema', () => {
