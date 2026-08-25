@@ -100,4 +100,39 @@ describe('PrismaAppleUserRepository', () => {
       },
     });
   });
+
+  it('applies a displayName even when the Apple token has no email', async () => {
+    const { repository, upsert } = createRepository();
+
+    await repository.upsertAppleUser({
+      providerId: 'apple-subject',
+      email: null,
+      emailVerified: false,
+      displayName: 'Nguyen Minh Anh',
+    });
+
+    expect(upsert).toHaveBeenCalledWith({
+      where: {
+        provider_providerId: {
+          provider: 'APPLE',
+          providerId: 'apple-subject',
+        },
+      },
+      create: {
+        provider: 'APPLE',
+        providerId: 'apple-subject',
+        email: null,
+        emailVerified: false,
+        displayName: 'Nguyen Minh Anh',
+      },
+      update: {
+        displayName: 'Nguyen Minh Anh',
+      },
+      select: {
+        id: true,
+        email: true,
+        displayName: true,
+      },
+    });
+  });
 });

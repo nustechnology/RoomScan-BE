@@ -30,16 +30,17 @@ export class PrismaAppleUserRepository implements AppleUserRepository {
           ? {}
           : { displayName: identity.displayName }),
       },
-      update:
-        identity.email === null
+      update: {
+        ...(identity.email === null
           ? {}
           : {
               email: identity.email,
               emailVerified: identity.emailVerified,
-              ...(identity.displayName === undefined || identity.displayName === null
-                ? {}
-                : { displayName: identity.displayName }),
-            },
+            }),
+        ...(identity.displayName === undefined || identity.displayName === null
+          ? {}
+          : { displayName: identity.displayName }),
+      },
       select: {
         id: true,
         email: true,
