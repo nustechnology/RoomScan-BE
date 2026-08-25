@@ -1,5 +1,10 @@
 import { z } from '../../openapi/zod.js';
 import {
+  paginatedResponseSchema,
+  paginationQuerySchema,
+  searchQuerySchema,
+} from '../../common/pagination/pagination.js';
+import {
   ProjectIdParamSchema,
   ProjectPermissionsSchema,
   ProjectScanSummarySchema,
@@ -33,15 +38,7 @@ export const SharedProjectDetailResponseSchema = SharedProjectResponseSchema.ext
   scans: z.array(ProjectScanSummarySchema),
 });
 
-export const SharedProjectListResponseSchema = z.object({
-  items: z.array(SharedProjectResponseSchema),
-  pagination: z.object({
-    page: z.number().int().positive(),
-    limit: z.number().int().positive(),
-    total: z.number().int().nonnegative(),
-    totalPages: z.number().int().nonnegative(),
-  }),
-});
+export const SharedProjectListResponseSchema = paginatedResponseSchema(SharedProjectResponseSchema);
 
 export const SharedProjectRemoveResponseSchema = z.object({
   projectId: z.uuid(),
@@ -50,14 +47,8 @@ export const SharedProjectRemoveResponseSchema = z.object({
 
 export const ListSharedProjectsQuerySchema = z
   .object({
-    search: z
-      .string()
-      .trim()
-      .max(50)
-      .optional()
-      .transform((value) => (value === '' ? undefined : value)),
-    page: z.coerce.number().int().min(1).default(1),
-    limit: z.coerce.number().int().min(1).max(100).default(5),
+    search: searchQuerySchema(),
+    ...paginationQuerySchema(5).shape,
     sort: ProjectSortSchema.default('updatedAt:desc'),
   })
   .strict();

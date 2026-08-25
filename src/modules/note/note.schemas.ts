@@ -1,4 +1,8 @@
 import { z } from '../../openapi/zod.js';
+import {
+  paginatedResponseSchema,
+  paginationQuerySchema,
+} from '../../common/pagination/pagination.js';
 
 export const NoteColorSchema = z.enum([
   'YELLOW',
@@ -44,15 +48,7 @@ export const NoteResponseSchema = z.object({
   permissions: NotePermissionsSchema,
 });
 
-export const NoteListResponseSchema = z.object({
-  items: z.array(NoteResponseSchema),
-  pagination: z.object({
-    page: z.number().int().positive(),
-    limit: z.number().int().positive(),
-    total: z.number().int().nonnegative(),
-    totalPages: z.number().int().nonnegative(),
-  }),
-});
+export const NoteListResponseSchema = paginatedResponseSchema(NoteResponseSchema);
 
 export const CreateNoteBodySchema = z
   .object({
@@ -100,8 +96,7 @@ export const NoteSortSchema = z.enum([
 
 export const ListNotesQuerySchema = z
   .object({
-    page: z.coerce.number().int().min(1).default(1),
-    limit: z.coerce.number().int().min(1).max(100).default(20),
+    ...paginationQuerySchema(20).shape,
     sort: NoteSortSchema.default('updatedAt:desc'),
   })
   .strict();

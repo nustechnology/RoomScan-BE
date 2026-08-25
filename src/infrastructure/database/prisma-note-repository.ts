@@ -1,5 +1,6 @@
 import { Prisma, type PrismaClient } from '../../generated/prisma/client.js';
 import { ProjectRole as PrismaProjectRole } from '../../generated/prisma/enums.js';
+import { buildOrderBy, toSkipTake } from '../../common/pagination/pagination.js';
 import type {
   IdempotencyContext,
   IdempotencyResult,
@@ -146,9 +147,7 @@ type NoteOrderBy = {
 };
 
 function orderByFor(sort: NoteListOptions['sort']): NoteOrderBy[] {
-  const [field, direction] = sort.split(':') as ['updatedAt' | 'createdAt', SortDirection];
-
-  return [{ [field]: direction }, { id: direction }];
+  return buildOrderBy<NoteOrderBy>(sort, (field, direction) => ({ [field]: direction }));
 }
 
 function viewableNoteWhere(noteId: string, userId: string) {
@@ -339,8 +338,7 @@ export class PrismaNoteRepository implements NoteRepository {
       this.#client.note.findMany({
         where,
         orderBy: orderByFor(options.sort),
-        skip: (options.page - 1) * options.limit,
-        take: options.limit,
+        ...toSkipTake(options),
         select: noteSelect,
       }),
       this.#client.note.count({ where }),

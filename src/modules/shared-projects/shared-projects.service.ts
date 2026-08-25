@@ -1,3 +1,4 @@
+import { toPaginationMeta } from '../../common/pagination/pagination.js';
 import { ProjectNotFoundError } from '../project/project.errors.js';
 import { NotSharedProjectError, SharedProjectNotInListError } from './shared-projects.errors.js';
 import type {
@@ -83,12 +84,7 @@ export class SharedProjectsService {
 
     return {
       items: items.map(toResult),
-      pagination: {
-        page: options.page,
-        limit: options.limit,
-        total,
-        totalPages: Math.ceil(total / options.limit),
-      },
+      pagination: toPaginationMeta(options, total),
     };
   }
 

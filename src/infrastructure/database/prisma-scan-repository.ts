@@ -1,5 +1,6 @@
 import { Prisma, type PrismaClient } from '../../generated/prisma/client.js';
 import { ProjectRole as PrismaProjectRole } from '../../generated/prisma/enums.js';
+import { buildOrderBy, toSkipTake } from '../../common/pagination/pagination.js';
 import { IdempotencyKeyConflictError } from '../../common/idempotency/idempotency.errors.js';
 import type {
   IdempotencyContext,
@@ -133,9 +134,7 @@ function toOwnerResult(record: ScanRecord): ScanResult {
 }
 
 function orderByFor(sort: ScanSort): ScanOrderBy[] {
-  const [field, direction] = sort.split(':') as ['updatedAt' | 'createdAt' | 'name', SortDirection];
-
-  return [{ [field]: direction }, { id: direction }];
+  return buildOrderBy<ScanOrderBy>(sort, (field, direction) => ({ [field]: direction }));
 }
 
 function viewableScanWhere(id: string, userId: string) {
@@ -395,8 +394,7 @@ export class PrismaScanRepository implements ScanRepository {
       this.#client.scan.findMany({
         where,
         orderBy: orderByFor(options.sort),
-        skip: (options.page - 1) * options.limit,
-        take: options.limit,
+        ...toSkipTake(options),
         select: scanSelect,
       }),
       this.#client.scan.count({ where }),

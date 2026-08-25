@@ -1,3 +1,4 @@
+import { toPaginationMeta } from '../../common/pagination/pagination.js';
 import { ProjectNotFoundError } from './project.errors.js';
 import type { ProjectPermissionService } from './project.permissions.js';
 import type {
@@ -99,12 +100,7 @@ export class ProjectService {
     const { items, total } = await this.#repository.list(ownerId, options);
     return {
       items: items.map((item) => toResult(item, 'OWNER')),
-      pagination: {
-        page: options.page,
-        limit: options.limit,
-        total,
-        totalPages: Math.ceil(total / options.limit),
-      },
+      pagination: toPaginationMeta(options, total),
     };
   }
 

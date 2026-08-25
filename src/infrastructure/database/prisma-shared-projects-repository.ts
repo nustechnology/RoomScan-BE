@@ -1,5 +1,6 @@
 import type { PrismaClient } from '../../generated/prisma/client.js';
 import { ProjectRole as PrismaProjectRole } from '../../generated/prisma/enums.js';
+import { buildOrderBy, buildSearchWhere, toSkipTake } from '../../common/pagination/pagination.js';
 import type {
   SharedProjectDetailRecord,
   SharedProjectRecord,
@@ -142,9 +143,7 @@ const sharedProjectDetailSelect = {
 } as const;
 
 function orderByFor(sort: ProjectSort): Array<{ project: Record<string, SortDirection> }> {
-  const [field, direction] = sort.split(':') as ['updatedAt' | 'createdAt' | 'name', SortDirection];
-
-  return [{ project: { [field]: direction } }, { project: { id: direction } }];
+  return buildOrderBy(sort, (field, direction) => ({ project: { [field]: direction } }));
 }
 
 type SharedProjectsClient = Pick<PrismaClient, 'projectAccess' | 'project' | '$transaction'>;
@@ -164,23 +163,13 @@ export class PrismaSharedProjectsRepository implements SharedProjectsRepository 
       userId,
       role: PrismaProjectRole.VIEWER,
       deletedAt: null,
-      ...(options.search === undefined
-        ? {}
-        : {
-            project: {
-              name: {
-                contains: options.search,
-                mode: 'insensitive' as const,
-              },
-            },
-          }),
+      ...buildSearchWhere(options.search, (contains) => ({ project: { name: contains } })),
     };
     const [rows, total] = await this.#client.$transaction([
       this.#client.projectAccess.findMany({
         where,
         orderBy: orderByFor(options.sort),
-        skip: (options.page - 1) * options.limit,
-        take: options.limit,
+        ...toSkipTake(options),
         select: sharedProjectSelect,
       }),
       this.#client.projectAccess.count({ where }),

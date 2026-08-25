@@ -1,4 +1,9 @@
 import { z } from '../../openapi/zod.js';
+import {
+  paginatedResponseSchema,
+  paginationQuerySchema,
+  searchQuerySchema,
+} from '../../common/pagination/pagination.js';
 import { ScanIdParamSchema, ScanPermissionsSchema, ScanSortSchema } from '../scan/scan.schemas.js';
 
 export const SharedScanStatusSchema = z.enum([
@@ -28,15 +33,7 @@ export const SharedScanResponseSchema = z.object({
   permissions: ScanPermissionsSchema,
 });
 
-export const SharedScanListResponseSchema = z.object({
-  items: z.array(SharedScanResponseSchema),
-  pagination: z.object({
-    page: z.number().int().positive(),
-    limit: z.number().int().positive(),
-    total: z.number().int().nonnegative(),
-    totalPages: z.number().int().nonnegative(),
-  }),
-});
+export const SharedScanListResponseSchema = paginatedResponseSchema(SharedScanResponseSchema);
 
 export const SharedScanRemoveResponseSchema = z.object({
   scanId: z.uuid(),
@@ -45,14 +42,8 @@ export const SharedScanRemoveResponseSchema = z.object({
 
 export const ListSharedScansQuerySchema = z
   .object({
-    search: z
-      .string()
-      .trim()
-      .max(50)
-      .optional()
-      .transform((value) => (value === '' ? undefined : value)),
-    page: z.coerce.number().int().min(1).default(1),
-    limit: z.coerce.number().int().min(1).max(100).default(5),
+    search: searchQuerySchema(),
+    ...paginationQuerySchema(5).shape,
     sort: ScanSortSchema.default('updatedAt:desc'),
   })
   .strict();

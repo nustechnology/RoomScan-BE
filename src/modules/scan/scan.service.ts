@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
+import { toPaginationMeta } from '../../common/pagination/pagination.js';
 import { ProjectNotFoundError } from '../project/project.errors.js';
 import type {
   IdempotencyGateway,
@@ -179,12 +180,7 @@ export class ScanService {
 
     return {
       items: items.map((item) => toResult(item, role)),
-      pagination: {
-        page: options.page,
-        limit: options.limit,
-        total,
-        totalPages: Math.ceil(total / options.limit),
-      },
+      pagination: toPaginationMeta(options, total),
     };
   }
 

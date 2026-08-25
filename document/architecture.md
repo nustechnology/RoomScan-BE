@@ -153,6 +153,15 @@ active scans as lightweight summaries (`id`, `name`, `description`, `thumbnail`,
 project list and detail responses carry the scans without a second round trip;
 `scanCount` counts the same non-deleted scans.
 
+Pagination/sort/search query parsing, the `skip`/`take` and `id`-tiebreaker
+`orderBy` mechanics, the case-insensitive `contains` search fragment, and the
+`{ items, pagination }` response envelope are shared across the Project, Scan,
+Note, Shared Projects, and Shared Scans list endpoints through
+`src/common/pagination/pagination.ts` rather than reimplemented per module;
+only the default page size, the allow-listed sort fields, and (for the two
+Shared modules) nesting the sort/search fragments under the joined
+`project`/`scan` relation vary by module.
+
 Canonical project detail resolves the record and the caller's Owner or active
 Viewer role in one repository lookup. An Owner update performs its guarded
 write and response read in one transaction, so an overlapping deletion cannot
