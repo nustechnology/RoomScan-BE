@@ -1,5 +1,6 @@
 import type { PrismaClient } from '../../generated/prisma/client.js';
 import { ProjectRole as PrismaProjectRole } from '../../generated/prisma/enums.js';
+import { buildOrderBy, buildSearchWhere, toSkipTake } from '../../common/pagination/pagination.js';
 import type {
   SharedScanRecord,
   SharedScansListOptions,
@@ -85,9 +86,7 @@ function toSharedScanRecord(row: SharedScanRow): SharedScanRecord {
 }
 
 function orderByFor(sort: ScanSort): Array<{ scan: Record<string, SortDirection> }> {
-  const [field, direction] = sort.split(':') as ['updatedAt' | 'createdAt' | 'name', SortDirection];
-
-  return [{ scan: { [field]: direction } }, { scan: { id: direction } }];
+  return buildOrderBy(sort, (field, direction) => ({ scan: { [field]: direction } }));
 }
 
 type SharedScansClient = Pick<PrismaClient, 'scanAccess' | 'scan' | '$transaction'>;
@@ -107,23 +106,13 @@ export class PrismaSharedScansRepository implements SharedScansRepository {
       userId,
       role: PrismaProjectRole.VIEWER,
       deletedAt: null,
-      ...(options.search === undefined
-        ? {}
-        : {
-            scan: {
-              name: {
-                contains: options.search,
-                mode: 'insensitive' as const,
-              },
-            },
-          }),
+      ...buildSearchWhere(options.search, (contains) => ({ scan: { name: contains } })),
     };
     const [rows, total] = await this.#client.$transaction([
       this.#client.scanAccess.findMany({
         where,
         orderBy: orderByFor(options.sort),
-        skip: (options.page - 1) * options.limit,
-        take: options.limit,
+        ...toSkipTake(options),
         select: sharedScanSelect,
       }),
       this.#client.scanAccess.count({ where }),

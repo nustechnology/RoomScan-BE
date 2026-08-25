@@ -1,5 +1,6 @@
 import type { PrismaClient } from '../../generated/prisma/client.js';
 import { ProjectRole as PrismaProjectRole } from '../../generated/prisma/enums.js';
+import { buildOrderBy, buildSearchWhere, toSkipTake } from '../../common/pagination/pagination.js';
 import { RevisionConflictError } from '../../common/revision/revision.errors.js';
 import type {
   IdempotencyContext,
@@ -180,9 +181,7 @@ function toOwnerResult(record: ProjectRecord): ProjectResult {
 }
 
 function orderByFor(sort: ProjectSort): ProjectOrderBy[] {
-  const [field, direction] = sort.split(':') as ['updatedAt' | 'createdAt' | 'name', SortDirection];
-
-  return [{ [field]: direction }, { id: direction }];
+  return buildOrderBy<ProjectOrderBy>(sort, (field, direction) => ({ [field]: direction }));
 }
 
 function viewableProjectWhere(id: string, userId: string) {
@@ -271,21 +270,13 @@ export class PrismaProjectRepository implements ProjectRepository {
     const where = {
       ownerId,
       deletedAt: null,
-      ...(options.search === undefined
-        ? {}
-        : {
-            name: {
-              contains: options.search,
-              mode: 'insensitive' as const,
-            },
-          }),
+      ...buildSearchWhere(options.search, (contains) => ({ name: contains })),
     };
     const [rows, total] = await this.#client.$transaction([
       this.#client.project.findMany({
         where,
         orderBy: orderByFor(options.sort),
-        skip: (options.page - 1) * options.limit,
-        take: options.limit,
+        ...toSkipTake(options),
         select: projectSelect,
       }),
       this.#client.project.count({ where }),

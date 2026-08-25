@@ -1,4 +1,9 @@
 import { z } from '../../openapi/zod.js';
+import {
+  paginatedResponseSchema,
+  paginationQuerySchema,
+  searchQuerySchema,
+} from '../../common/pagination/pagination.js';
 
 export const ProjectSyncStatusSchema = z.enum([
   'PENDING',
@@ -49,15 +54,7 @@ export const ProjectResponseSchema = z.object({
   permissions: ProjectPermissionsSchema,
 });
 
-export const ProjectListResponseSchema = z.object({
-  items: z.array(ProjectResponseSchema),
-  pagination: z.object({
-    page: z.number().int().positive(),
-    limit: z.number().int().positive(),
-    total: z.number().int().nonnegative(),
-    totalPages: z.number().int().nonnegative(),
-  }),
-});
+export const ProjectListResponseSchema = paginatedResponseSchema(ProjectResponseSchema);
 
 export const CreateProjectBodySchema = z
   .object({
@@ -91,14 +88,8 @@ export const ProjectSortSchema = z.enum([
 
 export const ListProjectsQuerySchema = z
   .object({
-    search: z
-      .string()
-      .trim()
-      .max(50)
-      .optional()
-      .transform((value) => (value === '' ? undefined : value)),
-    page: z.coerce.number().int().min(1).default(1),
-    limit: z.coerce.number().int().min(1).max(100).default(5),
+    search: searchQuerySchema(),
+    ...paginationQuerySchema(5).shape,
     sort: ProjectSortSchema.default('updatedAt:desc'),
   })
   .strict();

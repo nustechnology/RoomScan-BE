@@ -1,3 +1,4 @@
+import { toPaginationMeta } from '../../common/pagination/pagination.js';
 import { ScanNotFoundError } from '../scan/scan.errors.js';
 import { NotSharedScanError, SharedScanNotInListError } from './shared-scans.errors.js';
 import type {
@@ -64,12 +65,7 @@ export class SharedScansService {
 
     return {
       items: items.map(toResult),
-      pagination: {
-        page: options.page,
-        limit: options.limit,
-        total,
-        totalPages: Math.ceil(total / options.limit),
-      },
+      pagination: toPaginationMeta(options, total),
     };
   }
 

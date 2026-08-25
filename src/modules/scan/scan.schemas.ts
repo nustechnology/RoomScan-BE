@@ -1,4 +1,8 @@
 import { z } from '../../openapi/zod.js';
+import {
+  paginatedResponseSchema,
+  paginationQuerySchema,
+} from '../../common/pagination/pagination.js';
 import { MODEL_CONTENT_TYPES, THUMBNAIL_CONTENT_TYPES } from '../scan-asset/scan-asset.types.js';
 
 export const ScanSyncStatusSchema = z.enum(['PENDING', 'SYNCING', 'SYNCED', 'FAILED', 'CONFLICT']);
@@ -40,15 +44,7 @@ export const ScanResponseSchema = z.object({
   permissions: ScanPermissionsSchema,
 });
 
-export const ScanListResponseSchema = z.object({
-  items: z.array(ScanResponseSchema),
-  pagination: z.object({
-    page: z.number().int().positive(),
-    limit: z.number().int().positive(),
-    total: z.number().int().nonnegative(),
-    totalPages: z.number().int().nonnegative(),
-  }),
-});
+export const ScanListResponseSchema = paginatedResponseSchema(ScanResponseSchema);
 
 export const ThumbnailUploadDescriptorSchema = z
   .object({
@@ -111,8 +107,7 @@ export const ScanSortSchema = z.enum([
 
 export const ListScansQuerySchema = z
   .object({
-    page: z.coerce.number().int().min(1).default(1),
-    limit: z.coerce.number().int().min(1).max(100).default(20),
+    ...paginationQuerySchema(20).shape,
     sort: ScanSortSchema.default('createdAt:desc'),
   })
   .strict();
