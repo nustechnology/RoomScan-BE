@@ -18,6 +18,7 @@ describe('seedLocalTestUser', () => {
     const upsert = vi.fn().mockResolvedValue({
       id: LOCAL_TEST_USER_ID,
       email: LOCAL_TEST_USER_EMAIL,
+      displayName: 'RoomScan User',
     });
     const client = {
       user: { upsert },
@@ -26,6 +27,7 @@ describe('seedLocalTestUser', () => {
     await expect(seedLocalTestUser(client)).resolves.toEqual({
       id: LOCAL_TEST_USER_ID,
       email: LOCAL_TEST_USER_EMAIL,
+      displayName: 'RoomScan User',
     });
     expect(upsert).toHaveBeenCalledWith({
       where: {
@@ -40,14 +42,17 @@ describe('seedLocalTestUser', () => {
         providerId: LOCAL_TEST_APPLE_PROVIDER_ID,
         email: LOCAL_TEST_USER_EMAIL,
         emailVerified: true,
+        displayName: 'RoomScan User',
       },
       update: {
         email: LOCAL_TEST_USER_EMAIL,
         emailVerified: true,
+        displayName: 'RoomScan User',
       },
       select: {
         id: true,
         email: true,
+        displayName: true,
       },
     });
   });
@@ -56,6 +61,7 @@ describe('seedLocalTestUser', () => {
     const upsert = vi.fn().mockResolvedValue({
       id: LOCAL_TEST_VIEWER_ID,
       email: LOCAL_TEST_VIEWER_EMAIL,
+      displayName: 'Invited Viewer',
     });
     const client = {
       user: { upsert },
@@ -64,6 +70,7 @@ describe('seedLocalTestUser', () => {
     await expect(seedLocalTestViewer(client)).resolves.toEqual({
       id: LOCAL_TEST_VIEWER_ID,
       email: LOCAL_TEST_VIEWER_EMAIL,
+      displayName: 'Invited Viewer',
     });
     expect(upsert).toHaveBeenCalledWith({
       where: {
@@ -78,14 +85,17 @@ describe('seedLocalTestUser', () => {
         providerId: `${LOCAL_TEST_VIEWER_ID}-viewer`,
         email: LOCAL_TEST_VIEWER_EMAIL,
         emailVerified: true,
+        displayName: 'Invited Viewer',
       },
       update: {
         email: LOCAL_TEST_VIEWER_EMAIL,
         emailVerified: true,
+        displayName: 'Invited Viewer',
       },
       select: {
         id: true,
         email: true,
+        displayName: true,
       },
     });
   });

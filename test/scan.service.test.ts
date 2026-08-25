@@ -20,6 +20,7 @@ function createRecord(overrides: Partial<ScanRecord> = {}): ScanRecord {
     creator: {
       id: OWNER_ID,
       email: 'owner@example.com',
+      displayName: null,
     },
     name: 'Living Room',
     description: null,

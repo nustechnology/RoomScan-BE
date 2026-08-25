@@ -9,11 +9,13 @@ function createRepository() {
       (arguments_: unknown) => Promise<{
         id: string;
         email: string | null;
+        displayName: string | null;
       }>
     >()
     .mockResolvedValue({
       id: 'eb5d278f-c857-45c7-887d-7be65288cb75',
       email: 'user@example.com',
+      displayName: null,
     });
   const client = {
     user: {
@@ -40,6 +42,7 @@ describe('PrismaAppleUserRepository', () => {
     ).resolves.toEqual({
       id: 'eb5d278f-c857-45c7-887d-7be65288cb75',
       email: 'user@example.com',
+      displayName: null,
       provider: 'apple',
     });
     expect(upsert).toHaveBeenCalledWith({
@@ -62,6 +65,7 @@ describe('PrismaAppleUserRepository', () => {
       select: {
         id: true,
         email: true,
+        displayName: true,
       },
     });
   });
@@ -92,6 +96,42 @@ describe('PrismaAppleUserRepository', () => {
       select: {
         id: true,
         email: true,
+        displayName: true,
+      },
+    });
+  });
+
+  it('applies a displayName even when the Apple token has no email', async () => {
+    const { repository, upsert } = createRepository();
+
+    await repository.upsertAppleUser({
+      providerId: 'apple-subject',
+      email: null,
+      emailVerified: false,
+      displayName: 'Nguyen Minh Anh',
+    });
+
+    expect(upsert).toHaveBeenCalledWith({
+      where: {
+        provider_providerId: {
+          provider: 'APPLE',
+          providerId: 'apple-subject',
+        },
+      },
+      create: {
+        provider: 'APPLE',
+        providerId: 'apple-subject',
+        email: null,
+        emailVerified: false,
+        displayName: 'Nguyen Minh Anh',
+      },
+      update: {
+        displayName: 'Nguyen Minh Anh',
+      },
+      select: {
+        id: true,
+        email: true,
+        displayName: true,
       },
     });
   });

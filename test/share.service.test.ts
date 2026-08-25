@@ -67,7 +67,7 @@ function invitationWithProject(overrides: Partial<InvitationRecord> = {}) {
       name: 'District 2 Apartment',
       description: null,
       thumbnail: null,
-      owner: { id: OWNER_ID, email: 'owner@example.com' },
+      owner: { id: OWNER_ID, email: 'owner@example.com', displayName: null },
       scanCount: 2,
     },
     scan: null,
@@ -119,7 +119,7 @@ function createService(overrides: Partial<ShareRepository> = {}) {
       {
         userId: RECIPIENT_ID,
         revision: 1,
-        user: { id: RECIPIENT_ID, email: RECIPIENT_EMAIL },
+        user: { id: RECIPIENT_ID, email: RECIPIENT_EMAIL, displayName: null },
         grantedAt: NOW,
       },
     ]),
@@ -143,7 +143,7 @@ function createService(overrides: Partial<ShareRepository> = {}) {
     listActiveScanViewers: vi.fn<ShareRepository['listActiveScanViewers']>().mockResolvedValue([
       {
         userId: RECIPIENT_ID,
-        user: { id: RECIPIENT_ID, email: RECIPIENT_EMAIL },
+        user: { id: RECIPIENT_ID, email: RECIPIENT_EMAIL, displayName: null },
         grantedAt: NOW,
       },
     ]),
@@ -180,7 +180,7 @@ function createService(overrides: Partial<ShareRepository> = {}) {
           name: 'District 2 Apartment',
           description: null,
           thumbnail: null,
-          owner: { id: OWNER_ID, email: 'owner@example.com' },
+          owner: { id: OWNER_ID, email: 'owner@example.com', displayName: null },
           scanCount: 2,
         },
         scan: null,
@@ -351,7 +351,7 @@ describe('ShareService.previewInvitation', () => {
         name: 'District 2 Apartment',
         description: null,
         thumbnail: null,
-        owner: { id: OWNER_ID, email: 'owner@example.com' },
+        owner: { id: OWNER_ID, email: 'owner@example.com', displayName: null },
         scanCount: 2,
       },
       scan: null,
@@ -501,7 +501,7 @@ describe('ShareService.acceptInvitation', () => {
         name: 'District 2 Apartment',
         description: null,
         thumbnail: null,
-        owner: { id: OWNER_ID, email: 'owner@example.com' },
+        owner: { id: OWNER_ID, email: 'owner@example.com', displayName: null },
         scanCount: 2,
       },
       scan: null,
@@ -930,7 +930,7 @@ describe('ShareService.listShares', () => {
         {
           userId: RECIPIENT_ID,
           revision: 1,
-          recipientUser: { id: RECIPIENT_ID, email: RECIPIENT_EMAIL },
+          recipientUser: { id: RECIPIENT_ID, email: RECIPIENT_EMAIL, displayName: null },
           grantedAt: NOW.toISOString(),
         },
       ],
@@ -1021,7 +1021,7 @@ function scanInvitationContext(overrides: Partial<InvitationRecord> = {}) {
       description: null,
       thumbnail: null,
       noteCount: 5,
-      creator: { id: OWNER_ID, email: 'owner@example.com' },
+      creator: { id: OWNER_ID, email: 'owner@example.com', displayName: null },
       ownerId: OWNER_ID,
     },
   };
@@ -1045,7 +1045,7 @@ function shareLinkContext() {
       name: 'District 2 Apartment',
       description: null,
       thumbnail: null,
-      owner: { id: OWNER_ID, email: 'owner@example.com' },
+      owner: { id: OWNER_ID, email: 'owner@example.com', displayName: null },
       scanCount: 2,
     },
     scan: null,
@@ -1067,7 +1067,7 @@ function scanShareLinkContext() {
       description: null,
       thumbnail: null,
       noteCount: 5,
-      creator: { id: OWNER_ID, email: 'owner@example.com' },
+      creator: { id: OWNER_ID, email: 'owner@example.com', displayName: null },
       ownerId: OWNER_ID,
     },
   };
@@ -1374,7 +1374,7 @@ describe('ShareService.listScanShares', () => {
       viewers: [
         {
           userId: RECIPIENT_ID,
-          recipientUser: { id: RECIPIENT_ID, email: RECIPIENT_EMAIL },
+          recipientUser: { id: RECIPIENT_ID, email: RECIPIENT_EMAIL, displayName: null },
           grantedAt: NOW.toISOString(),
         },
       ],

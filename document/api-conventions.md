@@ -6,6 +6,7 @@
 - Liveness and readiness are `/api/v1/health` and `/api/v1/ready`.
 - Apple authentication is `POST /api/v1/auth/apple`.
 - Token refresh is `POST /api/v1/auth/refresh`.
+- Current user profile is updated at `PATCH /api/v1/users/me`.
 - Project management is `POST`, `GET`, `GET/:id`, `PATCH/:id`, and `DELETE/:id` at
   `/api/v1/projects`.
 - Scan metadata is `POST` and `GET` at `/api/v1/projects/:projectId/scans`, and
@@ -139,13 +140,14 @@ Successful authentication always returns 200:
   "user": {
     "id": "eb5d278f-c857-45c7-887d-7be65288cb75",
     "email": "user@example.com",
+    "displayName": null,
     "provider": "apple"
   }
 }
 ```
 
-`user.email` may be `null`. The response never contains the Apple subject,
-verification claims, signing details or secrets.
+`user.email` and `user.displayName` may be `null`. The response never contains the Apple
+subject, verification claims, signing details or secrets.
 
 Malformed or unverifiable Apple tokens return 401 with
 `INVALID_APPLE_IDENTITY_TOKEN`. Apple JWKS fetch failures return 503 with
@@ -203,6 +205,40 @@ stale token.
 
 The same per-IP rate-limit headers (`RateLimit`, `RateLimit-Policy`, and
 `Retry-After` on 429) apply to this endpoint.
+
+## Current user profile
+
+`PATCH /api/v1/users/me` updates the authenticated current user's `displayName`
+and returns the refreshed user profile.
+
+| Method  | Endpoint           | Result                         |
+| ------- | ------------------ | ------------------------------ |
+| `PATCH` | `/api/v1/users/me` | Update the current user; `200` |
+
+Request body:
+
+```json
+{ "displayName": "Nguyen Minh Anh" }
+```
+
+`displayName` is a trimmed Unicode string of 1–100 characters, or `null` to
+clear the stored value. The request body is strict and rejects unknown fields.
+
+Success `200`:
+
+```json
+{
+  "id": "eb5d278f-c857-45c7-887d-7be65288cb75",
+  "email": "user@example.com",
+  "displayName": "Nguyen Minh Anh",
+  "provider": "apple"
+}
+```
+
+`email` and `displayName` are nullable. The endpoint requires a valid Bearer
+access token. Errors: `400 VALIDATION_ERROR` (invalid body),
+`401 UNAUTHORIZED` (missing/invalid token), `404 USER_NOT_FOUND` (the listening
+user no longer exists), and `500 INTERNAL_SERVER_ERROR`.
 
 ## Offline mutation contract
 
@@ -350,7 +386,8 @@ Project response:
   "description": "Apartment survey",
   "owner": {
     "id": "8c53d31d-2788-48de-82a0-c4f219ca3701",
-    "email": "owner@example.com"
+    "email": "owner@example.com",
+    "displayName": null
   },
   "scanCount": 1,
   "scans": [
@@ -383,7 +420,7 @@ Project response:
 }
 ```
 
-`owner.email` is nullable. An active Viewer receives role `VIEWER` with only
+`owner.email` and `owner.displayName` are nullable. An active Viewer receives role `VIEWER` with only
 `canView: true`. `sharedCount` counts active Viewer access records.
 `scanCount` counts active (non-deleted) scans in the project, and `scans` lists
 those scans ordered by newest `createdAt` first with `id`, `name`,
@@ -471,7 +508,8 @@ Scan response:
   "thumbnail": null,
   "creator": {
     "id": "eb5d278f-c857-45c7-887d-7be65288cb75",
-    "email": "owner@example.com"
+    "email": "owner@example.com",
+    "displayName": null
   },
   "noteCount": 0,
   "assetStatus": "NONE",
@@ -489,7 +527,7 @@ Scan response:
 }
 ```
 
-`creator.email` is nullable. `noteCount` counts active notes attached to the
+`creator.email` and `creator.displayName` are nullable. `noteCount` counts active notes attached to the
 scan. `assetStatus` uses `NONE | PENDING | UPLOADING | UPLOADED | FAILED` and
 starts `NONE` for a metadata-only scan; `syncStatus` uses `PENDING | SYNCING |
 SYNCED | FAILED | CONFLICT` and starts `PENDING`. The metadata endpoints never
@@ -710,7 +748,8 @@ Note response:
   "revision": 1,
   "creator": {
     "id": "eb5d278f-c857-45c7-887d-7be65288cb75",
-    "email": "owner@example.com"
+    "email": "owner@example.com",
+    "displayName": null
   },
   "createdAt": "2026-07-29T10:00:00.000Z",
   "updatedAt": "2026-07-29T10:00:00.000Z",
@@ -881,7 +920,8 @@ project-scope invitation preview:
     "thumbnail": null,
     "owner": {
       "id": "eb5d278f-c857-45c7-887d-7be65288cb75",
-      "email": "owner@example.com"
+      "email": "owner@example.com",
+      "displayName": null
     },
     "scanCount": 4
   },
@@ -895,13 +935,15 @@ project-scope invitation preview:
 ```
 
 For a project-scope link, `project` includes the Owner info (`owner.id`, nullable
-`owner.email`), `scanCount` (number of active, non-deleted scans), and `thumbnail`
+`owner.email` and `owner.displayName`), `scanCount` (number of active, non-deleted
+scans), and `thumbnail`
 set to the thumbnail of the project's most recently created scan (nullable). The
 `owner` and `scanCount` fields are always present for a project-scope link and are
 absent for a scan-scope link, where `project` is `null`.
 
 For a scan-scope link, `scan` includes `id`, `projectId`, `name`, `description`,
-`thumbnail`, `creator` (the parent project Owner: `id` and nullable `email`), and
+`thumbnail`, `creator` (the parent project Owner: `id`, nullable `email`, and
+nullable `displayName`), and
 `noteCount` (number of active notes on the scan). `project` is `null` for a
 scan-scope link.
 
@@ -934,7 +976,8 @@ entity. A project-scope invitation accept:
     "thumbnail": null,
     "owner": {
       "id": "eb5d278f-c857-45c7-887d-7be65288cb75",
-      "email": "owner@example.com"
+      "email": "owner@example.com",
+      "displayName": null
     }
   },
   "scan": null,
@@ -989,7 +1032,8 @@ List shares `200`:
       "revision": 1,
       "recipientUser": {
         "id": "f1a2b3c4-d5e6-7890-abcd-ef1234567890",
-        "email": "recipient@example.com"
+        "email": "recipient@example.com",
+        "displayName": null
       },
       "grantedAt": "2026-07-29T10:00:00.000Z"
     }
@@ -1153,7 +1197,8 @@ returns `scans`):
   "description": null,
   "owner": {
     "id": "eb5d278f-c857-45c7-887d-7be65288cb75",
-    "email": "owner@example.com"
+    "email": "owner@example.com",
+    "displayName": null
   },
   "scanCount": 4,
   "thumbnail": null,
@@ -1176,7 +1221,7 @@ shape (`id`, `name`, `description`, `thumbnail`, `noteCount`, `assetStatus`,
 `syncStatus`, `createdAt`) as the canonical project detail. The Shared With Me
 list response omits `scans` to keep each list item lightweight.
 
-`owner.email` is nullable. `scanCount` counts active (non-deleted) scans in the
+`owner.email` and `owner.displayName` are nullable. `scanCount` counts active (non-deleted) scans in the
 project. `thumbnail` is `null` until the thumbnail persistence feature is
 present. `permissions` is always `VIEWER` and read-only; `canView` is `true`
 only while the project is `ACTIVE`. `status` is one of:
@@ -1299,7 +1344,8 @@ Shared scan item (list and detail share the same shape):
   "thumbnail": null,
   "creator": {
     "id": "eb5d278f-c857-45c7-887d-7be65288cb75",
-    "email": "owner@example.com"
+    "email": "owner@example.com",
+    "displayName": null
   },
   "noteCount": 4,
   "assetStatus": "UPLOADED",
@@ -1316,7 +1362,7 @@ Shared scan item (list and detail share the same shape):
 }
 ```
 
-`creator.email` is nullable. `noteCount` counts notes on the scan. `permissions`
+`creator.email` and `creator.displayName` are nullable. `noteCount` counts notes on the scan. `permissions`
 is always `VIEWER` and read-only; `canView` is `true` only while the scan is
 `ACTIVE`. `status` is one of:
 

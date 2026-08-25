@@ -20,6 +20,7 @@ export const SharedProjectResponseSchema = z.object({
   owner: z.object({
     id: z.uuid(),
     email: z.email().nullable(),
+    displayName: z.string().nullable(),
   }),
   scanCount: z.number().int().nonnegative(),
   thumbnail: z.url().nullable(),

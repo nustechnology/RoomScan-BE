@@ -26,23 +26,32 @@ export class PrismaAppleUserRepository implements AppleUserRepository {
         providerId: identity.providerId,
         email: identity.email,
         emailVerified: identity.emailVerified,
+        ...(identity.displayName === undefined || identity.displayName === null
+          ? {}
+          : { displayName: identity.displayName }),
       },
-      update:
-        identity.email === null
+      update: {
+        ...(identity.email === null
           ? {}
           : {
               email: identity.email,
               emailVerified: identity.emailVerified,
-            },
+            }),
+        ...(identity.displayName === undefined || identity.displayName === null
+          ? {}
+          : { displayName: identity.displayName }),
+      },
       select: {
         id: true,
         email: true,
+        displayName: true,
       },
     });
 
     return {
       id: user.id,
       email: user.email,
+      displayName: user.displayName,
       provider: 'apple',
     };
   }

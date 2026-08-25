@@ -22,6 +22,7 @@ const scanSelect = {
     select: {
       id: true,
       email: true,
+      displayName: true,
     },
   },
   name: true,

@@ -16,6 +16,7 @@ export type ProjectSort =
 export interface ProjectOwner {
   id: string;
   email: string | null;
+  displayName: string | null;
 }
 
 export interface ProjectScanSummary {

@@ -40,6 +40,7 @@ import { ShareLinkService } from './modules/share/share-link.service.js';
 import { SharedProjectsService } from './modules/shared-projects/shared-projects.service.js';
 import { SharedScansService } from './modules/shared-scans/shared-scans.service.js';
 import { SyncService } from './modules/sync/sync.service.js';
+import { UserProfileService } from './modules/users/users.service.js';
 
 const config = loadConfig();
 const logger = createLogger(config);
@@ -169,6 +170,7 @@ const sharedScansService = new SharedScansService({
   repository: sharedScansRepository,
 });
 const syncService = new SyncService({ repository: syncRepository, crypto: syncCrypto });
+const userProfileService = new UserProfileService({ repository: currentUserRepository });
 const rateLimiters = createRateLimiters(config, logger);
 const app = createApp({
   config,
@@ -185,6 +187,7 @@ const app = createApp({
   sharedProjectsService,
   sharedScansService,
   syncService,
+  userProfileService,
   accessTokenVerifier,
   currentUserRepository,
   rateLimiters,

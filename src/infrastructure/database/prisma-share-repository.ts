@@ -90,6 +90,7 @@ const shareProjectSummarySelect = {
       select: {
         id: true,
         email: true,
+        displayName: true,
       },
     },
     scans: {
@@ -127,6 +128,7 @@ const shareScanSummarySelect = {
       select: {
         id: true,
         email: true,
+        displayName: true,
       },
     },
     project: {
@@ -703,7 +705,7 @@ export class PrismaShareRepository implements ShareRepository {
     Array<{
       userId: string;
       revision: number;
-      user: { id: string; email: string | null };
+      user: { id: string; email: string | null; displayName: string | null };
       grantedAt: Date;
     }>
   > {
@@ -719,6 +721,7 @@ export class PrismaShareRepository implements ShareRepository {
           select: {
             id: true,
             email: true,
+            displayName: true,
           },
         },
       },
@@ -732,10 +735,12 @@ export class PrismaShareRepository implements ShareRepository {
     }));
   }
 
-  async listActiveScanViewers(
-    scanId: string,
-  ): Promise<
-    Array<{ userId: string; user: { id: string; email: string | null }; grantedAt: Date }>
+  async listActiveScanViewers(scanId: string): Promise<
+    Array<{
+      userId: string;
+      user: { id: string; email: string | null; displayName: string | null };
+      grantedAt: Date;
+    }>
   > {
     const rows = await this.#client.scanAccess.findMany({
       where: { scanId, role: PrismaProjectRole.VIEWER, revokedAt: null, deletedAt: null },
@@ -748,6 +753,7 @@ export class PrismaShareRepository implements ShareRepository {
           select: {
             id: true,
             email: true,
+            displayName: true,
           },
         },
       },

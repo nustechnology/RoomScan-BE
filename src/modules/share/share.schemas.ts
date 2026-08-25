@@ -56,6 +56,7 @@ const ProjectPreviewSchema = z.object({
   owner: z.object({
     id: z.uuid(),
     email: z.email().nullable(),
+    displayName: z.string().nullable(),
   }),
   scanCount: z.number().int().nonnegative(),
 });
@@ -68,6 +69,7 @@ const ProjectDetailSchema = z.object({
   owner: z.object({
     id: z.uuid(),
     email: z.email().nullable(),
+    displayName: z.string().nullable(),
   }),
 });
 
@@ -81,6 +83,7 @@ const ScanPreviewSchema = z.object({
   creator: z.object({
     id: z.uuid(),
     email: z.email().nullable(),
+    displayName: z.string().nullable(),
   }),
 });
 
@@ -175,6 +178,7 @@ export const SharesListResponseSchema = z.object({
       recipientUser: z.object({
         id: z.uuid(),
         email: z.email().nullable(),
+        displayName: z.string().nullable(),
       }),
       grantedAt: z.iso.datetime(),
     }),

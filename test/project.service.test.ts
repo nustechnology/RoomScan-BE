@@ -19,6 +19,7 @@ function createRecord(overrides: Partial<ProjectRecord> = {}): ProjectRecord {
     owner: {
       id: OWNER_ID,
       email: 'owner@example.com',
+      displayName: null,
     },
     scanCount: 0,
     scans: [],
@@ -69,6 +70,7 @@ describe('ProjectService', () => {
       owner: {
         id: OWNER_ID,
         email: 'owner@example.com',
+        displayName: null,
       },
       scanCount: 0,
       scans: [],

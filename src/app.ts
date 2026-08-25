@@ -39,6 +39,8 @@ import { createSharedScansRouter } from './modules/shared-scans/shared-scans.rou
 import type { SharedScansService } from './modules/shared-scans/shared-scans.service.js';
 import { createSyncRouter } from './modules/sync/sync.routes.js';
 import type { SyncService } from './modules/sync/sync.service.js';
+import { createUsersRouter } from './modules/users/users.routes.js';
+import type { UserProfileService } from './modules/users/users.types.js';
 import { createWellKnownRouter } from './modules/well-known/well-known.routes.js';
 import { createOpenApiDocument } from './openapi/document.js';
 
@@ -57,6 +59,7 @@ export interface AppDependencies {
   sharedProjectsService: SharedProjectsService;
   sharedScansService: SharedScansService;
   syncService: SyncService;
+  userProfileService: UserProfileService;
   accessTokenVerifier: AccessTokenVerifier;
   currentUserRepository: CurrentUserRepository;
   rateLimiters: RateLimiters;
@@ -93,6 +96,7 @@ export function createApp({
   sharedProjectsService,
   sharedScansService,
   syncService,
+  userProfileService,
   accessTokenVerifier,
   currentUserRepository,
   rateLimiters,
@@ -233,6 +237,14 @@ export function createApp({
     API_PREFIX,
     createSharedScansRouter({
       sharedScansService,
+      accessTokenVerifier,
+      currentUserRepository,
+    }),
+  );
+  app.use(
+    API_PREFIX,
+    createUsersRouter({
+      userProfileService,
       accessTokenVerifier,
       currentUserRepository,
     }),

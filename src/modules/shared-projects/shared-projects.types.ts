@@ -14,6 +14,7 @@ export interface SharedProjectRecord {
   owner: {
     id: string;
     email: string | null;
+    displayName: string | null;
   };
   scanCount: number;
   thumbnail: string | null;
@@ -30,6 +31,7 @@ export interface SharedProjectResult {
   owner: {
     id: string;
     email: string | null;
+    displayName: string | null;
   };
   scanCount: number;
   thumbnail: string | null;

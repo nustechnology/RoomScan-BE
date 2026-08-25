@@ -270,7 +270,10 @@ Postgres rejects `CONCURRENTLY` inside a transaction block, and Prisma Migrate
 applies a multi-statement `migration.sql` as one implicit transaction, so a
 `CONCURRENTLY` statement must be the only statement in its migration to run
 non-transactionally. Deploy migrations with `yarn prisma:migrate:deploy`;
-never rewrite older migrations or generated Prisma Client.
+never rewrite older migrations or generated Prisma Client. The
+`add_user_display_name` migration adds a nullable `VARCHAR(100)`
+`displayName` column to the `users` table; existing users keep a `null`
+display name until they set one.
 
 `SYNC_CRYPTO_KEY` must be configured before the migrated application starts and
 must remain unchanged. V1 ciphertext/cursor formats are versioned but do not

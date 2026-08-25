@@ -60,6 +60,7 @@ const noteSelect = {
     select: {
       id: true,
       email: true,
+      displayName: true,
     },
   },
   title: true,
@@ -81,6 +82,7 @@ type NoteRow = {
   creator: {
     id: string;
     email: string | null;
+    displayName: string | null;
   };
   title: string;
   content: string;

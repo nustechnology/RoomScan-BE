@@ -17,6 +17,7 @@ export const SharedScanResponseSchema = z.object({
   creator: z.object({
     id: z.uuid(),
     email: z.email().nullable(),
+    displayName: z.string().nullable(),
   }),
   noteCount: z.number().int().nonnegative(),
   assetStatus: z.enum(['NONE', 'PENDING', 'UPLOADING', 'UPLOADED', 'FAILED']),

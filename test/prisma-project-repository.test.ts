@@ -21,6 +21,7 @@ const expectedProjectSelect = {
     select: {
       id: true,
       email: true,
+      displayName: true,
     },
   },
   scans: {

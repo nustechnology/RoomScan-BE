@@ -37,6 +37,7 @@ export const NoteResponseSchema = z.object({
   creator: z.object({
     id: z.uuid(),
     email: z.email().nullable(),
+    displayName: z.string().nullable(),
   }),
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),

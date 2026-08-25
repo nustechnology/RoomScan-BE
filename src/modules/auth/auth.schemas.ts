@@ -18,6 +18,7 @@ export const AppleSignInRequestSchema = z
 export const AuthenticatedUserSchema = z.object({
   id: z.uuid(),
   email: z.email().nullable(),
+  displayName: z.string().nullable(),
   provider: z.literal('apple'),
 });
 

@@ -6,7 +6,8 @@ from injected dependencies. Keeping `app.listen` outside the app factory makes
 API tests deterministic and prevents them from opening network ports.
 
 The current product-facing scope contains health checks, Apple Sign-In
-authentication with refresh-token rotation, Owner/Viewer project management,
+authentication with refresh-token rotation, current-user profile display-name
+management, Owner/Viewer project management,
 room-scan metadata, scan asset upload/download, text notes anchored to scan
 models, project and scan sharing through expiring invitation links and reusable
 share links, and a Viewer-facing Shared With Me surface for both accepted
@@ -76,7 +77,24 @@ cannot enable this shortcut.
 
 Apple `sub` is the stable external identifier. Email is nullable and is never
 used to find or link a user. A supplied email updates the stored email and
-verification state; an absent email leaves existing values unchanged.
+verification state; an absent email leaves existing values unchanged. The
+`User` model also stores a nullable `displayName` (the human-readable name shown
+to other users, such as the invitation owner name) that is independent of the
+Apple identity and is managed by the Users module below.
+
+## Users module
+
+The Users module manages the authenticated current user's profile. It exposes
+`PATCH /api/v1/users/me`, which updates and returns the current user's
+`displayName`. The module depends on the narrow `UserProfileRepository`
+(`updateDisplayName`) implemented by `PrismaCurrentUserRepository`, so the same
+`currentUserRepository` service the authentication middleware uses powers both
+profile reads and the display-name write. The response reuses the app's
+`AuthenticatedUser` shape (`id`, `email`, `displayName`, `provider: 'apple'`).
+The `displayName` value is exposed wherever an owner or creator is returned
+(project owner, scan creator, note creator, share owner/creator/recipient, and
+Shared With Me owner/creator), so invitation screens can render the owner's
+name.
 
 The refresh JWT is issued for the mobile client. `POST /api/v1/auth/refresh`
 consumes a valid refresh JWT, revokes it, and returns a new access+refresh pair.
@@ -612,7 +630,8 @@ rate-limit middleware instances, the access-token and refresh-token verifiers,
 the project and scan permission services, the project service, the scan service,
 the scan-asset service, the refresh-token service, the note service, the share
 service, the share-link service, the shared-projects service, the
-shared-scans service, and the sync service once per process. Product modules
+shared-scans service, the sync service, and the user-profile service once per
+process. Product modules
 never import the Prisma client
 directly. The unique provider identity constraint makes concurrent first-time
 Apple logins idempotent at the database boundary. The projects table has a

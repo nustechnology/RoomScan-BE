@@ -24,6 +24,7 @@ function createRecord(overrides: Partial<NoteRecord> = {}): NoteRecord {
     creator: {
       id: OWNER_ID,
       email: 'owner@example.com',
+      displayName: null,
     },
     title: 'Cabinet hinge',
     content: 'Cabinet hinge is loose',

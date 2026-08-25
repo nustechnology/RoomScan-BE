@@ -23,6 +23,7 @@ const sharedProjectSelect = {
         select: {
           id: true,
           email: true,
+          displayName: true,
         },
       },
       _count: {
@@ -50,6 +51,7 @@ interface SharedProjectRow {
     owner: {
       id: string;
       email: string | null;
+      displayName: string | null;
     };
     _count: {
       scans: number;

@@ -35,6 +35,7 @@ import type { ShareLinkService } from '../src/modules/share/share-link.service.j
 import type { SharedProjectsService } from '../src/modules/shared-projects/shared-projects.service.js';
 import type { SharedScansService } from '../src/modules/shared-scans/shared-scans.service.js';
 import type { SyncService } from '../src/modules/sync/sync.service.js';
+import type { UserProfileService } from '../src/modules/users/users.types.js';
 
 const config: AppConfig = {
   nodeEnv: 'test',
@@ -107,7 +108,9 @@ describe('RoomScan HTTP application', () => {
     findById: vi.fn().mockResolvedValue({
       id: 'eb5d278f-c857-45c7-887d-7be65288cb75',
       email: 'user@example.com',
+      displayName: null,
     }),
+    updateDisplayName: vi.fn(),
   };
   const projectService = {
     create: vi.fn(),
@@ -167,6 +170,9 @@ describe('RoomScan HTTP application', () => {
     getChanges: vi.fn(),
     getStatus: vi.fn(),
   } as unknown as SyncService;
+  const userProfileService = {
+    updateMe: vi.fn(),
+  } as unknown as UserProfileService;
 
   const app = createApp({
     config,
@@ -183,6 +189,7 @@ describe('RoomScan HTTP application', () => {
     sharedProjectsService,
     sharedScansService,
     syncService,
+    userProfileService,
     accessTokenVerifier,
     currentUserRepository,
     rateLimiters,
@@ -197,6 +204,7 @@ describe('RoomScan HTTP application', () => {
       user: {
         id: 'eb5d278f-c857-45c7-887d-7be65288cb75',
         email: 'user@example.com',
+        displayName: null,
         provider: 'apple',
       },
     });
@@ -236,6 +244,7 @@ describe('RoomScan HTTP application', () => {
       sharedProjectsService,
       sharedScansService,
       syncService,
+      userProfileService,
       accessTokenVerifier,
       currentUserRepository,
       rateLimiters,
@@ -437,6 +446,7 @@ describe('RoomScan HTTP application', () => {
       user: {
         id: 'eb5d278f-c857-45c7-887d-7be65288cb75',
         email: 'user@example.com',
+        displayName: null,
         provider: 'apple',
       },
     });
@@ -463,6 +473,7 @@ describe('RoomScan HTTP application', () => {
       user: {
         id: 'eb5d278f-c857-45c7-887d-7be65288cb75',
         email: 'user@example.com',
+        displayName: null,
         provider: 'apple',
       },
     });
@@ -571,6 +582,7 @@ describe('RoomScan HTTP application', () => {
       sharedProjectsService,
       sharedScansService,
       syncService,
+      userProfileService,
       accessTokenVerifier,
       currentUserRepository,
       rateLimiters,
@@ -585,7 +597,11 @@ describe('RoomScan HTTP application', () => {
         name: 'District 2 Apartment',
         description: null,
         thumbnail: null,
-        owner: { id: 'eb5d278f-c857-45c7-887d-7be65288cb75', email: 'owner@example.com' },
+        owner: {
+          id: 'eb5d278f-c857-45c7-887d-7be65288cb75',
+          email: 'owner@example.com',
+          displayName: null,
+        },
         scanCount: 1,
       },
       scan: null,

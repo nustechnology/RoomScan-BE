@@ -11,6 +11,7 @@ export interface SharedScanRecord {
   creator: {
     id: string;
     email: string | null;
+    displayName: string | null;
   };
   noteCount: number;
   assetStatus: 'NONE' | 'PENDING' | 'UPLOADING' | 'UPLOADED' | 'FAILED';
@@ -31,6 +32,7 @@ export interface SharedScanResult {
   creator: {
     id: string;
     email: string | null;
+    displayName: string | null;
   };
   noteCount: number;
   assetStatus: SharedScanRecord['assetStatus'];

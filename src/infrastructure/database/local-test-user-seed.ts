@@ -23,14 +23,17 @@ export async function seedLocalTestUser(client: Pick<PrismaClient, 'user'>): Pro
       providerId: LOCAL_TEST_APPLE_PROVIDER_ID,
       email: LOCAL_TEST_USER_EMAIL,
       emailVerified: true,
+      displayName: 'RoomScan User',
     },
     update: {
       email: LOCAL_TEST_USER_EMAIL,
       emailVerified: true,
+      displayName: 'RoomScan User',
     },
     select: {
       id: true,
       email: true,
+      displayName: true,
     },
   });
 }
@@ -51,14 +54,17 @@ export async function seedLocalTestViewer(
       providerId: `${LOCAL_TEST_VIEWER_ID}-viewer`,
       email: LOCAL_TEST_VIEWER_EMAIL,
       emailVerified: true,
+      displayName: 'Invited Viewer',
     },
     update: {
       email: LOCAL_TEST_VIEWER_EMAIL,
       emailVerified: true,
+      displayName: 'Invited Viewer',
     },
     select: {
       id: true,
       email: true,
+      displayName: true,
     },
   });
 }
