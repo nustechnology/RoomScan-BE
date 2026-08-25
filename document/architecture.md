@@ -435,9 +435,11 @@ null`) access on every request. A Viewer who removes an item from their Shared
 With Me list has `deletedAt` on their access row instead and is treated the same
 way: every active-access lookup excludes `deletedAt`-non-null access, so a
 self-removed Viewer loses project, scan, note, and asset-download access just
-like an Owner-revoked one. Re-accepting an invitation or re-granting a share
-link on a previously self-removed _or_ Owner-revoked access resets both
-`revokedAt: null` and `deletedAt: null` so the Viewer is re-activated.
+like an Owner-revoked one. An invitation is terminal once accepted or declined
+and cannot itself be reused (see above), but accepting a fresh invitation the
+Owner sends afterward, or re-granting a share link, on a previously
+self-removed _or_ Owner-revoked access resets both `revokedAt: null` and
+`deletedAt: null` so the Viewer is re-activated.
 
 ## Shared With Me module
 
