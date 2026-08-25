@@ -21,6 +21,7 @@ import type { ShareLinkService } from '../src/modules/share/share-link.service.j
 import type { SharedProjectsService } from '../src/modules/shared-projects/shared-projects.service.js';
 import type { SharedScansService } from '../src/modules/shared-scans/shared-scans.service.js';
 import type { SyncService } from '../src/modules/sync/sync.service.js';
+import type { UserProfileService } from '../src/modules/users/users.types.js';
 
 const baseConfig: AppConfig = {
   nodeEnv: 'test',
@@ -80,6 +81,7 @@ function createTestApp(overrides: Partial<AppConfig> = {}, stores: RateLimitStor
     user: {
       id: 'eb5d278f-c857-45c7-887d-7be65288cb75',
       email: 'user@example.com',
+      displayName: null,
       provider: 'apple',
     },
   });
@@ -96,7 +98,9 @@ function createTestApp(overrides: Partial<AppConfig> = {}, stores: RateLimitStor
     findById: vi.fn().mockResolvedValue({
       id: 'eb5d278f-c857-45c7-887d-7be65288cb75',
       email: 'user@example.com',
+      displayName: null,
     }),
+    updateDisplayName: vi.fn(),
   };
   const projectService = {
     create: vi.fn(),
@@ -155,6 +159,7 @@ function createTestApp(overrides: Partial<AppConfig> = {}, stores: RateLimitStor
     getChanges: vi.fn(),
     getStatus: vi.fn(),
   } as unknown as SyncService;
+  const userProfileService = { updateMe: vi.fn() } as unknown as UserProfileService;
   const rateLimiters = createRateLimiters(config, logger, stores);
   const app = createApp({
     config,
@@ -174,6 +179,7 @@ function createTestApp(overrides: Partial<AppConfig> = {}, stores: RateLimitStor
     sharedProjectsService,
     sharedScansService,
     syncService,
+    userProfileService,
     accessTokenVerifier,
     currentUserRepository,
     rateLimiters,

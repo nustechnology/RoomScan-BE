@@ -53,6 +53,7 @@ import type { SharedProjectsService } from '../src/modules/shared-projects/share
 import type { SharedScansService } from '../src/modules/shared-scans/shared-scans.service.js';
 import type { SyncService } from '../src/modules/sync/sync.service.js';
 import type { NoteService } from '../src/modules/note/note.service.js';
+import type { UserProfileService } from '../src/modules/users/users.types.js';
 import type { ProjectService } from '../src/modules/project/project.service.js';
 import type { ScanService } from '../src/modules/scan/scan.service.js';
 import type { ScanAssetService } from '../src/modules/scan-asset/scan-asset.service.js';
@@ -152,8 +153,10 @@ describe('Share HTTP endpoints', () => {
       Promise.resolve({
         id: userId,
         email: userId === USER_OWNER ? 'owner@example.com' : 'recipient@example.com',
+        displayName: null,
       }),
     ),
+    updateDisplayName: vi.fn(),
   };
   const projectService = {
     create: vi.fn(),
@@ -230,6 +233,7 @@ describe('Share HTTP endpoints', () => {
     getChanges: vi.fn(),
     getStatus: vi.fn(),
   } as unknown as SyncService;
+  const userProfileService = { updateMe: vi.fn() } as unknown as UserProfileService;
   const app = createApp({
     config,
     database,
@@ -245,6 +249,7 @@ describe('Share HTTP endpoints', () => {
     sharedProjectsService,
     sharedScansService,
     syncService,
+    userProfileService,
     accessTokenVerifier,
     currentUserRepository,
     rateLimiters,
@@ -274,7 +279,7 @@ describe('Share HTTP endpoints', () => {
         name: 'District 2 Apartment',
         description: null,
         thumbnail: null,
-        owner: { id: USER_OWNER, email: 'owner@example.com' },
+        owner: { id: USER_OWNER, email: 'owner@example.com', displayName: null },
         scanCount: 2,
       },
       scan: null,
@@ -291,7 +296,7 @@ describe('Share HTTP endpoints', () => {
         name: 'District 2 Apartment',
         description: null,
         thumbnail: null,
-        owner: { id: USER_OWNER, email: 'owner@example.com' },
+        owner: { id: USER_OWNER, email: 'owner@example.com', displayName: null },
         scanCount: 2,
       },
       scan: null,
@@ -329,7 +334,7 @@ describe('Share HTTP endpoints', () => {
         {
           userId: USER_RECIPIENT,
           revision: 1,
-          recipientUser: { id: USER_RECIPIENT, email: 'recipient@example.com' },
+          recipientUser: { id: USER_RECIPIENT, email: 'recipient@example.com', displayName: null },
           grantedAt: NOW.toISOString(),
         },
       ],
@@ -361,7 +366,7 @@ describe('Share HTTP endpoints', () => {
       viewers: [
         {
           userId: USER_RECIPIENT,
-          recipientUser: { id: USER_RECIPIENT, email: 'recipient@example.com' },
+          recipientUser: { id: USER_RECIPIENT, email: 'recipient@example.com', displayName: null },
           grantedAt: NOW.toISOString(),
         },
       ],
@@ -586,7 +591,7 @@ describe('Share HTTP endpoints', () => {
           name: 'District 2 Apartment',
           description: null,
           thumbnail: null,
-          owner: { id: USER_OWNER, email: 'owner@example.com' },
+          owner: { id: USER_OWNER, email: 'owner@example.com', displayName: null },
           scanCount: 2,
         },
         scan: null,
@@ -616,7 +621,7 @@ describe('Share HTTP endpoints', () => {
           name: 'District 2 Apartment',
           description: null,
           thumbnail: null,
-          owner: { id: USER_OWNER, email: 'owner@example.com' },
+          owner: { id: USER_OWNER, email: 'owner@example.com', displayName: null },
           scanCount: 2,
         },
         scan: null,
@@ -708,7 +713,7 @@ describe('Share HTTP endpoints', () => {
           name: 'District 2 Apartment',
           description: null,
           thumbnail: null,
-          owner: { id: USER_OWNER, email: 'owner@example.com' },
+          owner: { id: USER_OWNER, email: 'owner@example.com', displayName: null },
         },
         scan: null,
         access: { role: 'VIEWER', status: 'ACTIVE', grantedAt: NOW.toISOString() },
@@ -858,7 +863,11 @@ describe('Share HTTP endpoints', () => {
           {
             userId: USER_RECIPIENT,
             revision: 1,
-            recipientUser: { id: USER_RECIPIENT, email: 'recipient@example.com' },
+            recipientUser: {
+              id: USER_RECIPIENT,
+              email: 'recipient@example.com',
+              displayName: null,
+            },
             grantedAt: NOW.toISOString(),
           },
         ],

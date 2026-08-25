@@ -16,6 +16,7 @@ export interface Vector3 {
 export interface NoteCreator {
   id: string;
   email: string | null;
+  displayName: string | null;
 }
 
 export interface NoteRecord {

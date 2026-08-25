@@ -37,6 +37,7 @@ const projectSelect = {
     select: {
       id: true,
       email: true,
+      displayName: true,
     },
   },
   scans: {
@@ -105,6 +106,7 @@ interface ProjectRow {
   owner: {
     id: string;
     email: string | null;
+    displayName: string | null;
   };
   scans: ProjectScanRow[];
   _count: {

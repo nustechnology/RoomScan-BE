@@ -14,6 +14,19 @@ export class PrismaCurrentUserRepository implements CurrentUserRepository {
       select: {
         id: true,
         email: true,
+        displayName: true,
+      },
+    });
+  }
+
+  async updateDisplayName(userId: string, displayName: string | null): Promise<CurrentUser | null> {
+    return await this.#client.user.update({
+      where: { id: userId },
+      data: { displayName },
+      select: {
+        id: true,
+        email: true,
+        displayName: true,
       },
     });
   }

@@ -75,6 +75,7 @@ model User {
   providerId    String       @db.VarChar(255)
   email         String?      @db.VarChar(320)
   emailVerified Boolean      @default(false)
+  displayName   String?      @db.VarChar(100)
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
 

@@ -22,6 +22,7 @@ import type { ShareLinkService } from '../src/modules/share/share-link.service.j
 import type { SharedProjectsService } from '../src/modules/shared-projects/shared-projects.service.js';
 import type { SharedScansService } from '../src/modules/shared-scans/shared-scans.service.js';
 import type { SyncService } from '../src/modules/sync/sync.service.js';
+import type { UserProfileService } from '../src/modules/users/users.types.js';
 import {
   AssetMetadataResponseSchema,
   CreateUploadSessionResponseSchema,
@@ -160,10 +161,12 @@ describe('Scan asset HTTP endpoints', () => {
     Promise.resolve({
       id: userId,
       email: userId === USER_A ? 'owner@example.com' : 'viewer@example.com',
+      displayName: null,
     }),
   );
   const currentUserRepository: CurrentUserRepository = {
     findById: findCurrentUser,
+    updateDisplayName: vi.fn(),
   };
   const projectService = {
     create: vi.fn(),
@@ -227,6 +230,9 @@ describe('Scan asset HTTP endpoints', () => {
     getChanges: vi.fn(),
     getStatus: vi.fn(),
   } as unknown as SyncService;
+  const userProfileService = {
+    updateMe: vi.fn(),
+  } as unknown as UserProfileService;
   const app = createApp({
     config,
     database,
@@ -242,6 +248,7 @@ describe('Scan asset HTTP endpoints', () => {
     sharedProjectsService,
     sharedScansService,
     syncService,
+    userProfileService,
     accessTokenVerifier,
     currentUserRepository,
     rateLimiters,

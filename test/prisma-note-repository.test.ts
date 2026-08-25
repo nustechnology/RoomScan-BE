@@ -21,6 +21,7 @@ const noteSelect = {
     select: {
       id: true,
       email: true,
+      displayName: true,
     },
   },
   title: true,

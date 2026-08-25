@@ -26,6 +26,7 @@ const sharedScanSelect = {
         select: {
           id: true,
           email: true,
+          displayName: true,
         },
       },
       _count: {
@@ -54,6 +55,7 @@ interface SharedScanRow {
     creator: {
       id: string;
       email: string | null;
+      displayName: string | null;
     };
     _count: {
       notes: number;

@@ -22,6 +22,7 @@ import type { ShareLinkService } from '../src/modules/share/share-link.service.j
 import type { SharedProjectsService } from '../src/modules/shared-projects/shared-projects.service.js';
 import type { SharedScansService } from '../src/modules/shared-scans/shared-scans.service.js';
 import type { SyncService } from '../src/modules/sync/sync.service.js';
+import type { UserProfileService } from '../src/modules/users/users.types.js';
 import type { NoteResult } from '../src/modules/note/note.types.js';
 import type { ProjectService } from '../src/modules/project/project.service.js';
 import type { ScanService } from '../src/modules/scan/scan.service.js';
@@ -94,6 +95,7 @@ function noteResult(overrides: Partial<NoteResult> = {}): NoteResult {
     creator: {
       id: USER_A,
       email: 'owner@example.com',
+      displayName: null,
     },
     createdAt: NOW.toISOString(),
     updatedAt: NOW.toISOString(),
@@ -143,8 +145,10 @@ describe('Note HTTP endpoints', () => {
       Promise.resolve({
         id: userId,
         email: userId === USER_A ? 'owner@example.com' : 'viewer@example.com',
+        displayName: null,
       }),
     ),
+    updateDisplayName: vi.fn(),
   };
   const projectService = {
     create: vi.fn(),
@@ -209,6 +213,9 @@ describe('Note HTTP endpoints', () => {
     getChanges: vi.fn(),
     getStatus: vi.fn(),
   } as unknown as SyncService;
+  const userProfileService = {
+    updateMe: vi.fn(),
+  } as unknown as UserProfileService;
   const app = createApp({
     config,
     database,
@@ -224,6 +231,7 @@ describe('Note HTTP endpoints', () => {
     sharedProjectsService,
     sharedScansService,
     syncService,
+    userProfileService,
     accessTokenVerifier,
     currentUserRepository,
     rateLimiters,

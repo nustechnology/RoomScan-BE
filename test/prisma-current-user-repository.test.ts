@@ -10,21 +10,24 @@ describe('PrismaCurrentUserRepository', () => {
     const findUnique = vi.fn().mockResolvedValue({
       id: USER_ID,
       email: 'user@example.com',
+      displayName: null,
     });
     const client = {
-      user: { findUnique },
+      user: { findUnique, update: vi.fn() },
     } as unknown as Pick<PrismaClient, 'user'>;
     const repository = new PrismaCurrentUserRepository(client);
 
     await expect(repository.findById(USER_ID)).resolves.toEqual({
       id: USER_ID,
       email: 'user@example.com',
+      displayName: null,
     });
     expect(findUnique).toHaveBeenCalledWith({
       where: { id: USER_ID },
       select: {
         id: true,
         email: true,
+        displayName: true,
       },
     });
   });
@@ -33,10 +36,38 @@ describe('PrismaCurrentUserRepository', () => {
     const client = {
       user: {
         findUnique: vi.fn().mockResolvedValue(null),
+        update: vi.fn(),
       },
     } as unknown as Pick<PrismaClient, 'user'>;
     const repository = new PrismaCurrentUserRepository(client);
 
     await expect(repository.findById(USER_ID)).resolves.toBeNull();
+  });
+
+  it('updates the displayName and returns the refreshed profile', async () => {
+    const update = vi.fn().mockResolvedValue({
+      id: USER_ID,
+      email: 'user@example.com',
+      displayName: 'Nguyen Minh Anh',
+    });
+    const client = {
+      user: { findUnique: vi.fn(), update },
+    } as unknown as Pick<PrismaClient, 'user'>;
+    const repository = new PrismaCurrentUserRepository(client);
+
+    await expect(repository.updateDisplayName(USER_ID, 'Nguyen Minh Anh')).resolves.toEqual({
+      id: USER_ID,
+      email: 'user@example.com',
+      displayName: 'Nguyen Minh Anh',
+    });
+    expect(update).toHaveBeenCalledWith({
+      where: { id: USER_ID },
+      data: { displayName: 'Nguyen Minh Anh' },
+      select: {
+        id: true,
+        email: true,
+        displayName: true,
+      },
+    });
   });
 });

@@ -38,6 +38,7 @@ const scanSelect = {
     select: {
       id: true,
       email: true,
+      displayName: true,
     },
   },
   name: true,
@@ -65,6 +66,7 @@ interface ScanRow {
   creator: {
     id: string;
     email: string | null;
+    displayName: string | null;
   };
   name: string;
   description: string | null;

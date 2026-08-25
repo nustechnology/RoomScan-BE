@@ -30,7 +30,10 @@ describe('Sync HTTP endpoints', () => {
     }),
   };
   const currentUserRepository: CurrentUserRepository = {
-    findById: vi.fn((id: string) => Promise.resolve({ id, email: 'owner@example.com' })),
+    findById: vi.fn((id: string) =>
+      Promise.resolve({ id, email: 'owner@example.com', displayName: null }),
+    ),
+    updateDisplayName: vi.fn(),
   };
   const app = express();
   app.use('/api/v1', createSyncRouter({ syncService, accessTokenVerifier, currentUserRepository }));

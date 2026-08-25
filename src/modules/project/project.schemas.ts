@@ -35,6 +35,7 @@ export const ProjectResponseSchema = z.object({
   owner: z.object({
     id: z.uuid(),
     email: z.email().nullable(),
+    displayName: z.string().nullable(),
   }),
   scanCount: z.number().int().nonnegative(),
   scans: z.array(ProjectScanSummarySchema),

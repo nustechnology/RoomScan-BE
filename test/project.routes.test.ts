@@ -29,6 +29,7 @@ import type { ShareLinkService } from '../src/modules/share/share-link.service.j
 import type { SharedProjectsService } from '../src/modules/shared-projects/shared-projects.service.js';
 import type { SharedScansService } from '../src/modules/shared-scans/shared-scans.service.js';
 import type { SyncService } from '../src/modules/sync/sync.service.js';
+import type { UserProfileService } from '../src/modules/users/users.types.js';
 import type { ProjectResult, ProjectRole } from '../src/modules/project/project.types.js';
 
 const ACCESS_SECRET = 'access-secret-that-is-at-least-32-characters';
@@ -91,6 +92,7 @@ function projectResult(role: ProjectRole = 'OWNER'): ProjectResult {
     owner: {
       id: USER_A,
       email: 'owner@example.com',
+      displayName: null,
     },
     scanCount: 0,
     scans: [],
@@ -151,10 +153,12 @@ describe('Project HTTP endpoints', () => {
     Promise.resolve({
       id: userId,
       email: userId === USER_A ? 'owner@example.com' : 'viewer@example.com',
+      displayName: null,
     }),
   );
   const currentUserRepository: CurrentUserRepository = {
     findById: findCurrentUser,
+    updateDisplayName: vi.fn(),
   };
   const create = vi.fn<ProjectService['create']>();
   const list = vi.fn<ProjectService['list']>();
@@ -218,6 +222,9 @@ describe('Project HTTP endpoints', () => {
     getChanges: vi.fn(),
     getStatus: vi.fn(),
   } as unknown as SyncService;
+  const userProfileService = {
+    updateMe: vi.fn(),
+  } as unknown as UserProfileService;
   const app = createApp({
     config,
     database,
@@ -233,6 +240,7 @@ describe('Project HTTP endpoints', () => {
     sharedProjectsService,
     sharedScansService,
     syncService,
+    userProfileService,
     accessTokenVerifier,
     currentUserRepository,
     rateLimiters,

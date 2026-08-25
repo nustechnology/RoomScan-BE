@@ -32,6 +32,7 @@ import type { ShareService } from '../src/modules/share/share.service.js';
 import type { ShareLinkService } from '../src/modules/share/share-link.service.js';
 import type { SharedProjectsService } from '../src/modules/shared-projects/shared-projects.service.js';
 import type { SyncService } from '../src/modules/sync/sync.service.js';
+import type { UserProfileService } from '../src/modules/users/users.types.js';
 
 const ACCESS_SECRET = 'access-secret-that-is-at-least-32-characters';
 const USER_VIEWER = 'f1a2b3c4-d5e6-7890-abcd-ef1234567890';
@@ -121,8 +122,10 @@ describe('Shared With Me scan HTTP endpoints', () => {
       Promise.resolve({
         id: userId,
         email: userId === USER_OWNER ? 'owner@example.com' : 'viewer@example.com',
+        displayName: null,
       }),
     ),
+    updateDisplayName: vi.fn(),
   };
   const projectService = {
     create: vi.fn(),
@@ -185,6 +188,9 @@ describe('Shared With Me scan HTTP endpoints', () => {
     getChanges: vi.fn(),
     getStatus: vi.fn(),
   } as unknown as SyncService;
+  const userProfileService = {
+    updateMe: vi.fn(),
+  } as unknown as UserProfileService;
   const app = createApp({
     config,
     database,
@@ -200,6 +206,7 @@ describe('Shared With Me scan HTTP endpoints', () => {
     sharedProjectsService,
     sharedScansService,
     syncService,
+    userProfileService,
     accessTokenVerifier,
     currentUserRepository,
     rateLimiters,
@@ -221,7 +228,7 @@ describe('Shared With Me scan HTTP endpoints', () => {
           name: 'Living Room Scan',
           description: null,
           thumbnail: null,
-          creator: { id: USER_OWNER, email: 'owner@example.com' },
+          creator: { id: USER_OWNER, email: 'owner@example.com', displayName: null },
           noteCount: 2,
           assetStatus: 'UPLOADED',
           syncStatus: 'SYNCED',
@@ -239,7 +246,7 @@ describe('Shared With Me scan HTTP endpoints', () => {
       name: 'Living Room Scan',
       description: null,
       thumbnail: null,
-      creator: { id: USER_OWNER, email: 'owner@example.com' },
+      creator: { id: USER_OWNER, email: 'owner@example.com', displayName: null },
       noteCount: 2,
       assetStatus: 'UPLOADED',
       syncStatus: 'SYNCED',

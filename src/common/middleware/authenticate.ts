@@ -13,10 +13,12 @@ export interface AccessTokenVerifier {
 export interface CurrentUser {
   id: string;
   email: string | null;
+  displayName: string | null;
 }
 
 export interface CurrentUserRepository {
   findById(userId: string): Promise<CurrentUser | null>;
+  updateDisplayName(userId: string, displayName: string | null): Promise<CurrentUser | null>;
 }
 
 export interface AuthenticatedLocals {

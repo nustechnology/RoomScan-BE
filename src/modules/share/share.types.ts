@@ -8,15 +8,18 @@ export type InvitationViewStatus = 'PENDING' | 'EXPIRED' | 'ACCEPTED' | 'DECLINE
 export type ShareScope = 'project' | 'scan';
 export type ShareLinkViewStatus = 'ACTIVE' | 'EXPIRED' | 'REVOKED';
 
+export interface ShareUserSummary {
+  id: string;
+  email: string | null;
+  displayName: string | null;
+}
+
 export interface ShareProjectSummary {
   id: string;
   name: string;
   description: string | null;
   thumbnail: string | null;
-  owner: {
-    id: string;
-    email: string | null;
-  };
+  owner: ShareUserSummary;
   scanCount: number;
 }
 
@@ -27,10 +30,7 @@ export interface ShareScanSummary {
   description: string | null;
   thumbnail: string | null;
   noteCount: number;
-  creator: {
-    id: string;
-    email: string | null;
-  };
+  creator: ShareUserSummary;
   ownerId: string;
 }
 
@@ -41,10 +41,7 @@ export interface ShareScanPreview {
   description: string | null;
   thumbnail: string | null;
   noteCount: number;
-  creator: {
-    id: string;
-    email: string | null;
-  };
+  creator: ShareUserSummary;
 }
 
 export interface ShareProjectPreview {
@@ -52,10 +49,7 @@ export interface ShareProjectPreview {
   name: string;
   description: string | null;
   thumbnail: string | null;
-  owner: {
-    id: string;
-    email: string | null;
-  };
+  owner: ShareUserSummary;
   scanCount: number;
 }
 
@@ -177,10 +171,7 @@ export interface PendingInvitationResult {
 export interface ViewerResult {
   userId: string;
   revision?: number;
-  recipientUser: {
-    id: string;
-    email: string | null;
-  };
+  recipientUser: ShareUserSummary;
   grantedAt: string;
 }
 
@@ -325,15 +316,13 @@ export interface ShareRepository {
     Array<{
       userId: string;
       revision: number;
-      user: { id: string; email: string | null };
+      user: ShareUserSummary;
       grantedAt: Date;
     }>
   >;
   listActiveScanViewers(
     scanId: string,
-  ): Promise<
-    Array<{ userId: string; user: { id: string; email: string | null }; grantedAt: Date }>
-  >;
+  ): Promise<Array<{ userId: string; user: ShareUserSummary; grantedAt: Date }>>;
   revokeViewerAccess(
     projectId: string,
     userId: string,

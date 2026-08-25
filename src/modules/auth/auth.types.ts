@@ -2,6 +2,7 @@ export interface VerifiedAppleIdentity {
   providerId: string;
   email: string | null;
   emailVerified: boolean;
+  displayName?: string | null;
 }
 
 export interface AppleIdentityVerifier {
@@ -11,6 +12,7 @@ export interface AppleIdentityVerifier {
 export interface AuthenticatedUser {
   id: string;
   email: string | null;
+  displayName: string | null;
   provider: 'apple';
 }
 

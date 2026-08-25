@@ -26,6 +26,7 @@ import {
 import type { SharedProjectsService } from '../src/modules/shared-projects/shared-projects.service.js';
 import type { SharedScansService } from '../src/modules/shared-scans/shared-scans.service.js';
 import type { SyncService } from '../src/modules/sync/sync.service.js';
+import type { UserProfileService } from '../src/modules/users/users.types.js';
 import type { NoteService } from '../src/modules/note/note.service.js';
 import type { ProjectService } from '../src/modules/project/project.service.js';
 import type { ScanService } from '../src/modules/scan/scan.service.js';
@@ -120,8 +121,10 @@ describe('Shared With Me HTTP endpoints', () => {
       Promise.resolve({
         id: userId,
         email: userId === USER_OWNER ? 'owner@example.com' : 'viewer@example.com',
+        displayName: null,
       }),
     ),
+    updateDisplayName: vi.fn(),
   };
   const projectService = {
     create: vi.fn(),
@@ -184,6 +187,9 @@ describe('Shared With Me HTTP endpoints', () => {
     getChanges: vi.fn(),
     getStatus: vi.fn(),
   } as unknown as SyncService;
+  const userProfileService = {
+    updateMe: vi.fn(),
+  } as unknown as UserProfileService;
   const app = createApp({
     config,
     database,
@@ -199,6 +205,7 @@ describe('Shared With Me HTTP endpoints', () => {
     sharedProjectsService,
     sharedScansService,
     syncService,
+    userProfileService,
     accessTokenVerifier,
     currentUserRepository,
     rateLimiters,
@@ -218,7 +225,7 @@ describe('Shared With Me HTTP endpoints', () => {
           id: PROJECT_ID,
           name: 'District 2 Apartment',
           description: null,
-          owner: { id: USER_OWNER, email: 'owner@example.com' },
+          owner: { id: USER_OWNER, email: 'owner@example.com', displayName: null },
           scanCount: 2,
           thumbnail: null,
           updatedAt: NOW.toISOString(),
@@ -239,7 +246,7 @@ describe('Shared With Me HTTP endpoints', () => {
       id: PROJECT_ID,
       name: 'District 2 Apartment',
       description: null,
-      owner: { id: USER_OWNER, email: 'owner@example.com' },
+      owner: { id: USER_OWNER, email: 'owner@example.com', displayName: null },
       scanCount: 2,
       thumbnail: null,
       updatedAt: NOW.toISOString(),

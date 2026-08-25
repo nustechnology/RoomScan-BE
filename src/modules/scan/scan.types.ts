@@ -18,6 +18,7 @@ export type ScanSort =
 export interface ScanCreator {
   id: string;
   email: string | null;
+  displayName: string | null;
 }
 
 export interface ScanRecord {
