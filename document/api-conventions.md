@@ -6,7 +6,7 @@
 - Liveness and readiness are `/api/v1/health` and `/api/v1/ready`.
 - Apple authentication is `POST /api/v1/auth/apple`.
 - Token refresh is `POST /api/v1/auth/refresh`.
-- Current user profile is updated at `PATCH /api/v1/users/me`.
+- Current user profile is read at `GET /api/v1/users/me` and updated at `PATCH /api/v1/users/me`.
 - Project management is `POST`, `GET`, `GET/:id`, `PATCH/:id`, and `DELETE/:id` at
   `/api/v1/projects`.
 - Scan metadata is `POST` and `GET` at `/api/v1/projects/:projectId/scans`, and
@@ -208,14 +208,30 @@ The same per-IP rate-limit headers (`RateLimit`, `RateLimit-Policy`, and
 
 ## Current user profile
 
-`PATCH /api/v1/users/me` updates the authenticated current user's `displayName`
-and returns the refreshed user profile.
+`GET /api/v1/users/me` returns the authenticated current user's profile
+(`email` and `displayName`). `PATCH /api/v1/users/me` updates the current
+user's `displayName` and returns the full profile.
 
-| Method  | Endpoint           | Result                         |
-| ------- | ------------------ | ------------------------------ |
-| `PATCH` | `/api/v1/users/me` | Update the current user; `200` |
+| Method  | Endpoint           | Result                              |
+| ------- | ------------------ | ----------------------------------- |
+| `GET`   | `/api/v1/users/me` | Get the current user profile; `200` |
+| `PATCH` | `/api/v1/users/me` | Update the current user; `200`      |
 
-Request body:
+`GET /api/v1/users/me` success `200`:
+
+```json
+{
+  "email": "user@example.com",
+  "displayName": null
+}
+```
+
+`email` and `displayName` are nullable. The endpoint requires a valid Bearer
+access token. Errors: `401 UNAUTHORIZED` (missing/invalid token),
+`404 USER_NOT_FOUND` (the listening user no longer exists), and
+`500 INTERNAL_SERVER_ERROR`.
+
+`PATCH /api/v1/users/me` request body:
 
 ```json
 { "displayName": "Nguyen Minh Anh" }
@@ -224,7 +240,7 @@ Request body:
 `displayName` is a trimmed Unicode string of 1–100 characters, or `null` to
 clear the stored value. The request body is strict and rejects unknown fields.
 
-Success `200`:
+`PATCH` success `200`:
 
 ```json
 {

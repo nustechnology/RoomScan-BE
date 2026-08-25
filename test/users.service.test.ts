@@ -15,7 +15,9 @@ describe('UserProfileService', () => {
         email: 'owner@example.com',
         displayName: 'Nguyen Minh Anh',
       });
-    const service = new UserProfileService({ repository: { updateDisplayName } });
+    const service = new UserProfileService({
+      repository: { findById: vi.fn(), updateDisplayName },
+    });
 
     await expect(service.updateMe(USER_ID, { displayName: 'Nguyen Minh Anh' })).resolves.toEqual({
       id: USER_ID,
@@ -30,7 +32,9 @@ describe('UserProfileService', () => {
     const updateDisplayName = vi
       .fn<UserProfileRepository['updateDisplayName']>()
       .mockResolvedValue({ id: USER_ID, email: 'owner@example.com', displayName: null });
-    const service = new UserProfileService({ repository: { updateDisplayName } });
+    const service = new UserProfileService({
+      repository: { findById: vi.fn(), updateDisplayName },
+    });
 
     await expect(service.updateMe(USER_ID, { displayName: null })).resolves.toEqual({
       id: USER_ID,
@@ -44,10 +48,38 @@ describe('UserProfileService', () => {
     const updateDisplayName = vi
       .fn<UserProfileRepository['updateDisplayName']>()
       .mockResolvedValue(null);
-    const service = new UserProfileService({ repository: { updateDisplayName } });
+    const service = new UserProfileService({
+      repository: { findById: vi.fn(), updateDisplayName },
+    });
 
     await expect(service.updateMe(USER_ID, { displayName: 'A' })).rejects.toBeInstanceOf(
       UserNotFoundError,
     );
+  });
+
+  it('returns the email and displayName for the current user', async () => {
+    const findById = vi.fn<UserProfileRepository['findById']>().mockResolvedValue({
+      id: USER_ID,
+      email: 'owner@example.com',
+      displayName: 'Nguyen Minh Anh',
+    });
+    const service = new UserProfileService({
+      repository: { findById, updateDisplayName: vi.fn() },
+    });
+
+    await expect(service.getMe(USER_ID)).resolves.toEqual({
+      email: 'owner@example.com',
+      displayName: 'Nguyen Minh Anh',
+    });
+    expect(findById).toHaveBeenCalledWith(USER_ID);
+  });
+
+  it('throws UserNotFoundError when getMe cannot find the user', async () => {
+    const findById = vi.fn<UserProfileRepository['findById']>().mockResolvedValue(null);
+    const service = new UserProfileService({
+      repository: { findById, updateDisplayName: vi.fn() },
+    });
+
+    await expect(service.getMe(USER_ID)).rejects.toBeInstanceOf(UserNotFoundError);
   });
 });

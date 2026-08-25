@@ -8,15 +8,20 @@ import type {
   CurrentUserRepository,
 } from '../src/common/middleware/authenticate.js';
 import type { UserProfileService } from '../src/modules/users/users.service.js';
-import { UserProfileResponseSchema } from '../src/modules/users/users.schemas.js';
+import {
+  GetMeResponseSchema,
+  UserProfileResponseSchema,
+} from '../src/modules/users/users.schemas.js';
 import { UserNotFoundError } from '../src/modules/users/users.errors.js';
 import { createUsersRouter } from '../src/modules/users/users.routes.js';
 
 const USER_ID = 'eb5d278f-c857-45c7-887d-7be65288cb75';
 
 function buildApp() {
+  const getMe = vi.fn<UserProfileService['getMe']>();
   const updateMe = vi.fn<UserProfileService['updateMe']>();
   const service = {
+    getMe,
     updateMe,
   } as unknown as UserProfileService;
   const accessTokenVerifier: AccessTokenVerifier = {
@@ -39,13 +44,32 @@ function buildApp() {
     createUsersRouter({ userProfileService: service, accessTokenVerifier, currentUserRepository }),
   );
   app.use(errorHandler);
-  return { app, updateMe };
+  return { app, getMe, updateMe };
 }
 
 describe('users router', () => {
-  it('requires authentication', async () => {
+  it('requires authentication for get and patch', async () => {
     const { app } = buildApp();
+    await request(app).get('/api/v1/users/me').expect(401);
     await request(app).patch('/api/v1/users/me').send({ displayName: 'Name' }).expect(401);
+  });
+
+  it('returns the current user email and displayName', async () => {
+    const { app, getMe } = buildApp();
+    getMe.mockResolvedValue({
+      email: 'owner@example.com',
+      displayName: 'Nguyen Minh Anh',
+    });
+    const response = await request(app)
+      .get('/api/v1/users/me')
+      .set('Authorization', 'Bearer token')
+      .expect(200);
+    const body = GetMeResponseSchema.parse(response.body as unknown);
+    expect(body).toEqual({
+      email: 'owner@example.com',
+      displayName: 'Nguyen Minh Anh',
+    });
+    expect(getMe).toHaveBeenCalledWith(USER_ID);
   });
 
   it('updates the current user displayName', async () => {
@@ -114,6 +138,16 @@ describe('users router', () => {
       .patch('/api/v1/users/me')
       .set('Authorization', 'Bearer token')
       .send({ displayName: 'Name' })
+      .expect(404);
+    expect((response.body as { error: { code: string } }).error.code).toBe('USER_NOT_FOUND');
+  });
+
+  it('returns 404 when getMe cannot find the current user', async () => {
+    const { app, getMe } = buildApp();
+    getMe.mockRejectedValue(new UserNotFoundError());
+    const response = await request(app)
+      .get('/api/v1/users/me')
+      .set('Authorization', 'Bearer token')
       .expect(404);
     expect((response.body as { error: { code: string } }).error.code).toBe('USER_NOT_FOUND');
   });

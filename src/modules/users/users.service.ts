@@ -1,5 +1,10 @@
 import { UserNotFoundError } from './users.errors.js';
-import type { UpdateMeInput, UserProfile, UserProfileRepository } from './users.types.js';
+import type {
+  GetMeResult,
+  UpdateMeInput,
+  UserProfile,
+  UserProfileRepository,
+} from './users.types.js';
 
 export interface UserProfileServiceDependencies {
   repository: UserProfileRepository;
@@ -23,6 +28,17 @@ export class UserProfileService {
 
   constructor({ repository }: UserProfileServiceDependencies) {
     this.#repository = repository;
+  }
+
+  async getMe(userId: string): Promise<GetMeResult> {
+    const user = await this.#repository.findById(userId);
+    if (user === null) {
+      throw new UserNotFoundError();
+    }
+    return {
+      email: user.email,
+      displayName: user.displayName,
+    };
   }
 
   async updateMe(userId: string, data: UpdateMeInput): Promise<UserProfile> {

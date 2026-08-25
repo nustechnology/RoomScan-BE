@@ -85,13 +85,16 @@ Apple identity and is managed by the Users module below.
 ## Users module
 
 The Users module manages the authenticated current user's profile. It exposes
-`PATCH /api/v1/users/me`, which updates and returns the current user's
-`displayName`. The module depends on the narrow `UserProfileRepository`
-(`updateDisplayName`) implemented by `PrismaCurrentUserRepository`, so the same
-`currentUserRepository` service the authentication middleware uses powers both
-profile reads and the display-name write. The response reuses the app's
-`AuthenticatedUser` shape (`id`, `email`, `displayName`, `provider: 'apple'`).
-The `displayName` value is exposed wherever an owner or creator is returned
+`GET /api/v1/users/me`, which returns the current user's `email` and
+`displayName`, and `PATCH /api/v1/users/me`, which updates and returns the
+current user's `displayName`. The module depends on the narrow
+`UserProfileRepository` (`findById`, `updateDisplayName`) implemented by
+`PrismaCurrentUserRepository`, so the same `currentUserRepository` service the
+authentication middleware uses powers profile reads, the display-name write,
+and current-user resolution. The update response reuses the app's
+`AuthenticatedUser` shape (`id`, `email`, `displayName`, `provider: 'apple'`);
+the read response returns only `email` and `displayName`. The `displayName`
+value is exposed wherever an owner or creator is returned
 (project owner, scan creator, note creator, share owner/creator/recipient, and
 Shared With Me owner/creator), so invitation screens can render the owner's
 name.

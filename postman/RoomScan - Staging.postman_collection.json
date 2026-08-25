@@ -2286,6 +2286,40 @@
       "name": "Users",
       "item": [
         {
+          "name": "Get Me",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "pm.test(\"Returns the current user profile\", function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(json).to.have.property('email');",
+                  "  pm.expect(json).to.have.property('displayName');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/users/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "me"
+              ]
+            },
+            "description": "Returns the authenticated current user's profile with `200` as `{ email, displayName }`. Requires a valid Bearer access token."
+          }
+        },
+        {
           "name": "Update Me",
           "event": [
             {

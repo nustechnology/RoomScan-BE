@@ -13,5 +13,11 @@ export const UserProfileResponseSchema = z.object({
   provider: z.literal('apple'),
 });
 
+export const GetMeResponseSchema = z.object({
+  email: z.email().nullable(),
+  displayName: z.string().nullable(),
+});
+
 export type UpdateMeBody = z.infer<typeof UpdateMeBodySchema>;
 export type UserProfileResponse = z.infer<typeof UserProfileResponseSchema>;
+export type GetMeResponse = z.infer<typeof GetMeResponseSchema>;

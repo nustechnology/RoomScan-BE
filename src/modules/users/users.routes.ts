@@ -9,6 +9,7 @@ import type {
 import { validateRequest } from '../../common/middleware/validate-request.js';
 import { UserNotFoundError } from './users.errors.js';
 import {
+  GetMeResponseSchema,
   UpdateMeBodySchema,
   UserProfileResponseSchema,
   type UpdateMeBody,
@@ -39,6 +40,18 @@ export function createUsersRouter({
 }: UsersRouterDependencies): Router {
   const router = Router();
   const requireAuth = authenticate(accessTokenVerifier, currentUserRepository);
+
+  router.get('/users/me', requireAuth, async (request, response, next) => {
+    try {
+      const userId = getUserId(request);
+      const result = await userProfileService.getMe(userId);
+      const responseBody = GetMeResponseSchema.parse(result);
+
+      response.status(200).json(responseBody);
+    } catch (error) {
+      next(mapError(error) ?? error);
+    }
+  });
 
   router.patch(
     '/users/me',

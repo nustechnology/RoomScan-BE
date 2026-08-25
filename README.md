@@ -146,6 +146,7 @@ docker restart roomscan
 | `GET`    | `/api/v1/ready`                                        | Readiness; verifies PostgreSQL with `SELECT 1`                     |
 | `POST`   | `/api/v1/auth/apple`                                   | Authenticate with an Apple identity token                          |
 | `POST`   | `/api/v1/auth/refresh`                                 | Rotate a RoomScan refresh token                                    |
+| `GET`    | `/api/v1/users/me`                                     | Get the current user’s profile (Bearer token required)             |
 | `PATCH`  | `/api/v1/users/me`                                     | Update the current user’s display name (Bearer token required)     |
 | `POST`   | `/api/v1/projects`                                     | Create a project (Bearer token required)                           |
 | `GET`    | `/api/v1/projects`                                     | List the authenticated user’s projects                             |
