@@ -1,6 +1,7 @@
 import { Router } from 'express';
 
 import { AppError } from '../../common/errors/app-error.js';
+import { withErrorMapping } from '../../common/http/route-handler.js';
 import { authenticate, getUserId } from '../../common/middleware/authenticate.js';
 import type {
   AccessTokenVerifier,
@@ -50,6 +51,8 @@ function mapError(error: unknown): AppError | undefined {
   return undefined;
 }
 
+const route = withErrorMapping(mapError);
+
 export function createSyncRouter({
   syncService,
   accessTokenVerifier,
@@ -62,36 +65,28 @@ export function createSyncRouter({
     '/sync/changes',
     requireAuth,
     validateRequest({ query: SyncChangesQuerySchema }),
-    async (request, response, next) => {
-      try {
-        const userId = getUserId(request);
-        const { query } = response.locals.validated as { query: SyncChangesQuery };
-        const result = await syncService.getChanges(userId, {
-          limit: query.limit,
-          ...(query.since === undefined ? {} : { since: query.since }),
-          ...(query.cursor === undefined ? {} : { cursor: query.cursor }),
-        });
-        response.status(200).json(SyncChangesResponseSchema.parse(result));
-      } catch (error) {
-        next(mapError(error) ?? error);
-      }
-    },
+    route(async (request, response) => {
+      const userId = getUserId(request);
+      const { query } = response.locals.validated as { query: SyncChangesQuery };
+      const result = await syncService.getChanges(userId, {
+        limit: query.limit,
+        ...(query.since === undefined ? {} : { since: query.since }),
+        ...(query.cursor === undefined ? {} : { cursor: query.cursor }),
+      });
+      response.status(200).json(SyncChangesResponseSchema.parse(result));
+    }),
   );
 
   router.get(
     '/sync/status',
     requireAuth,
     validateRequest({ query: SyncStatusQuerySchema }),
-    async (request, response, next) => {
-      try {
-        const userId = getUserId(request);
-        const { query } = response.locals.validated as { query: SyncStatusQuery };
-        const result = await syncService.getStatus(userId, query.projectId);
-        response.status(200).json(SyncStatusResponseSchema.parse(result));
-      } catch (error) {
-        next(mapError(error) ?? error);
-      }
-    },
+    route(async (request, response) => {
+      const userId = getUserId(request);
+      const { query } = response.locals.validated as { query: SyncStatusQuery };
+      const result = await syncService.getStatus(userId, query.projectId);
+      response.status(200).json(SyncStatusResponseSchema.parse(result));
+    }),
   );
 
   return router;

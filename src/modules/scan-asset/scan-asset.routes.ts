@@ -1,6 +1,7 @@
 import { Router } from 'express';
 
 import { AppError } from '../../common/errors/app-error.js';
+import { composeErrorMappers, withErrorMapping } from '../../common/http/route-handler.js';
 import {
   idempotencyErrorToAppError,
   resolveIdempotencyKey,
@@ -48,9 +49,7 @@ export interface ScanAssetRouterDependencies {
   currentUserRepository: CurrentUserRepository;
 }
 
-function mapError(error: unknown): AppError | undefined {
-  const idempotencyError = idempotencyErrorToAppError(error);
-  if (idempotencyError !== undefined) return idempotencyError;
+function scanAssetModuleMapError(error: unknown): AppError | undefined {
   if (error instanceof ScanNotFoundError) {
     return new AppError({ statusCode: 404, code: 'SCAN_NOT_FOUND', message: 'Scan was not found' });
   }
@@ -113,6 +112,9 @@ function mapError(error: unknown): AppError | undefined {
   return undefined;
 }
 
+const mapError = composeErrorMappers(idempotencyErrorToAppError, scanAssetModuleMapError);
+const route = withErrorMapping(mapError);
+
 export function createScanAssetRouter({
   scanAssetService,
   accessTokenVerifier,
@@ -129,127 +131,98 @@ export function createScanAssetRouter({
       params: ScanIdParamSchema,
       headers: IdempotencyKeyHeaderSchema,
     }),
-    async (request, response, next) => {
-      try {
-        const userId = getUserId(request);
-        const { body, params, headers } = response.locals.validated as {
-          body: CreateUploadSessionBody;
-          params: ScanIdParam;
-          headers: { 'Idempotency-Key': string };
-        };
-        const data = {
-          assetType: body.assetType,
-          contentType: body.contentType,
-          sizeBytes: body.sizeBytes,
-          ...(body.checksum === undefined ? {} : { checksum: body.checksum }),
-          ...(body.modelVersion === undefined ? {} : { modelVersion: body.modelVersion }),
-          ...(body.idempotencyKey === undefined ? {} : { idempotencyKey: body.idempotencyKey }),
-        };
-        const key = resolveIdempotencyKey(headers['Idempotency-Key'], body.idempotencyKey);
-        const result =
-          typeof scanAssetService.createUploadSessionIdempotently === 'function'
-            ? await scanAssetService.createUploadSessionIdempotently(
-                userId,
-                params.scanId,
-                data,
-                key,
-              )
-            : await scanAssetService
-                .createUploadSession(userId, params.scanId, data)
-                .then((body) => ({ body, statusCode: body.created ? 201 : 200 }));
-        const responseBody = CreateUploadSessionResponseSchema.parse(result.body);
-        response.status(result.statusCode).json(responseBody);
-      } catch (error) {
-        next(mapError(error) ?? error);
-      }
-    },
+    route(async (request, response) => {
+      const userId = getUserId(request);
+      const { body, params, headers } = response.locals.validated as {
+        body: CreateUploadSessionBody;
+        params: ScanIdParam;
+        headers: { 'Idempotency-Key': string };
+      };
+      const data = {
+        assetType: body.assetType,
+        contentType: body.contentType,
+        sizeBytes: body.sizeBytes,
+        ...(body.checksum === undefined ? {} : { checksum: body.checksum }),
+        ...(body.modelVersion === undefined ? {} : { modelVersion: body.modelVersion }),
+        ...(body.idempotencyKey === undefined ? {} : { idempotencyKey: body.idempotencyKey }),
+      };
+      const key = resolveIdempotencyKey(headers['Idempotency-Key'], body.idempotencyKey);
+      const result =
+        typeof scanAssetService.createUploadSessionIdempotently === 'function'
+          ? await scanAssetService.createUploadSessionIdempotently(userId, params.scanId, data, key)
+          : await scanAssetService
+              .createUploadSession(userId, params.scanId, data)
+              .then((body) => ({ body, statusCode: body.created ? 201 : 200 }));
+      const responseBody = CreateUploadSessionResponseSchema.parse(result.body);
+      response.status(result.statusCode).json(responseBody);
+    }),
   );
 
   router.post(
     '/upload-sessions/:uploadSessionId/complete',
     requireAuth,
     validateRequest({ body: CompleteUploadBodySchema, params: UploadSessionIdParamSchema }),
-    async (request, response, next) => {
-      try {
-        const userId = getUserId(request);
-        const { body, params } = response.locals.validated as {
-          body: CompleteUploadBody;
-          params: UploadSessionIdParam;
-        };
-        const data = {
-          ...(body.checksum === undefined ? {} : { checksum: body.checksum }),
-          ...(body.sizeBytes === undefined ? {} : { sizeBytes: body.sizeBytes }),
-        };
-        const result = await scanAssetService.completeUpload(userId, params.uploadSessionId, data);
-        const responseBody = AssetMetadataResponseSchema.parse(result);
-        response.status(200).json(responseBody);
-      } catch (error) {
-        next(mapError(error) ?? error);
-      }
-    },
+    route(async (request, response) => {
+      const userId = getUserId(request);
+      const { body, params } = response.locals.validated as {
+        body: CompleteUploadBody;
+        params: UploadSessionIdParam;
+      };
+      const data = {
+        ...(body.checksum === undefined ? {} : { checksum: body.checksum }),
+        ...(body.sizeBytes === undefined ? {} : { sizeBytes: body.sizeBytes }),
+      };
+      const result = await scanAssetService.completeUpload(userId, params.uploadSessionId, data);
+      const responseBody = AssetMetadataResponseSchema.parse(result);
+      response.status(200).json(responseBody);
+    }),
   );
 
   router.get(
     '/scans/:scanId/assets',
     requireAuth,
     validateRequest({ params: ScanIdParamSchema }),
-    async (request, response, next) => {
-      try {
-        const userId = getUserId(request);
-        const { params } = response.locals.validated as { params: ScanIdParam };
-        const result = await scanAssetService.listAssets(userId, params.scanId);
-        const responseBody = ListAssetsResponseSchema.parse(result);
-        response.status(200).json(responseBody);
-      } catch (error) {
-        next(mapError(error) ?? error);
-      }
-    },
+    route(async (request, response) => {
+      const userId = getUserId(request);
+      const { params } = response.locals.validated as { params: ScanIdParam };
+      const result = await scanAssetService.listAssets(userId, params.scanId);
+      const responseBody = ListAssetsResponseSchema.parse(result);
+      response.status(200).json(responseBody);
+    }),
   );
 
   router.get(
     '/scans/:scanId/assets/:assetType/download-url',
     requireAuth,
     validateRequest({ params: ScanIdParamSchema.merge(AssetTypeParamSchema) }),
-    async (request, response, next) => {
-      try {
-        const userId = getUserId(request);
-        const { params } = response.locals.validated as {
-          params: ScanIdParam & AssetTypeParam;
-        };
-        const result = await scanAssetService.getDownloadUrl(
-          userId,
-          params.scanId,
-          params.assetType,
-        );
-        const responseBody = DownloadUrlResponseSchema.parse(result);
-        response.status(200).json(responseBody);
-      } catch (error) {
-        next(mapError(error) ?? error);
-      }
-    },
+    route(async (request, response) => {
+      const userId = getUserId(request);
+      const { params } = response.locals.validated as {
+        params: ScanIdParam & AssetTypeParam;
+      };
+      const result = await scanAssetService.getDownloadUrl(userId, params.scanId, params.assetType);
+      const responseBody = DownloadUrlResponseSchema.parse(result);
+      response.status(200).json(responseBody);
+    }),
   );
 
   router.post(
     '/upload-sessions/:uploadSessionId/fail',
     requireAuth,
     validateRequest({ body: FailUploadBodySchema, params: UploadSessionIdParamSchema }),
-    async (request, response, next) => {
-      try {
-        const userId = getUserId(request);
-        const { body, params } = response.locals.validated as {
-          body: FailUploadBody;
-          params: UploadSessionIdParam;
-        };
-        const data = {
-          ...(body.reason === undefined ? {} : { reason: body.reason }),
-        };
-        const result = await scanAssetService.failUpload(userId, params.uploadSessionId, data);
-        const responseBody = AssetMetadataResponseSchema.parse(result);
-        response.status(200).json(responseBody);
-      } catch (error) {
-        next(mapError(error) ?? error);
-      }
-    },
+    route(async (request, response) => {
+      const userId = getUserId(request);
+      const { body, params } = response.locals.validated as {
+        body: FailUploadBody;
+        params: UploadSessionIdParam;
+      };
+      const data = {
+        ...(body.reason === undefined ? {} : { reason: body.reason }),
+      };
+      const result = await scanAssetService.failUpload(userId, params.uploadSessionId, data);
+      const responseBody = AssetMetadataResponseSchema.parse(result);
+      response.status(200).json(responseBody);
+    }),
   );
 
   return router;

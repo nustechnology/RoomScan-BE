@@ -1,28 +1,19 @@
+import { AccessPermissionService } from '../../common/permissions/access-permission-service.js';
 import { ProjectNotFoundError } from './project.errors.js';
 import type { ProjectRepository, ProjectRole } from './project.types.js';
 
 export class ProjectPermissionService {
-  readonly #repository: ProjectRepository;
+  readonly #base: AccessPermissionService<ProjectRole>;
 
   constructor(repository: ProjectRepository) {
-    this.#repository = repository;
+    this.#base = new AccessPermissionService(repository, () => new ProjectNotFoundError(), 'OWNER');
   }
 
-  async requireView(projectId: string, userId: string): Promise<ProjectRole> {
-    const role = await this.#repository.findAccessRole(projectId, userId);
-
-    if (role === null) {
-      throw new ProjectNotFoundError();
-    }
-
-    return role;
+  requireView(projectId: string, userId: string): Promise<ProjectRole> {
+    return this.#base.requireView(projectId, userId);
   }
 
-  async requireOwner(projectId: string, userId: string): Promise<void> {
-    const role = await this.requireView(projectId, userId);
-
-    if (role !== 'OWNER') {
-      throw new ProjectNotFoundError();
-    }
+  requireOwner(projectId: string, userId: string): Promise<void> {
+    return this.#base.requireOwner(projectId, userId);
   }
 }

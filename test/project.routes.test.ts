@@ -161,12 +161,14 @@ describe('Project HTTP endpoints', () => {
     updateDisplayName: vi.fn(),
   };
   const create = vi.fn<ProjectService['create']>();
+  const createIdempotently = vi.fn<ProjectService['createIdempotently']>();
   const list = vi.fn<ProjectService['list']>();
   const getById = vi.fn<ProjectService['getById']>();
   const update = vi.fn<ProjectService['update']>();
   const deleteProject = vi.fn<ProjectService['delete']>();
   const projectService = {
     create,
+    createIdempotently,
     list,
     getById,
     update,
@@ -255,6 +257,11 @@ describe('Project HTTP endpoints', () => {
     tokenA = await signAccessToken(USER_A);
     tokenB = await signAccessToken(USER_B);
     create.mockResolvedValue(projectResult());
+    createIdempotently.mockResolvedValue({
+      body: projectResult(),
+      statusCode: 201,
+      replayed: false,
+    });
     list.mockResolvedValue({
       items: [],
       pagination: {
@@ -284,10 +291,14 @@ describe('Project HTTP endpoints', () => {
       const body = ProjectResponseSchema.parse(response.body as unknown);
 
       expect(body).toEqual(projectResult());
-      expect(create).toHaveBeenCalledWith(USER_A, {
-        name: 'Căn hộ Quận 2',
-        description: 'Apartment survey',
-      });
+      expect(createIdempotently).toHaveBeenCalledWith(
+        USER_A,
+        {
+          name: 'Căn hộ Quận 2',
+          description: 'Apartment survey',
+        },
+        'project-create-1',
+      );
     });
 
     it('defaults description to null and accepts the 50/500 boundaries', async () => {
@@ -304,10 +315,14 @@ describe('Project HTTP endpoints', () => {
         .send({ name: 'No description' })
         .expect(201);
 
-      expect(create).toHaveBeenLastCalledWith(USER_A, {
-        name: 'No description',
-        description: null,
-      });
+      expect(createIdempotently).toHaveBeenLastCalledWith(
+        USER_A,
+        {
+          name: 'No description',
+          description: null,
+        },
+        'project-create-null-description',
+      );
     });
 
     it.each([
@@ -339,7 +354,7 @@ describe('Project HTTP endpoints', () => {
         .expect(401);
 
       expect(ErrorResponseSchema.parse(response.body as unknown).error.code).toBe('UNAUTHORIZED');
-      expect(create).not.toHaveBeenCalled();
+      expect(createIdempotently).not.toHaveBeenCalled();
     });
   });
 
@@ -622,7 +637,7 @@ describe('Project HTTP endpoints', () => {
   });
 
   it('returns a safe 500 response for unexpected service errors', async () => {
-    create.mockRejectedValueOnce(new Error('secret=do-not-expose'));
+    createIdempotently.mockRejectedValueOnce(new Error('secret=do-not-expose'));
 
     const response = await request(app)
       .post('/api/v1/projects')

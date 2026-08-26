@@ -1,6 +1,7 @@
 import { Router } from 'express';
 
 import { AppError } from '../../common/errors/app-error.js';
+import { withErrorMapping } from '../../common/http/route-handler.js';
 import { authenticate, getUserId } from '../../common/middleware/authenticate.js';
 import type {
   AccessTokenVerifier,
@@ -50,6 +51,8 @@ function mapError(error: unknown): AppError | undefined {
   return undefined;
 }
 
+const route = withErrorMapping(mapError);
+
 export function createSharedScansRouter({
   sharedScansService,
   accessTokenVerifier,
@@ -62,59 +65,47 @@ export function createSharedScansRouter({
     '/shared-scans',
     requireAuth,
     validateRequest({ query: ListSharedScansQuerySchema }),
-    async (request, response, next) => {
-      try {
-        const userId = getUserId(request);
-        const { query } = response.locals.validated as { query: ListSharedScansQuery };
-        const result = await sharedScansService.list(userId, {
-          page: query.page,
-          limit: query.limit,
-          sort: query.sort,
-          ...(query.search === undefined ? {} : { search: query.search }),
-        });
-        const responseBody = SharedScanListResponseSchema.parse(result);
+    route(async (request, response) => {
+      const userId = getUserId(request);
+      const { query } = response.locals.validated as { query: ListSharedScansQuery };
+      const result = await sharedScansService.list(userId, {
+        page: query.page,
+        limit: query.limit,
+        sort: query.sort,
+        ...(query.search === undefined ? {} : { search: query.search }),
+      });
+      const responseBody = SharedScanListResponseSchema.parse(result);
 
-        response.status(200).json(responseBody);
-      } catch (error) {
-        next(mapError(error) ?? error);
-      }
-    },
+      response.status(200).json(responseBody);
+    }),
   );
 
   router.get(
     '/shared-scans/:scanId',
     requireAuth,
     validateRequest({ params: SharedScanIdParamSchema }),
-    async (request, response, next) => {
-      try {
-        const userId = getUserId(request);
-        const { params } = response.locals.validated as { params: { scanId: string } };
-        const result = await sharedScansService.detail(userId, params.scanId);
-        const responseBody = SharedScanResponseSchema.parse(result);
+    route(async (request, response) => {
+      const userId = getUserId(request);
+      const { params } = response.locals.validated as { params: { scanId: string } };
+      const result = await sharedScansService.detail(userId, params.scanId);
+      const responseBody = SharedScanResponseSchema.parse(result);
 
-        response.status(200).json(responseBody);
-      } catch (error) {
-        next(mapError(error) ?? error);
-      }
-    },
+      response.status(200).json(responseBody);
+    }),
   );
 
   router.delete(
     '/shared-scans/:scanId',
     requireAuth,
     validateRequest({ params: SharedScanIdParamSchema }),
-    async (request, response, next) => {
-      try {
-        const userId = getUserId(request);
-        const { params } = response.locals.validated as { params: { scanId: string } };
-        const result = await sharedScansService.remove(userId, params.scanId);
-        const responseBody = SharedScanRemoveResponseSchema.parse(result);
+    route(async (request, response) => {
+      const userId = getUserId(request);
+      const { params } = response.locals.validated as { params: { scanId: string } };
+      const result = await sharedScansService.remove(userId, params.scanId);
+      const responseBody = SharedScanRemoveResponseSchema.parse(result);
 
-        response.status(200).json(responseBody);
-      } catch (error) {
-        next(mapError(error) ?? error);
-      }
-    },
+      response.status(200).json(responseBody);
+    }),
   );
 
   return router;

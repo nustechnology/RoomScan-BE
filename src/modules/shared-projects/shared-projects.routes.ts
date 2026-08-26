@@ -1,6 +1,7 @@
 import { Router } from 'express';
 
 import { AppError } from '../../common/errors/app-error.js';
+import { withErrorMapping } from '../../common/http/route-handler.js';
 import { authenticate, getUserId } from '../../common/middleware/authenticate.js';
 import type {
   AccessTokenVerifier,
@@ -50,6 +51,8 @@ function mapError(error: unknown): AppError | undefined {
   return undefined;
 }
 
+const route = withErrorMapping(mapError);
+
 export function createSharedProjectsRouter({
   sharedProjectsService,
   accessTokenVerifier,
@@ -62,59 +65,47 @@ export function createSharedProjectsRouter({
     '/shared-projects',
     requireAuth,
     validateRequest({ query: ListSharedProjectsQuerySchema }),
-    async (request, response, next) => {
-      try {
-        const userId = getUserId(request);
-        const { query } = response.locals.validated as { query: ListSharedProjectsQuery };
-        const result = await sharedProjectsService.list(userId, {
-          page: query.page,
-          limit: query.limit,
-          sort: query.sort,
-          ...(query.search === undefined ? {} : { search: query.search }),
-        });
-        const responseBody = SharedProjectListResponseSchema.parse(result);
+    route(async (request, response) => {
+      const userId = getUserId(request);
+      const { query } = response.locals.validated as { query: ListSharedProjectsQuery };
+      const result = await sharedProjectsService.list(userId, {
+        page: query.page,
+        limit: query.limit,
+        sort: query.sort,
+        ...(query.search === undefined ? {} : { search: query.search }),
+      });
+      const responseBody = SharedProjectListResponseSchema.parse(result);
 
-        response.status(200).json(responseBody);
-      } catch (error) {
-        next(mapError(error) ?? error);
-      }
-    },
+      response.status(200).json(responseBody);
+    }),
   );
 
   router.get(
     '/shared-projects/:projectId',
     requireAuth,
     validateRequest({ params: SharedProjectIdParamSchema }),
-    async (request, response, next) => {
-      try {
-        const userId = getUserId(request);
-        const { params } = response.locals.validated as { params: { projectId: string } };
-        const result = await sharedProjectsService.detail(userId, params.projectId);
-        const responseBody = SharedProjectDetailResponseSchema.parse(result);
+    route(async (request, response) => {
+      const userId = getUserId(request);
+      const { params } = response.locals.validated as { params: { projectId: string } };
+      const result = await sharedProjectsService.detail(userId, params.projectId);
+      const responseBody = SharedProjectDetailResponseSchema.parse(result);
 
-        response.status(200).json(responseBody);
-      } catch (error) {
-        next(mapError(error) ?? error);
-      }
-    },
+      response.status(200).json(responseBody);
+    }),
   );
 
   router.delete(
     '/shared-projects/:projectId',
     requireAuth,
     validateRequest({ params: SharedProjectIdParamSchema }),
-    async (request, response, next) => {
-      try {
-        const userId = getUserId(request);
-        const { params } = response.locals.validated as { params: { projectId: string } };
-        const result = await sharedProjectsService.remove(userId, params.projectId);
-        const responseBody = SharedProjectRemoveResponseSchema.parse(result);
+    route(async (request, response) => {
+      const userId = getUserId(request);
+      const { params } = response.locals.validated as { params: { projectId: string } };
+      const result = await sharedProjectsService.remove(userId, params.projectId);
+      const responseBody = SharedProjectRemoveResponseSchema.parse(result);
 
-        response.status(200).json(responseBody);
-      } catch (error) {
-        next(mapError(error) ?? error);
-      }
-    },
+      response.status(200).json(responseBody);
+    }),
   );
 
   return router;

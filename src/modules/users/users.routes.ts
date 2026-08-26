@@ -1,6 +1,7 @@
 import { Router } from 'express';
 
 import { AppError } from '../../common/errors/app-error.js';
+import { withErrorMapping } from '../../common/http/route-handler.js';
 import { authenticate, getUserId } from '../../common/middleware/authenticate.js';
 import type {
   AccessTokenVerifier,
@@ -33,6 +34,8 @@ function mapError(error: unknown): AppError | undefined {
   return undefined;
 }
 
+const route = withErrorMapping(mapError);
+
 export function createUsersRouter({
   userProfileService,
   accessTokenVerifier,
@@ -41,34 +44,30 @@ export function createUsersRouter({
   const router = Router();
   const requireAuth = authenticate(accessTokenVerifier, currentUserRepository);
 
-  router.get('/users/me', requireAuth, async (request, response, next) => {
-    try {
+  router.get(
+    '/users/me',
+    requireAuth,
+    route(async (request, response) => {
       const userId = getUserId(request);
       const result = await userProfileService.getMe(userId);
       const responseBody = GetMeResponseSchema.parse(result);
 
       response.status(200).json(responseBody);
-    } catch (error) {
-      next(mapError(error) ?? error);
-    }
-  });
+    }),
+  );
 
   router.patch(
     '/users/me',
     requireAuth,
     validateRequest({ body: UpdateMeBodySchema }),
-    async (request, response, next) => {
-      try {
-        const userId = getUserId(request);
-        const { body } = response.locals.validated as { body: UpdateMeBody };
-        const result = await userProfileService.updateMe(userId, body);
-        const responseBody = UserProfileResponseSchema.parse(result);
+    route(async (request, response) => {
+      const userId = getUserId(request);
+      const { body } = response.locals.validated as { body: UpdateMeBody };
+      const result = await userProfileService.updateMe(userId, body);
+      const responseBody = UserProfileResponseSchema.parse(result);
 
-        response.status(200).json(responseBody);
-      } catch (error) {
-        next(mapError(error) ?? error);
-      }
-    },
+      response.status(200).json(responseBody);
+    }),
   );
 
   return router;

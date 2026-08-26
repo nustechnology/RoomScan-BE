@@ -1,6 +1,7 @@
 import { Router } from 'express';
 
 import { AppError } from '../../common/errors/app-error.js';
+import { composeErrorMappers, withErrorMapping } from '../../common/http/route-handler.js';
 import {
   idempotencyErrorToAppError,
   resolveIdempotencyKey,
@@ -73,9 +74,7 @@ export interface ShareRouterDependencies {
   currentUserRepository: CurrentUserRepository;
 }
 
-function mapError(error: unknown): AppError | undefined {
-  const idempotencyError = idempotencyErrorToAppError(error);
-  if (idempotencyError !== undefined) return idempotencyError;
+function shareModuleMapError(error: unknown): AppError | undefined {
   if (error instanceof ProjectNotFoundError) {
     return new AppError({
       statusCode: 404,
@@ -205,6 +204,9 @@ function mapError(error: unknown): AppError | undefined {
   return undefined;
 }
 
+const mapError = composeErrorMappers(idempotencyErrorToAppError, shareModuleMapError);
+const route = withErrorMapping(mapError);
+
 export function createShareRouter({
   shareService,
   shareLinkService,
@@ -222,344 +224,272 @@ export function createShareRouter({
       params: ProjectIdParamSchema,
       headers: IdempotencyKeyHeaderSchema,
     }),
-    async (request, response, next) => {
-      try {
-        const userId = getUserId(request);
-        const { body, params, headers } = response.locals.validated as {
-          body: InvitationCreateBody;
-          params: ProjectIdParam;
-          headers: { 'Idempotency-Key': string };
-        };
-        const key = resolveIdempotencyKey(headers['Idempotency-Key']);
-        const input = {
-          recipientEmail: body.recipientEmail,
-          ...(body.expiresInSeconds === undefined
-            ? {}
-            : { expiresInSeconds: body.expiresInSeconds }),
-        };
-        const result =
-          typeof shareService.createInvitationIdempotently === 'function'
-            ? await shareService.createInvitationIdempotently(userId, params.projectId, input, key)
-            : {
-                body: await shareService.createInvitation(userId, params.projectId, input),
-                statusCode: 201,
-              };
-        const responseBody = InvitationCreateResponseSchema.parse(result.body);
+    route(async (request, response) => {
+      const userId = getUserId(request);
+      const { body, params, headers } = response.locals.validated as {
+        body: InvitationCreateBody;
+        params: ProjectIdParam;
+        headers: { 'Idempotency-Key': string };
+      };
+      const key = resolveIdempotencyKey(headers['Idempotency-Key']);
+      const input = {
+        recipientEmail: body.recipientEmail,
+        ...(body.expiresInSeconds === undefined ? {} : { expiresInSeconds: body.expiresInSeconds }),
+      };
+      const result =
+        typeof shareService.createInvitationIdempotently === 'function'
+          ? await shareService.createInvitationIdempotently(userId, params.projectId, input, key)
+          : {
+              body: await shareService.createInvitation(userId, params.projectId, input),
+              statusCode: 201,
+            };
+      const responseBody = InvitationCreateResponseSchema.parse(result.body);
 
-        response.status(result.statusCode).json(responseBody);
-      } catch (error) {
-        next(mapError(error) ?? error);
-      }
-    },
+      response.status(result.statusCode).json(responseBody);
+    }),
   );
 
   router.post(
     '/scans/:scanId/invitations',
     requireAuth,
     validateRequest({ body: InvitationCreateBodySchema, params: ScanIdParamSchema }),
-    async (request, response, next) => {
-      try {
-        const userId = getUserId(request);
-        const { body, params } = response.locals.validated as {
-          body: InvitationCreateBody;
-          params: ScanIdParam;
-        };
-        const result = await shareService.createScanInvitation(userId, params.scanId, {
-          recipientEmail: body.recipientEmail,
-          ...(body.expiresInSeconds === undefined
-            ? {}
-            : { expiresInSeconds: body.expiresInSeconds }),
-        });
-        const responseBody = InvitationCreateResponseSchema.parse(result);
+    route(async (request, response) => {
+      const userId = getUserId(request);
+      const { body, params } = response.locals.validated as {
+        body: InvitationCreateBody;
+        params: ScanIdParam;
+      };
+      const result = await shareService.createScanInvitation(userId, params.scanId, {
+        recipientEmail: body.recipientEmail,
+        ...(body.expiresInSeconds === undefined ? {} : { expiresInSeconds: body.expiresInSeconds }),
+      });
+      const responseBody = InvitationCreateResponseSchema.parse(result);
 
-        response.status(201).json(responseBody);
-      } catch (error) {
-        next(mapError(error) ?? error);
-      }
-    },
+      response.status(201).json(responseBody);
+    }),
   );
 
   router.post(
     '/invitations/:invitationId/resend',
     requireAuth,
     validateRequest({ params: InvitationIdParamSchema }),
-    async (request, response, next) => {
-      try {
-        const userId = getUserId(request);
-        const { params } = response.locals.validated as { params: InvitationIdParam };
-        const result = await shareService.resendInvitation(userId, params.invitationId);
-        const responseBody = InvitationResendResponseSchema.parse(result);
+    route(async (request, response) => {
+      const userId = getUserId(request);
+      const { params } = response.locals.validated as { params: InvitationIdParam };
+      const result = await shareService.resendInvitation(userId, params.invitationId);
+      const responseBody = InvitationResendResponseSchema.parse(result);
 
-        response.status(200).json(responseBody);
-      } catch (error) {
-        next(mapError(error) ?? error);
-      }
-    },
+      response.status(200).json(responseBody);
+    }),
   );
 
   router.get(
     '/invitations/:token',
     requireAuth,
     validateRequest({ params: InvitationTokenParamSchema }),
-    async (request, response, next) => {
-      try {
-        const { params } = response.locals.validated as { params: InvitationTokenParam };
-        const currentUser = request.locals!.currentUser;
-        const result = await shareService.previewInvitation(params.token, {
-          id: currentUser.id,
-          email: currentUser.email,
-        });
-        const responseBody = InvitationPreviewResponseSchema.parse(result);
+    route(async (request, response) => {
+      const { params } = response.locals.validated as { params: InvitationTokenParam };
+      const currentUser = request.locals!.currentUser;
+      const result = await shareService.previewInvitation(params.token, {
+        id: currentUser.id,
+        email: currentUser.email,
+      });
+      const responseBody = InvitationPreviewResponseSchema.parse(result);
 
-        response.status(200).json(responseBody);
-      } catch (error) {
-        next(mapError(error) ?? error);
-      }
-    },
+      response.status(200).json(responseBody);
+    }),
   );
 
   router.post(
     '/invitations/:token/accept',
     requireAuth,
     validateRequest({ params: InvitationTokenParamSchema }),
-    async (request, response, next) => {
-      try {
-        const currentUser = request.locals!.currentUser;
-        const { params } = response.locals.validated as { params: InvitationTokenParam };
-        const result = await shareService.acceptInvitation(
-          { id: currentUser.id, email: currentUser.email },
-          params.token,
-        );
-        const responseBody = InvitationAcceptResponseSchema.parse(result);
+    route(async (request, response) => {
+      const currentUser = request.locals!.currentUser;
+      const { params } = response.locals.validated as { params: InvitationTokenParam };
+      const result = await shareService.acceptInvitation(
+        { id: currentUser.id, email: currentUser.email },
+        params.token,
+      );
+      const responseBody = InvitationAcceptResponseSchema.parse(result);
 
-        response.status(200).json(responseBody);
-      } catch (error) {
-        next(mapError(error) ?? error);
-      }
-    },
+      response.status(200).json(responseBody);
+    }),
   );
 
   router.post(
     '/invitations/:token/decline',
     requireAuth,
     validateRequest({ params: InvitationTokenParamSchema }),
-    async (request, response, next) => {
-      try {
-        const currentUser = request.locals!.currentUser;
-        const { params } = response.locals.validated as { params: InvitationTokenParam };
-        const result = await shareService.declineInvitation(
-          { id: currentUser.id, email: currentUser.email },
-          params.token,
-        );
-        const responseBody = InvitationDeclineResponseSchema.parse(result);
+    route(async (request, response) => {
+      const currentUser = request.locals!.currentUser;
+      const { params } = response.locals.validated as { params: InvitationTokenParam };
+      const result = await shareService.declineInvitation(
+        { id: currentUser.id, email: currentUser.email },
+        params.token,
+      );
+      const responseBody = InvitationDeclineResponseSchema.parse(result);
 
-        response.status(200).json(responseBody);
-      } catch (error) {
-        next(mapError(error) ?? error);
-      }
-    },
+      response.status(200).json(responseBody);
+    }),
   );
 
   router.delete(
     '/invitations/:invitationId',
     requireAuth,
     validateRequest({ params: InvitationIdParamSchema }),
-    async (request, response, next) => {
-      try {
-        const userId = getUserId(request);
-        const { params } = response.locals.validated as { params: InvitationIdParam };
-        const result = await shareService.revokeInvitation(userId, params.invitationId);
-        const responseBody = InvitationRevokeResponseSchema.parse(result);
+    route(async (request, response) => {
+      const userId = getUserId(request);
+      const { params } = response.locals.validated as { params: InvitationIdParam };
+      const result = await shareService.revokeInvitation(userId, params.invitationId);
+      const responseBody = InvitationRevokeResponseSchema.parse(result);
 
-        response.status(200).json(responseBody);
-      } catch (error) {
-        next(mapError(error) ?? error);
-      }
-    },
+      response.status(200).json(responseBody);
+    }),
   );
 
   router.get(
     '/projects/:projectId/shares',
     requireAuth,
     validateRequest({ params: ProjectIdParamSchema }),
-    async (request, response, next) => {
-      try {
-        const userId = getUserId(request);
-        const { params } = response.locals.validated as { params: ProjectIdParam };
-        const result = await shareService.listShares(userId, params.projectId);
-        const responseBody = SharesListResponseSchema.parse(result);
+    route(async (request, response) => {
+      const userId = getUserId(request);
+      const { params } = response.locals.validated as { params: ProjectIdParam };
+      const result = await shareService.listShares(userId, params.projectId);
+      const responseBody = SharesListResponseSchema.parse(result);
 
-        response.status(200).json(responseBody);
-      } catch (error) {
-        next(mapError(error) ?? error);
-      }
-    },
+      response.status(200).json(responseBody);
+    }),
   );
 
   router.get(
     '/scans/:scanId/shares',
     requireAuth,
     validateRequest({ params: ScanIdParamSchema }),
-    async (request, response, next) => {
-      try {
-        const userId = getUserId(request);
-        const { params } = response.locals.validated as { params: ScanIdParam };
-        const result = await shareService.listScanShares(userId, params.scanId);
-        const responseBody = ScanSharesListResponseSchema.parse(result);
+    route(async (request, response) => {
+      const userId = getUserId(request);
+      const { params } = response.locals.validated as { params: ScanIdParam };
+      const result = await shareService.listScanShares(userId, params.scanId);
+      const responseBody = ScanSharesListResponseSchema.parse(result);
 
-        response.status(200).json(responseBody);
-      } catch (error) {
-        next(mapError(error) ?? error);
-      }
-    },
+      response.status(200).json(responseBody);
+    }),
   );
 
   router.delete(
     '/projects/:projectId/shares/:userId',
     requireAuth,
     validateRequest({ params: ShareRevokeParamsSchema }),
-    async (request, response, next) => {
-      try {
-        const userId = getUserId(request);
-        const { params } = response.locals.validated as { params: ShareRevokeParams };
-        const result = await shareService.revokeViewer(userId, params.projectId, params.userId);
-        const responseBody = ViewerRevokeResponseSchema.parse(result);
+    route(async (request, response) => {
+      const userId = getUserId(request);
+      const { params } = response.locals.validated as { params: ShareRevokeParams };
+      const result = await shareService.revokeViewer(userId, params.projectId, params.userId);
+      const responseBody = ViewerRevokeResponseSchema.parse(result);
 
-        response.status(200).json(responseBody);
-      } catch (error) {
-        next(mapError(error) ?? error);
-      }
-    },
+      response.status(200).json(responseBody);
+    }),
   );
 
   router.delete(
     '/scans/:scanId/shares/:userId',
     requireAuth,
     validateRequest({ params: ScanShareRevokeParamsSchema }),
-    async (request, response, next) => {
-      try {
-        const userId = getUserId(request);
-        const { params } = response.locals.validated as { params: ScanShareRevokeParams };
-        const result = await shareService.revokeScanViewer(userId, params.scanId, params.userId);
-        const responseBody = ScanViewerRevokeResponseSchema.parse(result);
+    route(async (request, response) => {
+      const userId = getUserId(request);
+      const { params } = response.locals.validated as { params: ScanShareRevokeParams };
+      const result = await shareService.revokeScanViewer(userId, params.scanId, params.userId);
+      const responseBody = ScanViewerRevokeResponseSchema.parse(result);
 
-        response.status(200).json(responseBody);
-      } catch (error) {
-        next(mapError(error) ?? error);
-      }
-    },
+      response.status(200).json(responseBody);
+    }),
   );
 
   router.post(
     '/projects/:projectId/share-links',
     requireAuth,
     validateRequest({ params: ProjectIdParamSchema }),
-    async (request, response, next) => {
-      try {
-        const userId = getUserId(request);
-        const { params } = response.locals.validated as { params: ProjectIdParam };
-        const result = await shareLinkService.createShareLink(userId, {
-          projectId: params.projectId,
-        });
-        const responseBody = ShareLinkCreateResponseSchema.parse(result);
+    route(async (request, response) => {
+      const userId = getUserId(request);
+      const { params } = response.locals.validated as { params: ProjectIdParam };
+      const result = await shareLinkService.createShareLink(userId, {
+        projectId: params.projectId,
+      });
+      const responseBody = ShareLinkCreateResponseSchema.parse(result);
 
-        response.status(201).json(responseBody);
-      } catch (error) {
-        next(mapError(error) ?? error);
-      }
-    },
+      response.status(201).json(responseBody);
+    }),
   );
 
   router.post(
     '/scans/:scanId/share-links',
     requireAuth,
     validateRequest({ params: ScanIdParamSchema }),
-    async (request, response, next) => {
-      try {
-        const userId = getUserId(request);
-        const { params } = response.locals.validated as { params: ScanIdParam };
-        const result = await shareLinkService.createShareLink(userId, { scanId: params.scanId });
-        const responseBody = ShareLinkCreateResponseSchema.parse(result);
+    route(async (request, response) => {
+      const userId = getUserId(request);
+      const { params } = response.locals.validated as { params: ScanIdParam };
+      const result = await shareLinkService.createShareLink(userId, { scanId: params.scanId });
+      const responseBody = ShareLinkCreateResponseSchema.parse(result);
 
-        response.status(201).json(responseBody);
-      } catch (error) {
-        next(mapError(error) ?? error);
-      }
-    },
+      response.status(201).json(responseBody);
+    }),
   );
 
   router.get(
     '/projects/:projectId/share-links',
     requireAuth,
     validateRequest({ params: ProjectIdParamSchema }),
-    async (request, response, next) => {
-      try {
-        const userId = getUserId(request);
-        const { params } = response.locals.validated as { params: ProjectIdParam };
-        const result = await shareLinkService.listShareLinks(userId, {
-          projectId: params.projectId,
-        });
-        const responseBody = ShareLinkListResponseSchema.parse({ items: result });
+    route(async (request, response) => {
+      const userId = getUserId(request);
+      const { params } = response.locals.validated as { params: ProjectIdParam };
+      const result = await shareLinkService.listShareLinks(userId, {
+        projectId: params.projectId,
+      });
+      const responseBody = ShareLinkListResponseSchema.parse({ items: result });
 
-        response.status(200).json(responseBody);
-      } catch (error) {
-        next(mapError(error) ?? error);
-      }
-    },
+      response.status(200).json(responseBody);
+    }),
   );
 
   router.get(
     '/scans/:scanId/share-links',
     requireAuth,
     validateRequest({ params: ScanIdParamSchema }),
-    async (request, response, next) => {
-      try {
-        const userId = getUserId(request);
-        const { params } = response.locals.validated as { params: ScanIdParam };
-        const result = await shareLinkService.listShareLinks(userId, { scanId: params.scanId });
-        const responseBody = ShareLinkListResponseSchema.parse({ items: result });
+    route(async (request, response) => {
+      const userId = getUserId(request);
+      const { params } = response.locals.validated as { params: ScanIdParam };
+      const result = await shareLinkService.listShareLinks(userId, { scanId: params.scanId });
+      const responseBody = ShareLinkListResponseSchema.parse({ items: result });
 
-        response.status(200).json(responseBody);
-      } catch (error) {
-        next(mapError(error) ?? error);
-      }
-    },
+      response.status(200).json(responseBody);
+    }),
   );
 
   router.delete(
     '/projects/:projectId/share-links/:shareLinkId',
     requireAuth,
     validateRequest({ params: ProjectShareLinkIdParamSchema }),
-    async (request, response, next) => {
-      try {
-        const userId = getUserId(request);
-        const { params } = response.locals.validated as { params: ProjectShareLinkIdParam };
-        const result = await shareLinkService.revokeShareLink(userId, params.shareLinkId);
-        const responseBody = ShareLinkRevokeResponseSchema.parse(result);
+    route(async (request, response) => {
+      const userId = getUserId(request);
+      const { params } = response.locals.validated as { params: ProjectShareLinkIdParam };
+      const result = await shareLinkService.revokeShareLink(userId, params.shareLinkId);
+      const responseBody = ShareLinkRevokeResponseSchema.parse(result);
 
-        response.status(200).json(responseBody);
-      } catch (error) {
-        next(mapError(error) ?? error);
-      }
-    },
+      response.status(200).json(responseBody);
+    }),
   );
 
   router.delete(
     '/scans/:scanId/share-links/:shareLinkId',
     requireAuth,
     validateRequest({ params: ScanShareLinkIdParamSchema }),
-    async (request, response, next) => {
-      try {
-        const userId = getUserId(request);
-        const { params } = response.locals.validated as { params: ScanShareLinkIdParam };
-        const result = await shareLinkService.revokeShareLink(userId, params.shareLinkId);
-        const responseBody = ShareLinkRevokeResponseSchema.parse(result);
+    route(async (request, response) => {
+      const userId = getUserId(request);
+      const { params } = response.locals.validated as { params: ScanShareLinkIdParam };
+      const result = await shareLinkService.revokeShareLink(userId, params.shareLinkId);
+      const responseBody = ShareLinkRevokeResponseSchema.parse(result);
 
-        response.status(200).json(responseBody);
-      } catch (error) {
-        next(mapError(error) ?? error);
-      }
-    },
+      response.status(200).json(responseBody);
+    }),
   );
 
   return router;

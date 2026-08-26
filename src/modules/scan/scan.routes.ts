@@ -1,6 +1,7 @@
 import { Router } from 'express';
 
 import { AppError } from '../../common/errors/app-error.js';
+import { composeErrorMappers, withErrorMapping } from '../../common/http/route-handler.js';
 import {
   idempotencyErrorToAppError,
   resolveIdempotencyKey,
@@ -50,9 +51,7 @@ export interface ScanRouterDependencies {
   currentUserRepository: CurrentUserRepository;
 }
 
-function notFoundToAppError(error: unknown): AppError | undefined {
-  const commonError = idempotencyErrorToAppError(error) ?? revisionErrorToAppError(error);
-  if (commonError !== undefined) return commonError;
+function scanModuleMapError(error: unknown): AppError | undefined {
   if (error instanceof ScanNotFoundError) {
     return new AppError({
       statusCode: 404,
@@ -86,6 +85,13 @@ function notFoundToAppError(error: unknown): AppError | undefined {
   return undefined;
 }
 
+const mapError = composeErrorMappers(
+  idempotencyErrorToAppError,
+  revisionErrorToAppError,
+  scanModuleMapError,
+);
+const route = withErrorMapping(mapError);
+
 export function createScanRouter({
   scanService,
   accessTokenVerifier,
@@ -102,112 +108,98 @@ export function createScanRouter({
       params: ProjectIdParamSchema,
       headers: IdempotencyKeyHeaderSchema,
     }),
-    async (request, response, next) => {
-      try {
-        const userId = getUserId(request);
-        const { body, params, headers } = response.locals.validated as {
-          body: CreateScanBody;
-          params: ProjectIdParam;
-          headers: { 'Idempotency-Key': string };
-        };
-        const data: ScanCreateInput = {
-          name: body.name,
-          description: body.description,
-          ...(body.clientMutationId === undefined
-            ? {}
-            : { clientMutationId: body.clientMutationId }),
-        };
-        const key = resolveIdempotencyKey(headers['Idempotency-Key'], body.clientMutationId);
-        const canonicalBody = {
-          name: body.name,
-          description: body.description,
-          ...(body.thumbnail === undefined ? {} : { thumbnail: body.thumbnail }),
-          ...(body.scanFile === undefined ? {} : { scanFile: body.scanFile }),
-        };
-        const uploadDescriptors = [
-          ...(body.thumbnail === undefined
-            ? []
-            : [
-                {
-                  assetType: 'THUMBNAIL' as const,
-                  contentType: body.thumbnail.contentType,
-                  sizeBytes: body.thumbnail.sizeBytes,
-                  ...(body.thumbnail.checksum === undefined
-                    ? {}
-                    : { checksum: body.thumbnail.checksum }),
-                },
-              ]),
-          ...(body.scanFile === undefined
-            ? []
-            : [
-                {
-                  assetType: 'MODEL' as const,
-                  contentType: body.scanFile.contentType,
-                  sizeBytes: body.scanFile.sizeBytes,
-                  checksum: body.scanFile.checksum,
-                  modelVersion: body.scanFile.modelVersion,
-                },
-              ]),
-        ];
-        const result = await scanService.createWithUploadsIdempotently(
-          userId,
-          params.projectId,
-          data,
-          uploadDescriptors,
-          key,
-          canonicalBody,
-        );
-        const responseBody = CreateScanResponseSchema.parse(result.body);
-        setRevisionEtag(response, responseBody.revision);
-        response.status(result.statusCode).json(responseBody);
-      } catch (error) {
-        next(notFoundToAppError(error) ?? error);
-      }
-    },
+    route(async (request, response) => {
+      const userId = getUserId(request);
+      const { body, params, headers } = response.locals.validated as {
+        body: CreateScanBody;
+        params: ProjectIdParam;
+        headers: { 'Idempotency-Key': string };
+      };
+      const data: ScanCreateInput = {
+        name: body.name,
+        description: body.description,
+        ...(body.clientMutationId === undefined ? {} : { clientMutationId: body.clientMutationId }),
+      };
+      const key = resolveIdempotencyKey(headers['Idempotency-Key'], body.clientMutationId);
+      const canonicalBody = {
+        name: body.name,
+        description: body.description,
+        ...(body.thumbnail === undefined ? {} : { thumbnail: body.thumbnail }),
+        ...(body.scanFile === undefined ? {} : { scanFile: body.scanFile }),
+      };
+      const uploadDescriptors = [
+        ...(body.thumbnail === undefined
+          ? []
+          : [
+              {
+                assetType: 'THUMBNAIL' as const,
+                contentType: body.thumbnail.contentType,
+                sizeBytes: body.thumbnail.sizeBytes,
+                ...(body.thumbnail.checksum === undefined
+                  ? {}
+                  : { checksum: body.thumbnail.checksum }),
+              },
+            ]),
+        ...(body.scanFile === undefined
+          ? []
+          : [
+              {
+                assetType: 'MODEL' as const,
+                contentType: body.scanFile.contentType,
+                sizeBytes: body.scanFile.sizeBytes,
+                checksum: body.scanFile.checksum,
+                modelVersion: body.scanFile.modelVersion,
+              },
+            ]),
+      ];
+      const result = await scanService.createWithUploadsIdempotently(
+        userId,
+        params.projectId,
+        data,
+        uploadDescriptors,
+        key,
+        canonicalBody,
+      );
+      const responseBody = CreateScanResponseSchema.parse(result.body);
+      setRevisionEtag(response, responseBody.revision);
+      response.status(result.statusCode).json(responseBody);
+    }),
   );
 
   router.get(
     '/projects/:projectId/scans',
     requireAuth,
     validateRequest({ params: ProjectIdParamSchema, query: ListScansQuerySchema }),
-    async (request, response, next) => {
-      try {
-        const userId = getUserId(request);
-        const { params, query } = response.locals.validated as {
-          params: ProjectIdParam;
-          query: ListScansQuery;
-        };
-        const result = await scanService.list(userId, params.projectId, {
-          page: query.page,
-          limit: query.limit,
-          sort: query.sort,
-        });
-        const responseBody = ScanListResponseSchema.parse(result);
+    route(async (request, response) => {
+      const userId = getUserId(request);
+      const { params, query } = response.locals.validated as {
+        params: ProjectIdParam;
+        query: ListScansQuery;
+      };
+      const result = await scanService.list(userId, params.projectId, {
+        page: query.page,
+        limit: query.limit,
+        sort: query.sort,
+      });
+      const responseBody = ScanListResponseSchema.parse(result);
 
-        response.status(200).json(responseBody);
-      } catch (error) {
-        next(notFoundToAppError(error) ?? error);
-      }
-    },
+      response.status(200).json(responseBody);
+    }),
   );
 
   router.get(
     '/scans/:scanId',
     requireAuth,
     validateRequest({ params: ScanIdParamSchema }),
-    async (request, response, next) => {
-      try {
-        const userId = getUserId(request);
-        const { params } = response.locals.validated as { params: ScanIdParam };
-        const result = await scanService.getById(userId, params.scanId);
-        const responseBody = ScanResponseSchema.parse(result);
+    route(async (request, response) => {
+      const userId = getUserId(request);
+      const { params } = response.locals.validated as { params: ScanIdParam };
+      const result = await scanService.getById(userId, params.scanId);
+      const responseBody = ScanResponseSchema.parse(result);
 
-        setRevisionEtag(response, responseBody.revision);
-        response.status(200).json(responseBody);
-      } catch (error) {
-        next(notFoundToAppError(error) ?? error);
-      }
-    },
+      setRevisionEtag(response, responseBody.revision);
+      response.status(200).json(responseBody);
+    }),
   );
 
   router.patch(
@@ -218,53 +210,45 @@ export function createScanRouter({
       params: ScanIdParamSchema,
       headers: IfMatchHeaderSchema,
     }),
-    async (request, response, next) => {
-      try {
-        const userId = getUserId(request);
-        const { body, params, headers } = response.locals.validated as {
-          body: UpdateScanBody;
-          params: ScanIdParam;
-          headers: { 'If-Match': string };
-        };
-        const data: ScanUpdateInput = {};
-        const expectedRevision = parseIfMatch(headers['If-Match']);
-        if (body.name !== undefined) {
-          data.name = body.name;
-        }
-        if (body.description !== undefined) {
-          data.description = body.description;
-        }
-        const result = await scanService.update(userId, params.scanId, expectedRevision, data);
-        const responseBody = ScanResponseSchema.parse(result);
-
-        setRevisionEtag(response, responseBody.revision);
-        response.status(200).json(responseBody);
-      } catch (error) {
-        next(notFoundToAppError(error) ?? error);
+    route(async (request, response) => {
+      const userId = getUserId(request);
+      const { body, params, headers } = response.locals.validated as {
+        body: UpdateScanBody;
+        params: ScanIdParam;
+        headers: { 'If-Match': string };
+      };
+      const data: ScanUpdateInput = {};
+      const expectedRevision = parseIfMatch(headers['If-Match']);
+      if (body.name !== undefined) {
+        data.name = body.name;
       }
-    },
+      if (body.description !== undefined) {
+        data.description = body.description;
+      }
+      const result = await scanService.update(userId, params.scanId, expectedRevision, data);
+      const responseBody = ScanResponseSchema.parse(result);
+
+      setRevisionEtag(response, responseBody.revision);
+      response.status(200).json(responseBody);
+    }),
   );
 
   router.delete(
     '/scans/:scanId',
     requireAuth,
     validateRequest({ params: ScanIdParamSchema, headers: IfMatchHeaderSchema }),
-    async (request, response, next) => {
-      try {
-        const userId = getUserId(request);
-        const { params, headers } = response.locals.validated as {
-          params: ScanIdParam;
-          headers: { 'If-Match': string };
-        };
-        const expectedRevision = parseIfMatch(headers['If-Match']);
-        const revision = await scanService.delete(userId, params.scanId, expectedRevision);
+    route(async (request, response) => {
+      const userId = getUserId(request);
+      const { params, headers } = response.locals.validated as {
+        params: ScanIdParam;
+        headers: { 'If-Match': string };
+      };
+      const expectedRevision = parseIfMatch(headers['If-Match']);
+      const revision = await scanService.delete(userId, params.scanId, expectedRevision);
 
-        setRevisionEtag(response, revision);
-        response.status(204).end();
-      } catch (error) {
-        next(notFoundToAppError(error) ?? error);
-      }
-    },
+      setRevisionEtag(response, revision);
+      response.status(204).end();
+    }),
   );
 
   return router;

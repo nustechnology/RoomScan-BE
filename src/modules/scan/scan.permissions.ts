@@ -1,20 +1,15 @@
+import { AccessPermissionService } from '../../common/permissions/access-permission-service.js';
 import { ScanNotFoundError } from './scan.errors.js';
 import type { ScanRepository, ScanRole } from './scan.types.js';
 
 export class ScanPermissionService {
-  readonly #repository: ScanRepository;
+  readonly #base: AccessPermissionService<ScanRole>;
 
   constructor(repository: ScanRepository) {
-    this.#repository = repository;
+    this.#base = new AccessPermissionService(repository, () => new ScanNotFoundError(), 'OWNER');
   }
 
-  async requireView(scanId: string, userId: string): Promise<ScanRole> {
-    const role = await this.#repository.findAccessRole(scanId, userId);
-
-    if (role === null) {
-      throw new ScanNotFoundError();
-    }
-
-    return role;
+  requireView(scanId: string, userId: string): Promise<ScanRole> {
+    return this.#base.requireView(scanId, userId);
   }
 }

@@ -172,6 +172,7 @@ describe('Note HTTP endpoints', () => {
     failUpload: vi.fn(),
   } as unknown as ScanAssetService;
   const create = vi.fn<NoteService['create']>();
+  const createIdempotently = vi.fn<NoteService['createIdempotently']>();
   const list = vi.fn<NoteService['list']>();
   const getById = vi.fn<NoteService['getById']>();
   const update = vi.fn<NoteService['update']>();
@@ -179,6 +180,7 @@ describe('Note HTTP endpoints', () => {
   const remove = vi.fn<NoteService['delete']>();
   const noteService = {
     create,
+    createIdempotently,
     list,
     getById,
     update,
@@ -246,6 +248,7 @@ describe('Note HTTP endpoints', () => {
     tokenA = await signAccessToken(USER_A);
     tokenB = await signAccessToken(USER_B);
     create.mockResolvedValue(noteResult());
+    createIdempotently.mockResolvedValue({ body: noteResult(), statusCode: 201, replayed: false });
     list.mockResolvedValue({
       items: [noteResult()],
       pagination: { page: 1, limit: 20, total: 1, totalPages: 1 },
@@ -274,14 +277,19 @@ describe('Note HTTP endpoints', () => {
       const body = NoteResponseSchema.parse(response.body as unknown);
 
       expect(body).toMatchObject(noteResult());
-      expect(create).toHaveBeenCalledWith(USER_A, SCAN_ID, {
-        title: 'Cabinet hinge',
-        content: 'Cabinet hinge is loose',
-        color: 'YELLOW',
-        position: { x: 1.5, y: -2, z: 3.25 },
-        orientation: { x: 0, y: 0, z: 1 },
-        modelVersion: '1',
-      });
+      expect(createIdempotently).toHaveBeenCalledWith(
+        USER_A,
+        SCAN_ID,
+        {
+          title: 'Cabinet hinge',
+          content: 'Cabinet hinge is loose',
+          color: 'YELLOW',
+          position: { x: 1.5, y: -2, z: 3.25 },
+          orientation: { x: 0, y: 0, z: 1 },
+          modelVersion: '1',
+        },
+        'note-create-1',
+      );
     });
 
     it('accepts the new CYAN and GRAY colors', async () => {
@@ -366,10 +374,11 @@ describe('Note HTTP endpoints', () => {
         })
         .expect(201);
 
-      expect(create).toHaveBeenCalledWith(
+      expect(createIdempotently).toHaveBeenCalledWith(
         USER_A,
         SCAN_ID,
         expect.objectContaining({ orientation: null }),
+        'note-create-no-orientation',
       );
     });
 
@@ -484,7 +493,7 @@ describe('Note HTTP endpoints', () => {
     });
 
     it('hides create from a Viewer', async () => {
-      create.mockRejectedValueOnce(new ScanNotFoundError());
+      createIdempotently.mockRejectedValueOnce(new ScanNotFoundError());
 
       const response = await request(app)
         .post(`/api/v1/scans/${SCAN_ID}/notes`)
@@ -504,7 +513,7 @@ describe('Note HTTP endpoints', () => {
     });
 
     it('returns 409 for a model version mismatch', async () => {
-      create.mockRejectedValueOnce(new ModelVersionMismatchError());
+      createIdempotently.mockRejectedValueOnce(new ModelVersionMismatchError());
 
       const response = await request(app)
         .post(`/api/v1/scans/${SCAN_ID}/notes`)
@@ -524,7 +533,7 @@ describe('Note HTTP endpoints', () => {
     });
 
     it('returns a safe 500 for unexpected errors', async () => {
-      create.mockRejectedValueOnce(new Error('secret=do-not-expose'));
+      createIdempotently.mockRejectedValueOnce(new Error('secret=do-not-expose'));
 
       const response = await request(app)
         .post(`/api/v1/scans/${SCAN_ID}/notes`)
