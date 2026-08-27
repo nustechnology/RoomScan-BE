@@ -446,7 +446,9 @@ export class ScanAssetService {
     }
 
     if (!verified) {
-      await this.#repository.update(asset.id, { status: 'FAILED' });
+      await this.#repository.updateGuarded(asset.id, ['PENDING', 'UPLOADING'], {
+        status: 'FAILED',
+      });
       throw new AssetUploadFailedError();
     }
 
@@ -474,7 +476,14 @@ export class ScanAssetService {
       update.thumbnailUrl = await this.#createDisplayUrl(asset.storageKey);
     }
 
-    const updated = await this.#repository.update(asset.id, update);
+    const updated = await this.#repository.updateGuarded(
+      asset.id,
+      ['PENDING', 'UPLOADING'],
+      update,
+    );
+    if (updated === null) {
+      throw new UploadSessionExpiredError();
+    }
 
     if (asset.assetType === 'MODEL') {
       if (this.#repository.managesSyncRollups !== true) {
@@ -541,7 +550,16 @@ export class ScanAssetService {
       return toMetadata(asset);
     }
 
-    const updated = await this.#repository.update(asset.id, { status: 'FAILED' });
+    const updated = await this.#repository.updateGuarded(asset.id, ['PENDING', 'UPLOADING'], {
+      status: 'FAILED',
+    });
+    if (updated === null) {
+      const current = await this.#repository.findById(asset.id);
+      if (current === null) {
+        throw new ScanAssetNotFoundError();
+      }
+      return toMetadata(current);
+    }
 
     if (asset.assetType === 'MODEL') {
       if (this.#repository.managesSyncRollups !== true) {

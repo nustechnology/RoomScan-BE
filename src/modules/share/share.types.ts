@@ -287,6 +287,8 @@ export interface ShareRepository {
     context: IdempotencyContext,
     result: InvitationCreateResult,
   ): Promise<IdempotencyResult<InvitationCreateResult>>;
+  /** Bulk-transitions PENDING invitations past `expiresAt` to REVOKED. Returns the count affected. */
+  expirePendingInvitations(now: Date): Promise<number>;
   findByTokenHash(tokenHash: string): Promise<InvitationWithEntity | null>;
   findTokenSourceKindByTokenHash(tokenHash: string): Promise<'invitation' | 'share-link' | null>;
   findInvitationById(id: string): Promise<InvitationRecord | null>;

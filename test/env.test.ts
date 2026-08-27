@@ -32,6 +32,14 @@ describe('loadConfig', () => {
       appleAuthRateLimitMaxRequests: 20,
       refreshAuthRateLimitWindowSeconds: 900,
       refreshAuthRateLimitMaxRequests: 10,
+      invitationCreateRateLimitWindowSeconds: 900,
+      invitationCreateRateLimitMaxRequests: 20,
+      invitationAcceptRateLimitWindowSeconds: 300,
+      invitationAcceptRateLimitMaxRequests: 30,
+      uploadSessionCreateRateLimitWindowSeconds: 900,
+      uploadSessionCreateRateLimitMaxRequests: 30,
+      downloadUrlRateLimitWindowSeconds: 300,
+      downloadUrlRateLimitMaxRequests: 60,
       appleClientId: 'com.example.roomscan',
       accessTokenSecret: 'access-secret-that-is-at-least-32-characters',
       refreshTokenSecret: 'refresh-secret-that-is-at-least-32-characters',
@@ -55,6 +63,8 @@ describe('loadConfig', () => {
       assetMaxThumbnailSizeBytes: 10_000_000,
       invitationTtlSeconds: 604_800,
       invitationBaseUrl: 'http://localhost:3000',
+      uploadSessionExpiryGraceSeconds: 300,
+      orphanAssetCleanupBatchSize: 200,
       mailProvider: 'log',
       smtpHost: '',
       smtpPort: 2525,
@@ -314,6 +324,76 @@ describe('loadConfig', () => {
     ['RATE_LIMIT_API_MAX_REQUESTS', '9007199254740992'],
     ['RATE_LIMIT_APPLE_AUTH_WINDOW_SECONDS', '0'],
     ['RATE_LIMIT_APPLE_AUTH_MAX_REQUESTS', '0'],
+  ])('rejects an invalid %s value: %s', (name, value) => {
+    expect(() =>
+      loadConfig({
+        ...validEnvironment,
+        [name]: value,
+      }),
+    ).toThrow(ZodError);
+  });
+
+  it('accepts configured rate limits for invitation, upload-session, and download-url endpoints', () => {
+    const config = loadConfig({
+      ...validEnvironment,
+      RATE_LIMIT_INVITATION_CREATE_WINDOW_SECONDS: '600',
+      RATE_LIMIT_INVITATION_CREATE_MAX_REQUESTS: '15',
+      RATE_LIMIT_INVITATION_ACCEPT_WINDOW_SECONDS: '120',
+      RATE_LIMIT_INVITATION_ACCEPT_MAX_REQUESTS: '25',
+      RATE_LIMIT_UPLOAD_SESSION_CREATE_WINDOW_SECONDS: '600',
+      RATE_LIMIT_UPLOAD_SESSION_CREATE_MAX_REQUESTS: '15',
+      RATE_LIMIT_DOWNLOAD_URL_WINDOW_SECONDS: '120',
+      RATE_LIMIT_DOWNLOAD_URL_MAX_REQUESTS: '25',
+    });
+
+    expect(config).toMatchObject({
+      invitationCreateRateLimitWindowSeconds: 600,
+      invitationCreateRateLimitMaxRequests: 15,
+      invitationAcceptRateLimitWindowSeconds: 120,
+      invitationAcceptRateLimitMaxRequests: 25,
+      uploadSessionCreateRateLimitWindowSeconds: 600,
+      uploadSessionCreateRateLimitMaxRequests: 15,
+      downloadUrlRateLimitWindowSeconds: 120,
+      downloadUrlRateLimitMaxRequests: 25,
+    });
+  });
+
+  it.each([
+    ['RATE_LIMIT_INVITATION_CREATE_WINDOW_SECONDS', '0'],
+    ['RATE_LIMIT_INVITATION_CREATE_MAX_REQUESTS', '0'],
+    ['RATE_LIMIT_INVITATION_ACCEPT_WINDOW_SECONDS', '0'],
+    ['RATE_LIMIT_INVITATION_ACCEPT_MAX_REQUESTS', '0'],
+    ['RATE_LIMIT_UPLOAD_SESSION_CREATE_WINDOW_SECONDS', '0'],
+    ['RATE_LIMIT_UPLOAD_SESSION_CREATE_MAX_REQUESTS', '0'],
+    ['RATE_LIMIT_DOWNLOAD_URL_WINDOW_SECONDS', '0'],
+    ['RATE_LIMIT_DOWNLOAD_URL_MAX_REQUESTS', '0'],
+  ])('rejects an invalid %s value: %s', (name, value) => {
+    expect(() =>
+      loadConfig({
+        ...validEnvironment,
+        [name]: value,
+      }),
+    ).toThrow(ZodError);
+  });
+
+  it('accepts configured cleanup job settings', () => {
+    const config = loadConfig({
+      ...validEnvironment,
+      UPLOAD_SESSION_EXPIRY_GRACE_SECONDS: '120',
+      ORPHAN_ASSET_CLEANUP_BATCH_SIZE: '50',
+    });
+
+    expect(config).toMatchObject({
+      uploadSessionExpiryGraceSeconds: 120,
+      orphanAssetCleanupBatchSize: 50,
+    });
+  });
+
+  it.each([
+    ['UPLOAD_SESSION_EXPIRY_GRACE_SECONDS', '0'],
+    ['UPLOAD_SESSION_EXPIRY_GRACE_SECONDS', '-1'],
+    ['ORPHAN_ASSET_CLEANUP_BATCH_SIZE', '0'],
+    ['ORPHAN_ASSET_CLEANUP_BATCH_SIZE', '-1'],
   ])('rejects an invalid %s value: %s', (name, value) => {
     expect(() =>
       loadConfig({

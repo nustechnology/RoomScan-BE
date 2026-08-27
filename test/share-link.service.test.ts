@@ -48,6 +48,7 @@ function createService(overrides: Partial<ShareRepository> = {}) {
     hasUploadedModel: vi.fn<ShareRepository['hasUploadedModel']>().mockResolvedValue(true),
     hasUploadedScanModel: vi.fn<ShareRepository['hasUploadedScanModel']>().mockResolvedValue(true),
     createInvitation: vi.fn<ShareRepository['createInvitation']>(),
+    expirePendingInvitations: vi.fn<ShareRepository['expirePendingInvitations']>(),
     findByTokenHash: vi.fn<ShareRepository['findByTokenHash']>(),
     findInvitationById: vi.fn<ShareRepository['findInvitationById']>(),
     acceptInvitation: vi.fn<ShareRepository['acceptInvitation']>(),

@@ -187,6 +187,7 @@ model Invitation {
   @@index([scanId, status])
   @@index([projectId, recipientEmail])
   @@index([scanId, recipientEmail])
+  @@index([status, expiresAt])
   @@map("invitations")
 }
 
@@ -261,6 +262,7 @@ model Scan {
 
   @@unique([projectId, clientMutationId])
   @@index([projectId, deletedAt, createdAt, id])
+  @@index([projectId, deletedAt, updatedAt, id])
   @@index([createdById])
   @@map("scans")
 }

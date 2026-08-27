@@ -206,6 +206,8 @@ export function createApp({
       scanAssetService,
       accessTokenVerifier,
       currentUserRepository,
+      uploadSessionCreateRateLimiter: rateLimiters.uploadSessionCreate,
+      downloadUrlRateLimiter: rateLimiters.downloadUrl,
     }),
   );
   app.use(
@@ -223,6 +225,8 @@ export function createApp({
       shareLinkService,
       accessTokenVerifier,
       currentUserRepository,
+      invitationCreateRateLimiter: rateLimiters.invitationCreate,
+      invitationAcceptRateLimiter: rateLimiters.invitationAccept,
     }),
   );
   app.use(

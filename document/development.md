@@ -273,7 +273,28 @@ non-transactionally. Deploy migrations with `yarn prisma:migrate:deploy`;
 never rewrite older migrations or generated Prisma Client. The
 `add_user_display_name` migration adds a nullable `VARCHAR(100)`
 `displayName` column to the `users` table; existing users keep a `null`
-display name until they set one.
+display name until they set one. The
+`add_scan_project_updated_at_idx` migration adds
+`@@index([projectId, deletedAt, updatedAt, id])` to `Scan`, alongside its
+existing `createdAt`-keyed index, so update-order scan list queries have a
+matching index. The `add_invitation_status_expires_at_idx` migration adds
+`@@index([status, expiresAt])` to `Invitation`, matching the exact query
+shape the invitation-expiry cleanup job (and the existing lazy-expire code in
+`PrismaShareRepository.createInvitation`) use to find stale `PENDING` rows.
+Both are regular (non-`CONCURRENTLY`) index creations; switch to the
+`DROP`/`CREATE INDEX CONCURRENTLY` two-migration pattern described above if a
+target environment's table sizes warrant an online build. No change was made
+to `Project`, `Note`, or `ProjectAccess` indexes for this pass: `Project`
+already has `@@index([ownerId, deletedAt, updatedAt, id])`, `Note` already has
+`@@index([scanId, deletedAt, updatedAt, id])`, and `ProjectAccess`'s
+`@@unique([projectId, userId])` already guarantees at most one access row per
+project/user regardless of lifecycle state. A `pg_trgm`/GIN index for
+free-text project-name search was deliberately not added: search already
+works via case-insensitive `contains`, and no schema-level extension
+(`CREATE EXTENSION`) is declared in this repository, so adding a real
+full-text/fuzzy search index is out of scope for this pass and would need its
+own migration and operational sign-off (elevated DB privilege to create the
+extension).
 
 `SYNC_CRYPTO_KEY` must be configured before the migrated application starts and
 must remain unchanged. V1 ciphertext/cursor formats are versioned but do not
@@ -281,6 +302,35 @@ implement key rotation. `sync_changes` and `idempotency_receipts` have no V1
 expiry or compaction job; retention is an operations follow-up.
 Tests use Prisma delegate doubles; native migration and endpoint verification
 use the PostgreSQL `db` container.
+
+## Cleanup jobs
+
+Three standalone scripts under `src/jobs/` implement the reliability cleanup
+work: `yarn jobs:expire-invitations`, `yarn jobs:expire-upload-sessions`, and
+`yarn jobs:cleanup-orphan-assets` run the compiled `dist/jobs/run-*.js`
+entrypoints; `yarn dev:jobs:expire-invitations`,
+`yarn dev:jobs:expire-upload-sessions`, and
+`yarn dev:jobs:cleanup-orphan-assets` run the same jobs from source with TSX
+for local iteration without a full `yarn build`.
+
+Each script connects one Prisma Client, runs a single pass, disconnects, and
+sets `process.exitCode = 1` on failure so an external scheduler can detect and
+alert on a failed run — there is no internal HTTP endpoint or built-in
+scheduler; an operator decides the cadence (host cron, a Kubernetes CronJob,
+a CI scheduled pipeline) and invokes the script directly, for example
+`node dist/jobs/run-invitation-expiry.js` against the production image with
+its container command overridden. All three jobs are idempotent: each
+selects rows by a condition (`status = PENDING AND expiresAt <= now`, a stuck
+upload-session window, or an orphan-asset condition) that a prior successful
+run already cleared, so re-running finds nothing left to do. See
+[Architecture](architecture.md#cleanup-jobs) for what each job does and why
+the orphan-asset job is deliberately database-driven only (it never lists or
+reconciles the storage bucket) and why its deletes are hard deletes rather
+than the soft-delete pattern used elsewhere.
+
+`UPLOAD_SESSION_EXPIRY_GRACE_SECONDS` (default 300) and
+`ORPHAN_ASSET_CLEANUP_BATCH_SIZE` (default 200) configure the upload-session
+and orphan-asset jobs; see the root README's environment variable table.
 
 ## Dependency and generated-file policy
 

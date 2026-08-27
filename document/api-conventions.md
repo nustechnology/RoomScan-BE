@@ -97,6 +97,27 @@ Public API traffic has three process-local per-IP policies:
 All Apple and refresh attempts count, including validation, credential and dependency
 failures. IPv6 clients are grouped by `/56`.
 
+Four additional route-specific policies protect sensitive actions, layered on
+top of the general `/api/v1` policy (a request can be blocked by either):
+
+- `POST /api/v1/projects/:projectId/invitations` and
+  `POST /api/v1/scans/:scanId/invitations` (invitation creation) allow 20
+  requests per 15 minutes.
+- `POST /api/v1/invitations/:token/accept` (invitation acceptance) allows 30
+  requests per 5 minutes.
+- `POST /api/v1/scans/:scanId/assets/upload-sessions` (upload-session
+  creation) allows 30 requests per 15 minutes.
+- `GET /api/v1/scans/:scanId/assets/:assetType/download-url` (download-URL
+  generation) allows 60 requests per 5 minutes.
+
+These policies apply only to the exact route named above — invitation
+preview (`GET /api/v1/invitations/:token`) and decline
+(`POST /api/v1/invitations/:token/decline`) are not subject to the
+invitation-accept policy, and listing scan assets
+(`GET /api/v1/scans/:scanId/assets`) is not subject to either scan-asset
+policy. All four counts, defaults, and windows are configurable via
+environment variables (see the root README).
+
 Allowed and rejected limited requests expose draft-8 `RateLimit` and
 `RateLimit-Policy` headers. A rejected request additionally returns
 `Retry-After`, HTTP 429 and:

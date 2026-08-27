@@ -16,6 +16,7 @@ export default defineConfig({
         'src/generated/**',
         'src/infrastructure/database/prisma.ts',
         'src/server.ts',
+        'src/jobs/run-*.ts',
       ],
       thresholds: {
         branches: 80,

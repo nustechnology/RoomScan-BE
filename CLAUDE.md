@@ -141,8 +141,10 @@ mock transaction client) — no live PostgreSQL needed for `test:run`. Native
 migration/endpoint verification against the real `db` container is a separate,
 explicit step, not part of routine unit testing. Coverage threshold is 80%
 across branches/functions/lines/statements (`vitest.config.ts`), excluding
-`src/config`, `src/generated`, `src/infrastructure/database/prisma.ts`, and
-`src/server.ts`.
+`src/config`, `src/generated`, `src/infrastructure/database/prisma.ts`,
+`src/server.ts`, and `src/jobs/run-*.ts` (the cleanup-job CLI entrypoints,
+which are thin composition-root scripts like `src/server.ts`; their logic
+lives in the tested `src/jobs/*.job.ts` pure functions).
 
 ## Prisma rules
 

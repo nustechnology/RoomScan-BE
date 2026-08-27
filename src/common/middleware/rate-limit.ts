@@ -9,12 +9,20 @@ export interface RateLimiters {
   api: RequestHandler;
   appleAuth: RequestHandler;
   refreshAuth: RequestHandler;
+  invitationCreate: RequestHandler;
+  invitationAccept: RequestHandler;
+  uploadSessionCreate: RequestHandler;
+  downloadUrl: RequestHandler;
 }
 
 export interface RateLimitStores {
   api?: Store;
   appleAuth?: Store;
   refreshAuth?: Store;
+  invitationCreate?: Store;
+  invitationAccept?: Store;
+  uploadSessionCreate?: Store;
+  downloadUrl?: Store;
 }
 
 interface RateLimitPolicyOptions {
@@ -101,6 +109,34 @@ export function createRateLimiters(
       maxRequests: config.refreshAuthRateLimitMaxRequests,
       logger: rateLimitLogger,
       ...(stores.refreshAuth === undefined ? {} : { store: stores.refreshAuth }),
+    }),
+    invitationCreate: createRateLimiter({
+      identifier: 'invitation-create',
+      windowSeconds: config.invitationCreateRateLimitWindowSeconds,
+      maxRequests: config.invitationCreateRateLimitMaxRequests,
+      logger: rateLimitLogger,
+      ...(stores.invitationCreate === undefined ? {} : { store: stores.invitationCreate }),
+    }),
+    invitationAccept: createRateLimiter({
+      identifier: 'invitation-accept',
+      windowSeconds: config.invitationAcceptRateLimitWindowSeconds,
+      maxRequests: config.invitationAcceptRateLimitMaxRequests,
+      logger: rateLimitLogger,
+      ...(stores.invitationAccept === undefined ? {} : { store: stores.invitationAccept }),
+    }),
+    uploadSessionCreate: createRateLimiter({
+      identifier: 'upload-session-create',
+      windowSeconds: config.uploadSessionCreateRateLimitWindowSeconds,
+      maxRequests: config.uploadSessionCreateRateLimitMaxRequests,
+      logger: rateLimitLogger,
+      ...(stores.uploadSessionCreate === undefined ? {} : { store: stores.uploadSessionCreate }),
+    }),
+    downloadUrl: createRateLimiter({
+      identifier: 'download-url',
+      windowSeconds: config.downloadUrlRateLimitWindowSeconds,
+      maxRequests: config.downloadUrlRateLimitMaxRequests,
+      logger: rateLimitLogger,
+      ...(stores.downloadUrl === undefined ? {} : { store: stores.downloadUrl }),
     }),
   };
 }

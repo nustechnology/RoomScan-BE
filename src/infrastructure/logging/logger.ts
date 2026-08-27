@@ -1,9 +1,9 @@
-import pino, { type Logger } from 'pino';
+import pino, { type Logger, type DestinationStream } from 'pino';
 
 import type { AppConfig } from '../../config/env.js';
 
-export function createLogger(config: AppConfig): Logger {
-  return pino({
+export function createLogger(config: AppConfig, destination?: DestinationStream): Logger {
+  const options = {
     enabled: config.logLevel !== 'silent',
     level: config.logLevel === 'silent' ? 'info' : config.logLevel,
     base: {
@@ -18,8 +18,14 @@ export function createLogger(config: AppConfig): Logger {
         'request.headers.cookie',
         'databaseUrl',
         'DATABASE_URL',
+        'storageKey',
+        'signedUrl',
+        'downloadUrl',
+        'uploadUrl',
+        'connectionString',
       ],
       censor: '[REDACTED]',
     },
-  });
+  };
+  return destination === undefined ? pino(options) : pino(options, destination);
 }

@@ -74,7 +74,30 @@ export interface ScanAssetRepository {
     reuseWithoutMutation: boolean,
   ): Promise<IdempotencyResult<CreateUploadSessionResult>>;
   update(id: string, data: ScanAssetUpdateData): Promise<ScanAssetRecord>;
+  /**
+   * Compare-and-set update: applies `data` only if the row's current status is
+   * one of `expectedStatuses`. Returns `null` (no write performed) when a
+   * concurrent writer already moved the row past that set of statuses.
+   */
+  updateGuarded(
+    id: string,
+    expectedStatuses: ScanAssetStatus[],
+    data: ScanAssetUpdateData,
+  ): Promise<ScanAssetRecord | null>;
   listByScan(scanId: string): Promise<ScanAssetRecord[]>;
+  /** Bulk-marks stuck PENDING/UPLOADING sessions past `cutoff` as FAILED. Returns the count affected. */
+  failStuckUploadSessions(cutoff: Date): Promise<number>;
+  /** Lists FAILED rows, or PENDING/UPLOADING rows past `cutoff`, oldest first. */
+  listOrphanCandidates(cutoff: Date, limit: number): Promise<ScanAssetRecord[]>;
+  /**
+   * Hard-deletes an orphaned row after re-verifying it still matches the same
+   * orphan condition it was selected under. Returns `false` (no-op) if a
+   * concurrent write already moved the row out of that condition.
+   */
+  deleteOrphanAsset(
+    id: string,
+    expected: { status: ScanAssetStatus; uploadUrlExpiresAt: Date | null },
+  ): Promise<boolean>;
 }
 
 export interface ScanAssetMetadata {

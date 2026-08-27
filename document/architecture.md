@@ -245,6 +245,13 @@ and the raw `storageKey` field is omitted from responses. Storage failures
 while minting upload or download URLs or while verifying an upload surface as
 `503 STORAGE_UNAVAILABLE`.
 
+Completion and failure both write through `ScanAssetRepository.updateGuarded`,
+a compare-and-set update (`WHERE status IN (...)`) that only applies when the
+row's current status is still `PENDING`/`UPLOADING`; if the upload-session
+expiry cleanup job (see Cleanup jobs below) concurrently marks the same row
+`FAILED`, the guarded write reports no match and `completeUpload` surfaces
+`409 UPLOAD_SESSION_EXPIRED` instead of silently overwriting the newer state.
+
 Create-session retries use the required `Idempotency-Key` header. The deprecated
 body `idempotencyKey` remains an alias and must match the header when both are
 present; new asset rows never store the raw key. A MODEL asset that reached
@@ -613,12 +620,33 @@ claim remain accepted only when the request also omits the nonce.
 
 ## Rate limiting
 
-The composition root creates independent general API, Apple authentication, and
-token-refresh rate limiters and injects them into the application factory. The
-general policy allows 120 requests per 60 seconds for each client IP. Apple
-authentication has an additional policy allowing 20 attempts per 15 minutes.
-Token refresh has an additional policy allowing 10 attempts per 15 minutes.
-Every Apple and refresh attempt counts regardless of its outcome.
+The composition root creates seven independent rate limiters through the
+shared `createRateLimiter` factory (`src/common/middleware/rate-limit.ts`) and
+injects them into the application factory as one `rateLimiters` object. The
+general API policy allows 120 requests per 60 seconds for each client IP.
+Apple authentication has an additional policy allowing 20 attempts per 15
+minutes. Token refresh has an additional policy allowing 10 attempts per 15
+minutes. Every Apple and refresh attempt counts regardless of its outcome.
+
+Four narrower policies protect specific sensitive actions: invitation creation
+(project- and scan-scope), invitation acceptance, upload-session creation, and
+download-URL generation. These are mounted differently from the three
+policies above: `api`, `appleAuth`, and `refreshAuth` are mounted centrally in
+`app.ts` by path prefix (`app.use(prefix, limiter)`), which works because
+their target paths (`/auth/apple`, `/auth/refresh`) are exclusive to that
+action. The four new policies cannot use the same approach, because their
+routes share a path prefix with sibling routes that must stay unlimited by
+them — `POST /invitations/:token/accept` shares `/invitations/:token` with the
+unauthenticated-quota preview (`GET`) and decline (`POST .../decline`) routes,
+and `POST /scans/:scanId/assets/upload-sessions` /
+`GET /scans/:scanId/assets/:assetType/download-url` share
+`/scans/:scanId/assets` with the unlimited list-metadata route. Mounting by
+prefix would either miss the target route or over-limit its siblings, so
+these four limiters are instead injected as an added dependency into
+`createShareRouter`/`createScanAssetRouter` and attached as route-level
+middleware (after `requireAuth`, before `validateRequest`) only on the exact
+route each protects. `app.ts` still owns composing every limiter into its
+router; only the mounting mechanism differs per policy.
 
 Liveness, readiness, Swagger and raw OpenAPI are exempt. Rejected requests use
 the standard error middleware and return 429 with `RateLimit`,
@@ -643,7 +671,7 @@ repository, the project repository, the scan repository, the scan-asset
 repository, the refresh-token repository, the note repository, the share
 repository, the shared-projects repository, the shared-scans repository, the
 sync repository, and the idempotency executor, plus the storage,
-sync-cryptography, and mail adapters. It also creates the three
+sync-cryptography, and mail adapters. It also creates the seven
 rate-limit middleware instances, the access-token and refresh-token verifiers,
 the project and scan permission services, the project service, the scan service,
 the scan-asset service, the refresh-token service, the note service, the share
@@ -666,6 +694,63 @@ creator with `onDelete: Restrict`; their `tokenHash` is unique, their
 referencing them use `onDelete: SetNull` so revoking an invitation never orphans
 Viewer access. Share links belong to a project or scan with
 `onDelete: Cascade` and to a creator with `onDelete: Restrict`.
+
+## Cleanup jobs
+
+`src/jobs/` holds three standalone cleanup scripts, run outside the Express
+app by an external scheduler (host cron, a Kubernetes CronJob, CI) rather than
+through a built-in scheduler or an internal HTTP endpoint. Each script
+(`run-invitation-expiry.ts`, `run-upload-session-expiry.ts`,
+`run-orphan-asset-cleanup.ts`, compiled to `dist/jobs/*.js`) loads
+configuration, connects one Prisma Client, runs a single pass of its
+corresponding pure job function (`*.job.ts`), disconnects, and sets a non-zero
+exit code on failure. The job functions take an explicit dependency object
+(repository slice, clock, logger) rather than a class, so they are testable
+the same way services are, without constructing an Express app.
+
+The invitation-expiry job bulk-transitions `PENDING` invitations past
+`expiresAt` to `REVOKED` — the same transition
+`PrismaShareRepository.createInvitation`/`createInvitationIdempotently`
+already perform lazily and scoped to one recipient when a new invitation
+collides with a stale pending one; the job runs that transition unscoped. No
+new `InvitationStatus` value exists for "expired": expiry is represented by
+the existing `REVOKED` state plus `revokedAt`.
+
+The upload-session-expiry job marks `ScanAsset` rows stuck `PENDING`/
+`UPLOADING` past `uploadUrlExpiresAt` (plus `UPLOAD_SESSION_EXPIRY_GRACE_SECONDS`)
+as `FAILED`, using a guarded `ScanAssetRepository.updateGuarded`/
+`failStuckUploadSessions` compare-and-set (`WHERE status IN (...)`) so a
+session a client concurrently completes or fails is left untouched rather than
+overwritten. `ScanAssetService.completeUpload` and `failUpload` use the same
+`updateGuarded` method for their own terminal status writes, closing a race
+that this job's introduction as a second writer to `ScanAsset.status` would
+otherwise create; a write that loses the race surfaces the existing
+`UploadSessionExpiredError` rather than silently committing over a
+newer state.
+
+The orphan-asset-cleanup job is deliberately **database-driven only**: it
+selects `ScanAsset` rows that are `FAILED`, or `PENDING`/`UPLOADING` past the
+same cutoff, via `ScanAssetRepository.listOrphanCandidates`, best-effort calls
+the new `StorageAdapter.deleteObject` on each row's `storageKey` (a failure is
+logged — without the raw key — and counted, but never aborts the batch or
+blocks the row delete), then hard-deletes the row via
+`ScanAssetRepository.deleteOrphanAsset`, which re-verifies inside its
+transaction that the row still matches the same orphan condition before
+deleting, closing the race against a request that completes the upload
+between selection and delete. It never lists or reconciles the storage bucket
+itself, so it can only ever remove objects the database already knows about.
+Because `StorageAdapter.buildObjectKey(scanId, assetType)` is deterministic
+and `ScanAsset` carries a `@@unique([scanId, assetType])` constraint, hard-deleting
+the row (rather than soft-deleting it, as every other domain model does) is
+safe: a later upload-session create for the same `(scan, assetType)` simply
+inserts a fresh row with the identical key. A hard delete on a row that was
+ever synced writes a matching `SCAN_ASSET` `DELETE` sync change so a client
+that previously observed the orphaned placeholder learns it disappeared.
+
+All three jobs are idempotent: a repeated run only ever acts on rows that
+still match its selection condition, so rows already transitioned or removed
+by an earlier run (or by the live request path) are simply absent from the
+next run's candidate set.
 
 ## Lifecycle
 

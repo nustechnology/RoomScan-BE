@@ -29,6 +29,12 @@
     "prisma:migrate:reset": "node scripts/prisma-migrate-reset.mjs",
     "prisma:studio": "prisma studio",
     "seed:local": "tsx prisma/seed-local.ts",
+    "jobs:expire-invitations": "node dist/jobs/run-invitation-expiry.js",
+    "jobs:expire-upload-sessions": "node dist/jobs/run-upload-session-expiry.js",
+    "jobs:cleanup-orphan-assets": "node dist/jobs/run-orphan-asset-cleanup.js",
+    "dev:jobs:expire-invitations": "tsx src/jobs/run-invitation-expiry.ts",
+    "dev:jobs:expire-upload-sessions": "tsx src/jobs/run-upload-session-expiry.ts",
+    "dev:jobs:cleanup-orphan-assets": "tsx src/jobs/run-orphan-asset-cleanup.ts",
     "prepare": "node .husky/install.mjs"
   },
   "dependencies": {
