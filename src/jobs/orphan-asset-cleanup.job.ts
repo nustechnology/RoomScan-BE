@@ -38,14 +38,20 @@ export async function runOrphanAssetCleanupJob({
   let storageDeleteFailureCount = 0;
 
   for (const candidate of candidates) {
+    let storageDeleted = true;
     try {
       await storage.deleteObject(candidate.storageKey);
     } catch (error) {
+      storageDeleted = false;
       storageDeleteFailureCount += 1;
       logger.warn(
         { err: error, assetId: candidate.id },
-        'Failed to delete an orphan asset object from storage; the row will still be removed',
+        'Failed to delete an orphan asset object from storage; the row is preserved for retry on the next run',
       );
+    }
+
+    if (!storageDeleted) {
+      continue;
     }
 
     const deleted = await scanAssetRepository.deleteOrphanAsset(candidate.id, {

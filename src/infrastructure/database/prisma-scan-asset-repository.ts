@@ -324,16 +324,18 @@ export class PrismaScanAssetRepository implements ScanAssetRepository {
   ): Promise<ScanAssetRecord | null> {
     const { thumbnailUrl, ...assetData } = data;
     if (this.#idempotency === undefined) {
-      const result = await this.#client.scanAsset.updateMany({
-        where: { id, status: { in: expectedStatuses } },
-        data: assetData,
+      return await this.#client.$transaction(async (transaction) => {
+        const result = await transaction.scanAsset.updateMany({
+          where: { id, status: { in: expectedStatuses } },
+          data: assetData,
+        });
+        if (result.count === 0) return null;
+        const row = await transaction.scanAsset.findUnique({
+          where: { id },
+          select: legacyScanAssetSelect,
+        });
+        return row === null ? null : toScanAssetRecord(row as ScanAssetRow);
       });
-      if (result.count === 0) return null;
-      const row = await this.#client.scanAsset.findUnique({
-        where: { id },
-        select: legacyScanAssetSelect,
-      });
-      return row === null ? null : toScanAssetRecord(row as ScanAssetRow);
     }
     return await this.#client.$transaction(async (transaction) => {
       const changedAt = new Date();
@@ -375,7 +377,7 @@ export class PrismaScanAssetRepository implements ScanAssetRepository {
     return rows.map(toScanAssetRecord);
   }
 
-  async failStuckUploadSessions(cutoff: Date): Promise<number> {
+  async failStuckUploadSessions(cutoff: Date, batchSize: number): Promise<number> {
     if (this.#idempotency === undefined) {
       const result = await this.#client.scanAsset.updateMany({
         where: {
@@ -386,21 +388,26 @@ export class PrismaScanAssetRepository implements ScanAssetRepository {
       });
       return result.count;
     }
-    const candidates = await this.#client.scanAsset.findMany({
-      where: {
-        deletedAt: null,
-        status: { in: STUCK_UPLOAD_STATUSES },
-        uploadUrlExpiresAt: { not: null, lte: cutoff },
-      },
-      select: { id: true },
-    });
     let failedCount = 0;
-    for (const candidate of candidates) {
-      const updated = await this.updateGuarded(candidate.id, STUCK_UPLOAD_STATUSES, {
-        status: 'FAILED',
+    let batch: Array<{ id: string }>;
+    do {
+      batch = await this.#client.scanAsset.findMany({
+        where: {
+          deletedAt: null,
+          status: { in: STUCK_UPLOAD_STATUSES },
+          uploadUrlExpiresAt: { not: null, lte: cutoff },
+        },
+        orderBy: { id: 'asc' },
+        take: batchSize,
+        select: { id: true },
       });
-      if (updated !== null) failedCount += 1;
-    }
+      for (const candidate of batch) {
+        const updated = await this.updateGuarded(candidate.id, STUCK_UPLOAD_STATUSES, {
+          status: 'FAILED',
+        });
+        if (updated !== null) failedCount += 1;
+      }
+    } while (batch.length === batchSize);
     return failedCount;
   }
 
@@ -467,6 +474,21 @@ export class PrismaScanAssetRepository implements ScanAssetRepository {
         },
       });
       if (row === null) return false;
+
+      // Conditional delete on the same match conditions: the atomic claim.
+      // Unlike delete-by-id, this never throws when a concurrent run already
+      // claimed the row — it simply matches zero rows, which we detect below
+      // and abort on, before any sync/rollup side effect is written.
+      const claimed = await transaction.scanAsset.deleteMany({
+        where: {
+          id,
+          deletedAt: null,
+          status: expected.status,
+          uploadUrlExpiresAt: expected.uploadUrlExpiresAt,
+        },
+      });
+      if (claimed.count === 0) return false;
+
       await writeDeleteChange(transaction, {
         projectId: row.scan.projectId,
         ownerId: row.scan.project.ownerId,
@@ -475,7 +497,6 @@ export class PrismaScanAssetRepository implements ScanAssetRepository {
         revision: row.revision + 1,
         deletedAt: now,
       });
-      await transaction.scanAsset.delete({ where: { id: row.id } });
       await refreshScanRollup(transaction, row.scanId, now);
       return true;
     });

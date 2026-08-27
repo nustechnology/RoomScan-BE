@@ -410,9 +410,12 @@ describe('rate limiting', () => {
       .set('idempotency-key', 'test-key-2')
       .send(body)
       .expect(429);
-    await request(app).get(`/api/v1/scans/${scanId}/assets`).set('authorization', 'Bearer token');
+    const listResponse = await request(app)
+      .get(`/api/v1/scans/${scanId}/assets`)
+      .set('authorization', 'Bearer token');
 
     expect(blocked.headers.ratelimit).toContain('"upload-session-create"');
+    expect(listResponse.status).not.toBe(429);
   });
 
   it('enforces the download-url policy independently from the asset list route', async () => {
@@ -429,9 +432,12 @@ describe('rate limiting', () => {
       .get(`/api/v1/scans/${scanId}/assets/MODEL/download-url`)
       .set('authorization', 'Bearer token')
       .expect(429);
-    await request(app).get(`/api/v1/scans/${scanId}/assets`).set('authorization', 'Bearer token');
+    const listResponse = await request(app)
+      .get(`/api/v1/scans/${scanId}/assets`)
+      .set('authorization', 'Bearer token');
 
     expect(blocked.headers.ratelimit).toContain('"download-url"');
+    expect(listResponse.status).not.toBe(429);
   });
 
   it('fails open and logs when the rate-limit store is unavailable', async () => {

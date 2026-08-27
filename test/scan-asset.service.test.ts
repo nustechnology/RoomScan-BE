@@ -467,6 +467,35 @@ describe('ScanAssetService', () => {
     );
   });
 
+  it('returns uploaded metadata instead of an expired-session error when a concurrent request already completed it', async () => {
+    const { service, findById, updateGuarded, updateAssetStatus } = createHarness();
+    updateGuarded.mockResolvedValueOnce(null);
+    findById
+      .mockResolvedValueOnce(createAssetRecord())
+      .mockResolvedValueOnce(createAssetRecord({ status: 'UPLOADED', uploadedAt: NOW }));
+
+    const result = await service.completeUpload(OWNER_ID, ASSET_ID, {});
+
+    expect(result.status).toBe('UPLOADED');
+    expect(updateAssetStatus).toHaveBeenCalledWith(SCAN_ID, {
+      assetStatus: 'UPLOADED',
+      syncStatus: 'SYNCED',
+    });
+  });
+
+  it('returns uploaded metadata instead of an upload-failed error when verification loses a race to a concurrent completion', async () => {
+    const { service, findById, updateGuarded, verifyObject } = createHarness();
+    verifyObject.mockResolvedValueOnce(false);
+    updateGuarded.mockResolvedValueOnce(null);
+    findById
+      .mockResolvedValueOnce(createAssetRecord())
+      .mockResolvedValueOnce(createAssetRecord({ status: 'UPLOADED', uploadedAt: NOW }));
+
+    const result = await service.completeUpload(OWNER_ID, ASSET_ID, {});
+
+    expect(result.status).toBe('UPLOADED');
+  });
+
   it('reports a storage outage as unavailable', async () => {
     const { service, verifyObject } = createHarness();
     verifyObject.mockRejectedValueOnce(new Error('down'));

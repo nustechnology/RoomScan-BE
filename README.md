@@ -570,11 +570,13 @@ criteria are simply left untouched on a re-run:
   sessions `FAILED` once `uploadUrlExpiresAt` plus
   `UPLOAD_SESSION_EXPIRY_GRACE_SECONDS` has passed, guarded so a session a
   client completes or fails concurrently is left alone.
-- `jobs:cleanup-orphan-assets` finds `FAILED` or stuck scan-asset rows,
-  best-effort deletes their storage object (a failure is logged and the row
-  is still removed on the next pass), and hard-deletes the row after
-  re-confirming it still matches. It only acts on rows already known to the
-  database; it never lists or reconciles the storage bucket directly.
+- `jobs:cleanup-orphan-assets` finds `FAILED` or stuck scan-asset rows and, for
+  each, deletes its storage object first; the row (and its `storageKey`) is
+  only hard-deleted once that storage delete succeeds. A storage delete
+  failure is logged and counted, and the row is left in place so the same
+  candidate is retried on a later run — it is never removed while its object
+  might still exist. It only acts on rows already known to the database; it
+  never lists or reconciles the storage bucket directly.
 
 ## Quality gates
 

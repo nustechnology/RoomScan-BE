@@ -214,6 +214,20 @@ export class ScanAssetService {
     await this.#scanRepository.updateThumbnail(asset.scanId, displayUrl);
   }
 
+  async #handleAlreadyUploaded(asset: ScanAssetRecord): Promise<ScanAssetMetadata> {
+    if (asset.assetType === 'MODEL') {
+      if (this.#repository.managesSyncRollups !== true) {
+        await this.#scanRepository.updateAssetStatus(asset.scanId, {
+          assetStatus: 'UPLOADED',
+          syncStatus: 'SYNCED',
+        });
+      }
+    } else {
+      await this.#persistThumbnailUrl(asset);
+    }
+    return toMetadata(asset);
+  }
+
   async createUploadSession(
     userId: string,
     scanId: string,
@@ -417,17 +431,7 @@ export class ScanAssetService {
     await this.#requireOwner(asset.scanId, userId);
 
     if (asset.status === 'UPLOADED') {
-      if (asset.assetType === 'MODEL') {
-        if (this.#repository.managesSyncRollups !== true) {
-          await this.#scanRepository.updateAssetStatus(asset.scanId, {
-            assetStatus: 'UPLOADED',
-            syncStatus: 'SYNCED',
-          });
-        }
-      } else {
-        await this.#persistThumbnailUrl(asset);
-      }
-      return toMetadata(asset);
+      return await this.#handleAlreadyUploaded(asset);
     }
 
     const now = this.#clock();
@@ -446,9 +450,15 @@ export class ScanAssetService {
     }
 
     if (!verified) {
-      await this.#repository.updateGuarded(asset.id, ['PENDING', 'UPLOADING'], {
+      const failed = await this.#repository.updateGuarded(asset.id, ['PENDING', 'UPLOADING'], {
         status: 'FAILED',
       });
+      if (failed === null) {
+        const current = await this.#repository.findById(asset.id);
+        if (current !== null && current.status === 'UPLOADED') {
+          return await this.#handleAlreadyUploaded(current);
+        }
+      }
       throw new AssetUploadFailedError();
     }
 
@@ -482,6 +492,10 @@ export class ScanAssetService {
       update,
     );
     if (updated === null) {
+      const current = await this.#repository.findById(asset.id);
+      if (current !== null && current.status === 'UPLOADED') {
+        return await this.#handleAlreadyUploaded(current);
+      }
       throw new UploadSessionExpiredError();
     }
 

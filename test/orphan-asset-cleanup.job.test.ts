@@ -117,12 +117,39 @@ describe('runOrphanAssetCleanupJob', () => {
       logger,
     });
 
-    expect(deleteOrphanAsset).toHaveBeenCalledTimes(2);
-    expect(result.deletedCount).toBe(2);
+    expect(deleteOrphanAsset).toHaveBeenCalledTimes(1);
+    expect(deleteOrphanAsset).toHaveBeenCalledWith('asset-2', {
+      status: 'FAILED',
+      uploadUrlExpiresAt: null,
+    });
+    expect(result.deletedCount).toBe(1);
     expect(result.storageDeleteFailureCount).toBe(1);
     expect(logWarn).toHaveBeenCalledOnce();
     const [loggedContext] = logWarn.mock.calls[0] as unknown as [Record<string, unknown>];
     expect(JSON.stringify(loggedContext)).not.toContain('scans/scan-1/model');
+  });
+
+  it('preserves the row for retry when the storage delete fails, rather than removing it', async () => {
+    const listOrphanCandidates = vi
+      .fn<ScanAssetRepository['listOrphanCandidates']>()
+      .mockResolvedValue([createCandidate({ id: 'asset-1' })]);
+    const deleteOrphanAsset = vi.fn<ScanAssetRepository['deleteOrphanAsset']>();
+    const deleteObject = vi
+      .fn<StorageAdapter['deleteObject']>()
+      .mockRejectedValueOnce(new Error('storage down'));
+
+    const result = await runOrphanAssetCleanupJob({
+      scanAssetRepository: { listOrphanCandidates, deleteOrphanAsset },
+      storage: { deleteObject },
+      clock: () => NOW,
+      graceSeconds: 300,
+      batchSize: 200,
+      logger: createLogger(),
+    });
+
+    expect(deleteOrphanAsset).not.toHaveBeenCalled();
+    expect(result.deletedCount).toBe(0);
+    expect(result.storageDeleteFailureCount).toBe(1);
   });
 
   it('does not count a row as deleted when a concurrent write already moved it', async () => {

@@ -637,7 +637,9 @@ their target paths (`/auth/apple`, `/auth/refresh`) are exclusive to that
 action. The four new policies cannot use the same approach, because their
 routes share a path prefix with sibling routes that must stay unlimited by
 them — `POST /invitations/:token/accept` shares `/invitations/:token` with the
-unauthenticated-quota preview (`GET`) and decline (`POST .../decline`) routes,
+authenticated but unmetered preview (`GET`) and decline (`POST .../decline`)
+routes (both still require the same `requireAuth` Bearer token as every other
+route in this router),
 and `POST /scans/:scanId/assets/upload-sessions` /
 `GET /scans/:scanId/assets/:assetType/download-url` share
 `/scans/:scanId/assets` with the unlimited list-metadata route. Mounting by
@@ -730,22 +732,34 @@ newer state.
 
 The orphan-asset-cleanup job is deliberately **database-driven only**: it
 selects `ScanAsset` rows that are `FAILED`, or `PENDING`/`UPLOADING` past the
-same cutoff, via `ScanAssetRepository.listOrphanCandidates`, best-effort calls
-the new `StorageAdapter.deleteObject` on each row's `storageKey` (a failure is
-logged — without the raw key — and counted, but never aborts the batch or
-blocks the row delete), then hard-deletes the row via
-`ScanAssetRepository.deleteOrphanAsset`, which re-verifies inside its
-transaction that the row still matches the same orphan condition before
-deleting, closing the race against a request that completes the upload
-between selection and delete. It never lists or reconciles the storage bucket
-itself, so it can only ever remove objects the database already knows about.
+same cutoff, via `ScanAssetRepository.listOrphanCandidates`, then for each row
+calls the new `StorageAdapter.deleteObject` on its `storageKey`. Row deletion
+runs **only after** that storage delete succeeds (or the object was already
+gone, which `deleteObject` also treats as success): a storage failure is
+logged — without the raw key — and counted, and the row and its `storageKey`
+are left untouched so the same candidate is retried on the next run. Only
+once the storage object is confirmed gone does the job hard-delete the row
+via `ScanAssetRepository.deleteOrphanAsset`, which conditionally claims the
+row (a guarded delete matching the same status/expiry it was selected under,
+so it never throws if a concurrent run or request already claimed it) before
+writing the sync tombstone, closing the race against a request that
+completes the upload between selection and delete. It never lists or
+reconciles the storage bucket itself, so it can only ever remove objects the
+database already knows about.
+
 Because `StorageAdapter.buildObjectKey(scanId, assetType)` is deterministic
-and `ScanAsset` carries a `@@unique([scanId, assetType])` constraint, hard-deleting
-the row (rather than soft-deleting it, as every other domain model does) is
-safe: a later upload-session create for the same `(scan, assetType)` simply
-inserts a fresh row with the identical key. A hard delete on a row that was
-ever synced writes a matching `SCAN_ASSET` `DELETE` sync change so a client
-that previously observed the orphaned placeholder learns it disappeared.
+and `ScanAsset` carries a `@@unique([scanId, assetType])` constraint,
+hard-deleting the row (rather than soft-deleting it, as every other domain
+model does) is safe **once the storage object is actually gone**: a later
+upload-session create for the same `(scan, assetType)` simply inserts a fresh
+row with the identical key, so there is no dangling reference and no stale
+bytes left unreachable under a key nothing points to any more. The
+delete-only-after-storage-success ordering above is what guarantees that
+precondition — deleting the row first, before storage confirms the object is
+gone, would discard the only record of that `storageKey` and leak the object
+permanently. A hard delete on a row that was ever synced writes a matching
+`SCAN_ASSET` `DELETE` sync change so a client that previously observed the
+orphaned placeholder learns it disappeared.
 
 All three jobs are idempotent: a repeated run only ever acts on rows that
 still match its selection condition, so rows already transitioned or removed

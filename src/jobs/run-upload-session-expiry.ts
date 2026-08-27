@@ -19,6 +19,7 @@ try {
   await runUploadSessionExpiryJob({
     scanAssetRepository,
     graceSeconds: config.uploadSessionExpiryGraceSeconds,
+    batchSize: config.orphanAssetCleanupBatchSize,
     logger,
   });
   process.exitCode = 0;

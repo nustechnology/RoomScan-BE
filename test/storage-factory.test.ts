@@ -70,6 +70,14 @@ describe('createStorageAdapter', () => {
     expect(adapter).toBeInstanceOf(LocalStorageAdapter);
   });
 
+  it('throws for an unsupported storage provider rather than silently falling back to local', () => {
+    expect(() =>
+      createStorageAdapter(
+        makeConfig({ storageProvider: 'unsupported' as unknown as AppConfig['storageProvider'] }),
+      ),
+    ).toThrow('Unsupported STORAGE_PROVIDER');
+  });
+
   it('builds a MinioStorageAdapter for the minio provider', () => {
     const adapter = createStorageAdapter(
       makeConfig({

@@ -19,10 +19,11 @@ describe('runUploadSessionExpiryJob', () => {
       scanAssetRepository: { failStuckUploadSessions },
       clock: () => now,
       graceSeconds: 300,
+      batchSize: 200,
       logger: createLogger(),
     });
 
-    expect(failStuckUploadSessions).toHaveBeenCalledWith(new Date('2026-08-05T09:55:00.000Z'));
+    expect(failStuckUploadSessions).toHaveBeenCalledWith(new Date('2026-08-05T09:55:00.000Z'), 200);
     expect(result.failedCount).toBe(2);
   });
 
@@ -34,6 +35,7 @@ describe('runUploadSessionExpiryJob', () => {
     const result = await runUploadSessionExpiryJob({
       scanAssetRepository: { failStuckUploadSessions },
       graceSeconds: 300,
+      batchSize: 200,
       logger: createLogger(),
     });
 
@@ -49,6 +51,7 @@ describe('runUploadSessionExpiryJob', () => {
       runUploadSessionExpiryJob({
         scanAssetRepository: { failStuckUploadSessions },
         graceSeconds: 300,
+        batchSize: 200,
         logger: createLogger(),
       }),
     ).rejects.toThrow('db unavailable');

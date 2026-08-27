@@ -85,8 +85,12 @@ export interface ScanAssetRepository {
     data: ScanAssetUpdateData,
   ): Promise<ScanAssetRecord | null>;
   listByScan(scanId: string): Promise<ScanAssetRecord[]>;
-  /** Bulk-marks stuck PENDING/UPLOADING sessions past `cutoff` as FAILED. Returns the count affected. */
-  failStuckUploadSessions(cutoff: Date): Promise<number>;
+  /**
+   * Marks stuck PENDING/UPLOADING sessions past `cutoff` as FAILED, processed
+   * in bounded batches of `batchSize` rows at a time. Returns the count
+   * affected.
+   */
+  failStuckUploadSessions(cutoff: Date, batchSize: number): Promise<number>;
   /** Lists FAILED rows, or PENDING/UPLOADING rows past `cutoff`, oldest first. */
   listOrphanCandidates(cutoff: Date, limit: number): Promise<ScanAssetRecord[]>;
   /**
