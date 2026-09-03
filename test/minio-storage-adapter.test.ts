@@ -17,6 +17,7 @@ function createClient() {
   const statObject = vi
     .fn<MinioClient['statObject']>()
     .mockResolvedValue({ size: 1024, metaData: { 'content-type': 'model/gltf-binary' } } as never);
+  const removeObject = vi.fn<MinioClient['removeObject']>().mockResolvedValue(undefined);
 
   const client = {
     bucketExists,
@@ -24,9 +25,18 @@ function createClient() {
     presignedPutObject,
     presignedGetObject,
     statObject,
+    removeObject,
   } as unknown as MinioClient;
 
-  return { client, bucketExists, makeBucket, presignedPutObject, presignedGetObject, statObject };
+  return {
+    client,
+    bucketExists,
+    makeBucket,
+    presignedPutObject,
+    presignedGetObject,
+    statObject,
+    removeObject,
+  };
 }
 
 function createAdapter(client: MinioClient = createClient().client) {
@@ -206,6 +216,33 @@ describe('MinioStorageAdapter', () => {
     await expect(adapter.verifyObject('scans/scan-1/model', EXPECTED)).rejects.toThrow(
       'connection refused',
     );
+  });
+
+  it('deletes an object', async () => {
+    const { client, removeObject } = createClient();
+    const adapter = createAdapter(client);
+
+    await adapter.deleteObject('scans/scan-1/model');
+
+    expect(removeObject).toHaveBeenCalledWith('roomscan-assets', 'scans/scan-1/model');
+  });
+
+  it('treats a missing object as a successful delete', async () => {
+    const { client, removeObject } = createClient();
+    removeObject.mockRejectedValueOnce(
+      Object.assign(new Error('The specified key does not exist.'), { code: 'NoSuchKey' }),
+    );
+    const adapter = createAdapter(client);
+
+    await expect(adapter.deleteObject('scans/scan-1/model')).resolves.toBeUndefined();
+  });
+
+  it('propagates a non-missing-object error from a delete', async () => {
+    const { client, removeObject } = createClient();
+    removeObject.mockRejectedValueOnce(new Error('connection refused'));
+    const adapter = createAdapter(client);
+
+    await expect(adapter.deleteObject('scans/scan-1/model')).rejects.toThrow('connection refused');
   });
 
   it('returns a stable display URL derived from the endpoint', async () => {

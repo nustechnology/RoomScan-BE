@@ -54,4 +54,10 @@ describe('LocalStorageAdapter', () => {
       }),
     ).resolves.toBe(true);
   });
+
+  it('deletes an object as a no-op since it never persisted bytes', async () => {
+    const adapter = new LocalStorageAdapter();
+
+    await expect(adapter.deleteObject('scans/scan-1/model')).resolves.toBeUndefined();
+  });
 });

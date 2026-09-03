@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, type RequestHandler } from 'express';
 
 import { AppError } from '../../common/errors/app-error.js';
 import {
@@ -71,6 +71,8 @@ export interface ShareRouterDependencies {
   shareLinkService: ShareLinkService;
   accessTokenVerifier: AccessTokenVerifier;
   currentUserRepository: CurrentUserRepository;
+  invitationCreateRateLimiter: RequestHandler;
+  invitationAcceptRateLimiter: RequestHandler;
 }
 
 function mapError(error: unknown): AppError | undefined {
@@ -210,6 +212,8 @@ export function createShareRouter({
   shareLinkService,
   accessTokenVerifier,
   currentUserRepository,
+  invitationCreateRateLimiter,
+  invitationAcceptRateLimiter,
 }: ShareRouterDependencies): Router {
   const router = Router();
   const requireAuth = authenticate(accessTokenVerifier, currentUserRepository);
@@ -217,6 +221,7 @@ export function createShareRouter({
   router.post(
     '/projects/:projectId/invitations',
     requireAuth,
+    invitationCreateRateLimiter,
     validateRequest({
       body: InvitationCreateBodySchema,
       params: ProjectIdParamSchema,
@@ -256,6 +261,7 @@ export function createShareRouter({
   router.post(
     '/scans/:scanId/invitations',
     requireAuth,
+    invitationCreateRateLimiter,
     validateRequest({ body: InvitationCreateBodySchema, params: ScanIdParamSchema }),
     async (request, response, next) => {
       try {
@@ -321,6 +327,7 @@ export function createShareRouter({
   router.post(
     '/invitations/:token/accept',
     requireAuth,
+    invitationAcceptRateLimiter,
     validateRequest({ params: InvitationTokenParamSchema }),
     async (request, response, next) => {
       try {

@@ -434,42 +434,52 @@ assets, and the upload flow.
 
 ## Environment variables
 
-| Variable                                                 | Required | Default                                     | Description                                                         |
-| -------------------------------------------------------- | -------- | ------------------------------------------- | ------------------------------------------------------------------- |
-| `NODE_ENV`                                               | No       | `development`                               | `development`, `staging`, `test` or `production`                    |
-| `PORT`                                                   | No       | `3000`                                      | HTTP port inside the process                                        |
-| `DATABASE_URL`                                           | Yes      | —                                           | PostgreSQL connection string                                        |
-| `LOG_LEVEL`                                              | No       | `info`                                      | Pino log level                                                      |
-| `CORS_ORIGIN`                                            | No       | `*`                                         | `*` or comma-separated allowed origins                              |
-| `TRUST_PROXY`                                            | No       | disabled                                    | Trusted hop count or comma-separated proxy IPs/CIDRs                |
-| `RATE_LIMIT_API_WINDOW_SECONDS`                          | No       | `60`                                        | General API rate-limit window                                       |
-| `RATE_LIMIT_API_MAX_REQUESTS`                            | No       | `120`                                       | Requests per IP in the general API window                           |
-| `RATE_LIMIT_APPLE_AUTH_WINDOW_SECONDS`                   | No       | `900`                                       | Apple sign-in rate-limit window                                     |
-| `RATE_LIMIT_APPLE_AUTH_MAX_REQUESTS`                     | No       | `20`                                        | Apple sign-in attempts per IP in its window                         |
-| `RATE_LIMIT_REFRESH_AUTH_WINDOW_SECONDS`                 | No       | `900`                                       | Token refresh rate-limit window                                     |
-| `RATE_LIMIT_REFRESH_AUTH_MAX_REQUESTS`                   | No       | `10`                                        | Token refresh attempts per IP in its window                         |
-| `APPLE_CLIENT_ID`                                        | Yes      | —                                           | Native app bundle identifier used as Apple `aud`                    |
-| `AUTH_ACCESS_TOKEN_SECRET`                               | Yes      | —                                           | HS256 access-token secret, at least 32 characters                   |
-| `AUTH_REFRESH_TOKEN_SECRET`                              | Yes      | —                                           | HS256 refresh-token secret, at least 32 characters                  |
-| `SYNC_CRYPTO_KEY`                                        | Yes      | —                                           | Stable base64-encoded 32-byte master key for receipts and cursors   |
-| `AUTH_ACCESS_TOKEN_TTL_SECONDS`                          | No       | `3600`                                      | RoomScan access-token lifetime                                      |
-| `AUTH_REFRESH_TOKEN_TTL_SECONDS`                         | No       | `2592000`                                   | RoomScan refresh-token lifetime                                     |
-| `LOCAL_TEST_AUTH_ENABLED`                                | No       | `false`                                     | Enable the seeded login only in `development`                       |
-| `STORAGE_PROVIDER`                                       | No       | `local`                                     | Storage adapter: `local` (dev/test fake) or `minio` (S3-compatible) |
-| `STORAGE_BUCKET` / `STORAGE_REGION` / `STORAGE_ENDPOINT` | No       | ``                                          | MinIO bucket, region, and `host[:port]` endpoint                    |
-| `STORAGE_ACCESS_KEY_ID` / `STORAGE_SECRET_ACCESS_KEY`    | No       | ``                                          | MinIO credentials; required with `STORAGE_PROVIDER=minio`           |
-| `STORAGE_USE_SSL`                                        | No       | `false`                                     | Use HTTPS instead of HTTP for the MinIO endpoint                    |
-| `STORAGE_UPLOAD_URL_TTL_SECONDS`                         | No       | `900`                                       | Signed upload URL lifetime                                          |
-| `STORAGE_DOWNLOAD_URL_TTL_SECONDS`                       | No       | `60`                                        | Signed download URL lifetime                                        |
-| `ASSET_MIN_MODEL_SIZE_BYTES`                             | No       | `0`                                         | Minimum model scan-file size (0 MB)                                 |
-| `ASSET_MAX_MODEL_SIZE_BYTES`                             | No       | `200000000`                                 | Maximum model scan-file size (200 MB)                               |
-| `ASSET_MAX_THUMBNAIL_SIZE_BYTES`                         | No       | `10000000`                                  | Maximum thumbnail asset size                                        |
-| `INVITATION_TTL_SECONDS`                                 | No       | `604800`                                    | Default invitation-link lifetime (7 days)                           |
-| `INVITATION_BASE_URL`                                    | No       | `http://localhost:3000`                     | Client-facing base used to build `invitationUrl` links              |
-| `MAIL_PROVIDER`                                          | No       | `log`                                       | Mail adapter: `log` (dev/test fake) or `smtp`                       |
-| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS`    | No       | ``/ `2525` /`` / ``                         | SMTP connection; required with `MAIL_PROVIDER=smtp`                 |
-| `SMTP_SECURE`                                            | No       | `false`                                     | Use TLS for the SMTP connection                                     |
-| `MAIL_FROM`                                              | No       | `RoomScan App <notifications@roomscan.app>` | Sender address for transactional email                              |
+| Variable                                                 | Required | Default                                     | Description                                                                             |
+| -------------------------------------------------------- | -------- | ------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `NODE_ENV`                                               | No       | `development`                               | `development`, `staging`, `test` or `production`                                        |
+| `PORT`                                                   | No       | `3000`                                      | HTTP port inside the process                                                            |
+| `DATABASE_URL`                                           | Yes      | —                                           | PostgreSQL connection string                                                            |
+| `LOG_LEVEL`                                              | No       | `info`                                      | Pino log level                                                                          |
+| `CORS_ORIGIN`                                            | No       | `*`                                         | `*` or comma-separated allowed origins                                                  |
+| `TRUST_PROXY`                                            | No       | disabled                                    | Trusted hop count or comma-separated proxy IPs/CIDRs                                    |
+| `RATE_LIMIT_API_WINDOW_SECONDS`                          | No       | `60`                                        | General API rate-limit window                                                           |
+| `RATE_LIMIT_API_MAX_REQUESTS`                            | No       | `120`                                       | Requests per IP in the general API window                                               |
+| `RATE_LIMIT_APPLE_AUTH_WINDOW_SECONDS`                   | No       | `900`                                       | Apple sign-in rate-limit window                                                         |
+| `RATE_LIMIT_APPLE_AUTH_MAX_REQUESTS`                     | No       | `20`                                        | Apple sign-in attempts per IP in its window                                             |
+| `RATE_LIMIT_REFRESH_AUTH_WINDOW_SECONDS`                 | No       | `900`                                       | Token refresh rate-limit window                                                         |
+| `RATE_LIMIT_REFRESH_AUTH_MAX_REQUESTS`                   | No       | `10`                                        | Token refresh attempts per IP in its window                                             |
+| `RATE_LIMIT_INVITATION_CREATE_WINDOW_SECONDS`            | No       | `900`                                       | Invitation-creation rate-limit window                                                   |
+| `RATE_LIMIT_INVITATION_CREATE_MAX_REQUESTS`              | No       | `20`                                        | Invitation-creation attempts per IP in its window                                       |
+| `RATE_LIMIT_INVITATION_ACCEPT_WINDOW_SECONDS`            | No       | `300`                                       | Invitation-accept rate-limit window                                                     |
+| `RATE_LIMIT_INVITATION_ACCEPT_MAX_REQUESTS`              | No       | `30`                                        | Invitation-accept attempts per IP in its window                                         |
+| `RATE_LIMIT_UPLOAD_SESSION_CREATE_WINDOW_SECONDS`        | No       | `900`                                       | Upload-session-creation rate-limit window                                               |
+| `RATE_LIMIT_UPLOAD_SESSION_CREATE_MAX_REQUESTS`          | No       | `30`                                        | Upload-session-creation attempts per IP in its window                                   |
+| `RATE_LIMIT_DOWNLOAD_URL_WINDOW_SECONDS`                 | No       | `300`                                       | Download-URL-generation rate-limit window                                               |
+| `RATE_LIMIT_DOWNLOAD_URL_MAX_REQUESTS`                   | No       | `60`                                        | Download-URL-generation attempts per IP in its window                                   |
+| `APPLE_CLIENT_ID`                                        | Yes      | —                                           | Native app bundle identifier used as Apple `aud`                                        |
+| `AUTH_ACCESS_TOKEN_SECRET`                               | Yes      | —                                           | HS256 access-token secret, at least 32 characters                                       |
+| `AUTH_REFRESH_TOKEN_SECRET`                              | Yes      | —                                           | HS256 refresh-token secret, at least 32 characters                                      |
+| `SYNC_CRYPTO_KEY`                                        | Yes      | —                                           | Stable base64-encoded 32-byte master key for receipts and cursors                       |
+| `AUTH_ACCESS_TOKEN_TTL_SECONDS`                          | No       | `3600`                                      | RoomScan access-token lifetime                                                          |
+| `AUTH_REFRESH_TOKEN_TTL_SECONDS`                         | No       | `2592000`                                   | RoomScan refresh-token lifetime                                                         |
+| `LOCAL_TEST_AUTH_ENABLED`                                | No       | `false`                                     | Enable the seeded login only in `development`                                           |
+| `STORAGE_PROVIDER`                                       | No       | `local`                                     | Storage adapter: `local` (dev/test fake) or `minio` (S3-compatible)                     |
+| `STORAGE_BUCKET` / `STORAGE_REGION` / `STORAGE_ENDPOINT` | No       | ``                                          | MinIO bucket, region, and `host[:port]` endpoint                                        |
+| `STORAGE_ACCESS_KEY_ID` / `STORAGE_SECRET_ACCESS_KEY`    | No       | ``                                          | MinIO credentials; required with `STORAGE_PROVIDER=minio`                               |
+| `STORAGE_USE_SSL`                                        | No       | `false`                                     | Use HTTPS instead of HTTP for the MinIO endpoint                                        |
+| `STORAGE_UPLOAD_URL_TTL_SECONDS`                         | No       | `900`                                       | Signed upload URL lifetime                                                              |
+| `STORAGE_DOWNLOAD_URL_TTL_SECONDS`                       | No       | `60`                                        | Signed download URL lifetime                                                            |
+| `ASSET_MIN_MODEL_SIZE_BYTES`                             | No       | `0`                                         | Minimum model scan-file size (0 MB)                                                     |
+| `ASSET_MAX_MODEL_SIZE_BYTES`                             | No       | `200000000`                                 | Maximum model scan-file size (200 MB)                                                   |
+| `ASSET_MAX_THUMBNAIL_SIZE_BYTES`                         | No       | `10000000`                                  | Maximum thumbnail asset size                                                            |
+| `INVITATION_TTL_SECONDS`                                 | No       | `604800`                                    | Default invitation-link lifetime (7 days)                                               |
+| `INVITATION_BASE_URL`                                    | No       | `http://localhost:3000`                     | Client-facing base used to build `invitationUrl` links                                  |
+| `MAIL_PROVIDER`                                          | No       | `log`                                       | Mail adapter: `log` (dev/test fake) or `smtp`                                           |
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS`    | No       | ``/ `2525` /`` / ``                         | SMTP connection; required with `MAIL_PROVIDER=smtp`                                     |
+| `SMTP_SECURE`                                            | No       | `false`                                     | Use TLS for the SMTP connection                                                         |
+| `MAIL_FROM`                                              | No       | `RoomScan App <notifications@roomscan.app>` | Sender address for transactional email                                                  |
+| `UPLOAD_SESSION_EXPIRY_GRACE_SECONDS`                    | No       | `300`                                       | Grace period past `uploadUrlExpiresAt` before the cleanup jobs treat a session as stuck |
+| `ORPHAN_ASSET_CLEANUP_BATCH_SIZE`                        | No       | `200`                                       | Max rows the orphan-asset cleanup job processes per run                                 |
 
 The remaining PostgreSQL, MinIO and `ROOMSCAN_PORT` values in `.env.example`
 configure Docker Compose. The refresh TTL must exceed the access TTL. Replace
@@ -496,6 +506,20 @@ shared by replicas. The current single-instance Compose topology needs no
 additional store. Before deploying behind a reverse proxy, set `TRUST_PROXY` to
 the exact proxy hop count or trusted IP/CIDR list. Never set it to `true`.
 
+Beyond the three process-wide policies above, four narrower policies protect
+specific sensitive actions: creating an invitation (project- or scan-scope),
+accepting an invitation, creating an upload session, and generating a download
+URL. Because these routes share a path prefix with sibling routes that must
+stay unlimited (for example invitation preview/decline, or listing scan
+assets), they are attached directly to their specific route handler rather
+than mounted by path prefix like the three general policies.
+
+Two related settings control the cleanup jobs described below:
+`UPLOAD_SESSION_EXPIRY_GRACE_SECONDS` is the grace period added past a
+session's `uploadUrlExpiresAt` before it is treated as stuck, and
+`ORPHAN_ASSET_CLEANUP_BATCH_SIZE` bounds how many rows one cleanup run
+processes.
+
 Invitation email follows the same pattern: `MAIL_PROVIDER=log` (the default)
 writes messages to the application log and is only allowed in development and
 test, while `MAIL_PROVIDER=smtp` sends through SMTP (for example the Mailtrap
@@ -508,24 +532,51 @@ send is logged and never fails the invitation request.
 
 ## Project scripts
 
-| Command                             | Description                                                               |
-| ----------------------------------- | ------------------------------------------------------------------------- |
-| `yarn dev`                          | Run the API with TSX watch mode                                           |
-| `yarn build`                        | Generate Prisma Client and compile production JavaScript                  |
-| `yarn start`                        | Run the compiled API                                                      |
-| `yarn lint` / `yarn lint:fix`       | Check or fix lint errors                                                  |
-| `yarn format` / `yarn format:check` | Write or verify Prettier formatting                                       |
-| `yarn typecheck`                    | Run strict TypeScript checks without emitting                             |
-| `yarn test`                         | Run Vitest in watch mode                                                  |
-| `yarn test:run`                     | Run unit/API tests once                                                   |
-| `yarn test:coverage`                | Run tests and enforce coverage thresholds                                 |
-| `yarn validate`                     | Run the complete local pre-commit quality gate                            |
-| `yarn prisma:generate`              | Regenerate the ignored Prisma Client                                      |
-| `yarn prisma:migrate:dev`           | Create/apply a development migration                                      |
-| `yarn prisma:migrate:deploy`        | Apply committed migrations                                                |
-| `yarn prisma:migrate:reset`         | Reset the database with Prisma migrations (development only)              |
-| `yarn prisma:studio`                | Open Prisma Studio                                                        |
-| `yarn seed:local`                   | Create or refresh the development-only login user and demo projects/scans |
+| Command                                                                                                           | Description                                                                 |
+| ----------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `yarn dev`                                                                                                        | Run the API with TSX watch mode                                             |
+| `yarn build`                                                                                                      | Generate Prisma Client and compile production JavaScript                    |
+| `yarn start`                                                                                                      | Run the compiled API                                                        |
+| `yarn lint` / `yarn lint:fix`                                                                                     | Check or fix lint errors                                                    |
+| `yarn format` / `yarn format:check`                                                                               | Write or verify Prettier formatting                                         |
+| `yarn typecheck`                                                                                                  | Run strict TypeScript checks without emitting                               |
+| `yarn test`                                                                                                       | Run Vitest in watch mode                                                    |
+| `yarn test:run`                                                                                                   | Run unit/API tests once                                                     |
+| `yarn test:coverage`                                                                                              | Run tests and enforce coverage thresholds                                   |
+| `yarn validate`                                                                                                   | Run the complete local pre-commit quality gate                              |
+| `yarn prisma:generate`                                                                                            | Regenerate the ignored Prisma Client                                        |
+| `yarn prisma:migrate:dev`                                                                                         | Create/apply a development migration                                        |
+| `yarn prisma:migrate:deploy`                                                                                      | Apply committed migrations                                                  |
+| `yarn prisma:migrate:reset`                                                                                       | Reset the database with Prisma migrations (development only)                |
+| `yarn prisma:studio`                                                                                              | Open Prisma Studio                                                          |
+| `yarn seed:local`                                                                                                 | Create or refresh the development-only login user and demo projects/scans   |
+| `yarn jobs:expire-invitations`                                                                                    | Run the invitation-expiry cleanup job once against the compiled build       |
+| `yarn jobs:expire-upload-sessions`                                                                                | Run the upload-session-expiry cleanup job once against the compiled build   |
+| `yarn jobs:cleanup-orphan-assets`                                                                                 | Run the orphan-asset cleanup job once against the compiled build            |
+| `yarn dev:jobs:expire-invitations`, `yarn dev:jobs:expire-upload-sessions`, `yarn dev:jobs:cleanup-orphan-assets` | Run the same jobs from source with TSX, for local iteration without a build |
+
+Each cleanup job is a standalone script (`src/jobs/run-*.ts`, compiled to
+`dist/jobs/run-*.js`): it loads configuration, connects Prisma, runs one pass,
+disconnects, and exits non-zero on failure so an external scheduler (host
+cron, a Kubernetes CronJob, CI) can alert. There is no built-in scheduler or
+internal HTTP endpoint; an operator invokes the script on whatever cadence
+they choose. Each job is idempotent — rows that no longer match its selection
+criteria are simply left untouched on a re-run:
+
+- `jobs:expire-invitations` bulk-transitions `PENDING` invitations past
+  `expiresAt` to `REVOKED`, mirroring the same transition the API already
+  performs lazily when a new invitation collides with a stale pending one.
+- `jobs:expire-upload-sessions` marks `PENDING`/`UPLOADING` scan-asset upload
+  sessions `FAILED` once `uploadUrlExpiresAt` plus
+  `UPLOAD_SESSION_EXPIRY_GRACE_SECONDS` has passed, guarded so a session a
+  client completes or fails concurrently is left alone.
+- `jobs:cleanup-orphan-assets` finds `FAILED` or stuck scan-asset rows and, for
+  each, deletes its storage object first; the row (and its `storageKey`) is
+  only hard-deleted once that storage delete succeeds. A storage delete
+  failure is logged and counted, and the row is left in place so the same
+  candidate is retried on a later run — it is never removed while its object
+  might still exist. It only acts on rows already known to the database; it
+  never lists or reconciles the storage bucket directly.
 
 ## Quality gates
 

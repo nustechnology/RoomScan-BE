@@ -18,9 +18,7 @@ import { PrismaNoteRepository } from './infrastructure/database/prisma-note-repo
 import { PrismaShareRepository } from './infrastructure/database/prisma-share-repository.js';
 import { PrismaSharedProjectsRepository } from './infrastructure/database/prisma-shared-projects-repository.js';
 import { PrismaSharedScansRepository } from './infrastructure/database/prisma-shared-scans-repository.js';
-import { LocalStorageAdapter } from './infrastructure/storage/local-storage-adapter.js';
-import { MinioStorageAdapter } from './infrastructure/storage/minio-storage-adapter.js';
-import type { StorageAdapter } from './infrastructure/storage/storage.types.js';
+import { createStorageAdapter } from './infrastructure/storage/storage-factory.js';
 import { LogMailer } from './infrastructure/mail/log-mailer.js';
 import { SmtpMailer, createNodemailerTransport } from './infrastructure/mail/smtp-mailer.js';
 import type { Mailer } from './infrastructure/mail/mailer.types.js';
@@ -58,22 +56,7 @@ const shareRepository = new PrismaShareRepository(prismaClient, idempotency);
 const sharedProjectsRepository = new PrismaSharedProjectsRepository(prismaClient);
 const sharedScansRepository = new PrismaSharedScansRepository(prismaClient);
 const syncRepository = new PrismaSyncRepository(prismaClient);
-function createStorageAdapter(): StorageAdapter {
-  if (config.storageProvider === 'minio') {
-    return new MinioStorageAdapter({
-      bucket: config.storageBucket,
-      endPoint: config.storageEndpoint,
-      accessKey: config.storageAccessKeyId,
-      secretKey: config.storageSecretAccessKey,
-      useSSL: config.storageUseSsl,
-      publicEndPoint: config.storagePublicEndpoint,
-      publicUseSSL: config.storagePublicUseSsl,
-      ...(config.storageRegion === '' ? {} : { region: config.storageRegion }),
-    });
-  }
-  return new LocalStorageAdapter();
-}
-const storageAdapter = createStorageAdapter();
+const storageAdapter = createStorageAdapter(config);
 function createMailer(): Mailer {
   if (config.mailProvider === 'smtp') {
     return new SmtpMailer({

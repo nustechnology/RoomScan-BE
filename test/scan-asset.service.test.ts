@@ -68,13 +68,29 @@ function createHarness(options: { managesSyncRollups?: boolean; minModelSizeByte
     .fn<ScanAssetRepository['create']>()
     .mockResolvedValue({ record: createAssetRecord(), created: true });
   const update = vi.fn<ScanAssetRepository['update']>().mockResolvedValue(createAssetRecord());
+  const updateGuarded = vi
+    .fn<ScanAssetRepository['updateGuarded']>()
+    .mockResolvedValue(createAssetRecord());
   const listByScan = vi.fn<ScanAssetRepository['listByScan']>().mockResolvedValue([]);
+  const failStuckUploadSessions = vi
+    .fn<ScanAssetRepository['failStuckUploadSessions']>()
+    .mockResolvedValue(0);
+  const listOrphanCandidates = vi
+    .fn<ScanAssetRepository['listOrphanCandidates']>()
+    .mockResolvedValue([]);
+  const deleteOrphanAsset = vi
+    .fn<ScanAssetRepository['deleteOrphanAsset']>()
+    .mockResolvedValue(true);
   const assetRepository: ScanAssetRepository = {
     findById,
     findByScanAndType,
     create,
     update,
+    updateGuarded,
     listByScan,
+    failStuckUploadSessions,
+    listOrphanCandidates,
+    deleteOrphanAsset,
     ...(options.managesSyncRollups === undefined ? {} : { managesSyncRollups: true }),
   };
 
@@ -108,6 +124,7 @@ function createHarness(options: { managesSyncRollups?: boolean; minModelSizeByte
   const createDisplayUrl = vi
     .fn<StorageAdapter['createDisplayUrl']>()
     .mockResolvedValue('http://storage/thumbnail');
+  const deleteObject = vi.fn<StorageAdapter['deleteObject']>().mockResolvedValue(undefined);
   const storage: StorageAdapter = {
     provider: 'local',
     buildObjectKey,
@@ -115,6 +132,7 @@ function createHarness(options: { managesSyncRollups?: boolean; minModelSizeByte
     createDownloadUrl,
     verifyObject,
     createDisplayUrl,
+    deleteObject,
   };
 
   const service = new ScanAssetService({
@@ -142,10 +160,15 @@ function createHarness(options: { managesSyncRollups?: boolean; minModelSizeByte
     listByScan,
     findAccessRole,
     scanFindAccessRole,
+    updateGuarded,
+    failStuckUploadSessions,
+    listOrphanCandidates,
+    deleteOrphanAsset,
     createUploadUrl,
     createDownloadUrl,
     verifyObject,
     createDisplayUrl,
+    deleteObject,
     service,
   };
 }
@@ -321,11 +344,11 @@ describe('ScanAssetService', () => {
   });
 
   it('completes a thumbnail upload and persists its display URL on the scan', async () => {
-    const { service, findById, update, updateThumbnail, createDisplayUrl } = createHarness();
+    const { service, findById, updateGuarded, updateThumbnail, createDisplayUrl } = createHarness();
     findById.mockResolvedValueOnce(
       createAssetRecord({ assetType: 'THUMBNAIL', storageKey: `scans/${SCAN_ID}/thumbnail` }),
     );
-    update.mockResolvedValueOnce(
+    updateGuarded.mockResolvedValueOnce(
       createAssetRecord({
         assetType: 'THUMBNAIL',
         storageKey: `scans/${SCAN_ID}/thumbnail`,
@@ -343,13 +366,13 @@ describe('ScanAssetService', () => {
   });
 
   it('persists the thumbnail display URL inside the asset update transaction', async () => {
-    const { service, findById, update, updateThumbnail, createDisplayUrl } = createHarness({
+    const { service, findById, updateGuarded, updateThumbnail, createDisplayUrl } = createHarness({
       managesSyncRollups: true,
     });
     findById.mockResolvedValueOnce(
       createAssetRecord({ assetType: 'THUMBNAIL', storageKey: `scans/${SCAN_ID}/thumbnail` }),
     );
-    update.mockResolvedValueOnce(
+    updateGuarded.mockResolvedValueOnce(
       createAssetRecord({
         assetType: 'THUMBNAIL',
         status: 'UPLOADED',
@@ -362,8 +385,9 @@ describe('ScanAssetService', () => {
 
     expect(result.status).toBe('UPLOADED');
     expect(createDisplayUrl).toHaveBeenCalledWith(`scans/${SCAN_ID}/thumbnail`);
-    expect(update).toHaveBeenCalledWith(
+    expect(updateGuarded).toHaveBeenCalledWith(
       ASSET_ID,
+      ['PENDING', 'UPLOADING'],
       expect.objectContaining({
         status: 'UPLOADED',
         thumbnailUrl: 'http://storage/display/thumbnail',
@@ -373,8 +397,8 @@ describe('ScanAssetService', () => {
   });
 
   it('completes an upload and marks the model synced', async () => {
-    const { service, update, updateAssetStatus, verifyObject } = createHarness();
-    update.mockResolvedValueOnce(createAssetRecord({ status: 'UPLOADED', uploadedAt: NOW }));
+    const { service, updateGuarded, updateAssetStatus, verifyObject } = createHarness();
+    updateGuarded.mockResolvedValueOnce(createAssetRecord({ status: 'UPLOADED', uploadedAt: NOW }));
 
     const result = await service.completeUpload(OWNER_ID, ASSET_ID, {});
 
@@ -398,13 +422,13 @@ describe('ScanAssetService', () => {
   });
 
   it('is idempotent when the upload is already completed', async () => {
-    const { service, findById, update, updateAssetStatus } = createHarness();
+    const { service, findById, updateGuarded, updateAssetStatus } = createHarness();
     findById.mockResolvedValueOnce(createAssetRecord({ status: 'UPLOADED', uploadedAt: NOW }));
 
     const result = await service.completeUpload(OWNER_ID, ASSET_ID, {});
 
     expect(result.status).toBe('UPLOADED');
-    expect(update).not.toHaveBeenCalled();
+    expect(updateGuarded).not.toHaveBeenCalled();
     expect(updateAssetStatus).toHaveBeenCalledWith(SCAN_ID, {
       assetStatus: 'UPLOADED',
       syncStatus: 'SYNCED',
@@ -423,13 +447,53 @@ describe('ScanAssetService', () => {
   });
 
   it('marks the asset failed when the store cannot verify the object', async () => {
-    const { service, update, verifyObject } = createHarness();
+    const { service, updateGuarded, verifyObject } = createHarness();
     verifyObject.mockResolvedValueOnce(false);
 
     await expect(service.completeUpload(OWNER_ID, ASSET_ID, {})).rejects.toBeInstanceOf(
       AssetUploadFailedError,
     );
-    expect(update).toHaveBeenCalledWith(ASSET_ID, { status: 'FAILED' });
+    expect(updateGuarded).toHaveBeenCalledWith(ASSET_ID, ['PENDING', 'UPLOADING'], {
+      status: 'FAILED',
+    });
+  });
+
+  it('throws an expired-session error when completing loses a status race', async () => {
+    const { service, updateGuarded } = createHarness();
+    updateGuarded.mockResolvedValueOnce(null);
+
+    await expect(service.completeUpload(OWNER_ID, ASSET_ID, {})).rejects.toBeInstanceOf(
+      UploadSessionExpiredError,
+    );
+  });
+
+  it('returns uploaded metadata instead of an expired-session error when a concurrent request already completed it', async () => {
+    const { service, findById, updateGuarded, updateAssetStatus } = createHarness();
+    updateGuarded.mockResolvedValueOnce(null);
+    findById
+      .mockResolvedValueOnce(createAssetRecord())
+      .mockResolvedValueOnce(createAssetRecord({ status: 'UPLOADED', uploadedAt: NOW }));
+
+    const result = await service.completeUpload(OWNER_ID, ASSET_ID, {});
+
+    expect(result.status).toBe('UPLOADED');
+    expect(updateAssetStatus).toHaveBeenCalledWith(SCAN_ID, {
+      assetStatus: 'UPLOADED',
+      syncStatus: 'SYNCED',
+    });
+  });
+
+  it('returns uploaded metadata instead of an upload-failed error when verification loses a race to a concurrent completion', async () => {
+    const { service, findById, updateGuarded, verifyObject } = createHarness();
+    verifyObject.mockResolvedValueOnce(false);
+    updateGuarded.mockResolvedValueOnce(null);
+    findById
+      .mockResolvedValueOnce(createAssetRecord())
+      .mockResolvedValueOnce(createAssetRecord({ status: 'UPLOADED', uploadedAt: NOW }));
+
+    const result = await service.completeUpload(OWNER_ID, ASSET_ID, {});
+
+    expect(result.status).toBe('UPLOADED');
   });
 
   it('reports a storage outage as unavailable', async () => {
@@ -502,8 +566,8 @@ describe('ScanAssetService', () => {
   });
 
   it('marks an upload failed as the Owner and reflects it on the scan', async () => {
-    const { service, updateAssetStatus, update } = createHarness();
-    update.mockResolvedValueOnce(createAssetRecord({ status: 'FAILED' }));
+    const { service, updateAssetStatus, updateGuarded } = createHarness();
+    updateGuarded.mockResolvedValueOnce(createAssetRecord({ status: 'FAILED' }));
 
     const result = await service.failUpload(OWNER_ID, ASSET_ID, { reason: 'timeout' });
 
@@ -512,6 +576,19 @@ describe('ScanAssetService', () => {
       assetStatus: 'FAILED',
       syncStatus: 'FAILED',
     });
+  });
+
+  it('returns the current state when failing loses a status race', async () => {
+    const { service, findById, updateGuarded, updateAssetStatus } = createHarness();
+    updateGuarded.mockResolvedValueOnce(null);
+    findById
+      .mockResolvedValueOnce(createAssetRecord())
+      .mockResolvedValueOnce(createAssetRecord({ status: 'FAILED' }));
+
+    const result = await service.failUpload(OWNER_ID, ASSET_ID, { reason: 'timeout' });
+
+    expect(result.status).toBe('FAILED');
+    expect(updateAssetStatus).not.toHaveBeenCalled();
   });
 
   it('throws not-found for a missing upload session', async () => {
@@ -573,8 +650,10 @@ describe('ScanAssetService', () => {
   });
 
   it('skips the scan status update for a model when sync rollups are managed', async () => {
-    const { service, update, updateAssetStatus } = createHarness({ managesSyncRollups: true });
-    update.mockResolvedValueOnce(createAssetRecord({ status: 'UPLOADED', uploadedAt: NOW }));
+    const { service, updateGuarded, updateAssetStatus } = createHarness({
+      managesSyncRollups: true,
+    });
+    updateGuarded.mockResolvedValueOnce(createAssetRecord({ status: 'UPLOADED', uploadedAt: NOW }));
 
     const result = await service.completeUpload(OWNER_ID, ASSET_ID, {});
 
@@ -600,7 +679,7 @@ describe('ScanAssetService', () => {
   });
 
   it('marks a thumbnail failed when verification fails', async () => {
-    const { service, findById, update, verifyObject } = createHarness();
+    const { service, findById, updateGuarded, verifyObject } = createHarness();
     findById.mockResolvedValueOnce(
       createAssetRecord({ assetType: 'THUMBNAIL', storageKey: `scans/${SCAN_ID}/thumbnail` }),
     );
@@ -609,7 +688,9 @@ describe('ScanAssetService', () => {
     await expect(service.completeUpload(OWNER_ID, ASSET_ID, {})).rejects.toBeInstanceOf(
       AssetUploadFailedError,
     );
-    expect(update).toHaveBeenCalledWith(ASSET_ID, { status: 'FAILED' });
+    expect(updateGuarded).toHaveBeenCalledWith(ASSET_ID, ['PENDING', 'UPLOADING'], {
+      status: 'FAILED',
+    });
   });
 
   it('rejects a thumbnail upload exceeding the thumbnail size limit', async () => {
@@ -630,21 +711,24 @@ describe('ScanAssetService', () => {
   });
 
   it('records a client-supplied checksum when completing an upload', async () => {
-    const { service, update } = createHarness();
-    update.mockResolvedValueOnce(createAssetRecord({ status: 'UPLOADED', uploadedAt: NOW }));
+    const { service, updateGuarded } = createHarness();
+    updateGuarded.mockResolvedValueOnce(createAssetRecord({ status: 'UPLOADED', uploadedAt: NOW }));
 
     await service.completeUpload(OWNER_ID, ASSET_ID, { checksum: 'new-checksum' });
 
-    expect(update).toHaveBeenCalledWith(
+    expect(updateGuarded).toHaveBeenCalledWith(
       ASSET_ID,
+      ['PENDING', 'UPLOADING'],
       expect.objectContaining({ checksum: 'new-checksum' }),
     );
   });
 
   it('returns a failed thumbnail without touching the scan', async () => {
-    const { service, findById, update, updateAssetStatus } = createHarness();
+    const { service, findById, updateGuarded, updateAssetStatus } = createHarness();
     findById.mockResolvedValueOnce(createAssetRecord({ assetType: 'THUMBNAIL' }));
-    update.mockResolvedValueOnce(createAssetRecord({ assetType: 'THUMBNAIL', status: 'FAILED' }));
+    updateGuarded.mockResolvedValueOnce(
+      createAssetRecord({ assetType: 'THUMBNAIL', status: 'FAILED' }),
+    );
 
     const result = await service.failUpload(OWNER_ID, ASSET_ID, { reason: 'timeout' });
 
@@ -653,13 +737,13 @@ describe('ScanAssetService', () => {
   });
 
   it('returns the metadata when failing an already-uploaded asset', async () => {
-    const { service, findById, update } = createHarness();
+    const { service, findById, updateGuarded } = createHarness();
     findById.mockResolvedValueOnce(createAssetRecord({ status: 'UPLOADED', uploadedAt: NOW }));
 
     const result = await service.failUpload(OWNER_ID, ASSET_ID, { reason: 'timeout' });
 
     expect(result.status).toBe('UPLOADED');
-    expect(update).not.toHaveBeenCalled();
+    expect(updateGuarded).not.toHaveBeenCalled();
   });
 
   it('returns a download URL for an uploaded thumbnail', async () => {

@@ -36,6 +36,14 @@ const baseConfig: AppConfig = {
   appleAuthRateLimitMaxRequests: 20,
   refreshAuthRateLimitWindowSeconds: 900,
   refreshAuthRateLimitMaxRequests: 10,
+  invitationCreateRateLimitWindowSeconds: 900,
+  invitationCreateRateLimitMaxRequests: 20,
+  invitationAcceptRateLimitWindowSeconds: 300,
+  invitationAcceptRateLimitMaxRequests: 30,
+  uploadSessionCreateRateLimitWindowSeconds: 900,
+  uploadSessionCreateRateLimitMaxRequests: 30,
+  downloadUrlRateLimitWindowSeconds: 300,
+  downloadUrlRateLimitMaxRequests: 60,
   appleClientId: 'com.example.roomscan',
   accessTokenSecret: 'access-secret-that-is-at-least-32-characters',
   refreshTokenSecret: 'refresh-secret-that-is-at-least-32-characters',
@@ -59,6 +67,8 @@ const baseConfig: AppConfig = {
   assetMaxThumbnailSizeBytes: 10_000_000,
   invitationTtlSeconds: 604_800,
   invitationBaseUrl: 'http://localhost:3000',
+  uploadSessionExpiryGraceSeconds: 300,
+  orphanAssetCleanupBatchSize: 200,
   mailProvider: 'log',
   smtpHost: '',
   smtpPort: 2525,
@@ -133,6 +143,7 @@ function createTestApp(overrides: Partial<AppConfig> = {}, stores: RateLimitStor
   } as unknown as NoteService;
   const shareService = {
     createInvitation: vi.fn(),
+    createScanInvitation: vi.fn(),
     previewInvitation: vi.fn(),
     acceptInvitation: vi.fn(),
     declineInvitation: vi.fn(),
@@ -315,6 +326,118 @@ describe('rate limiting', () => {
     await signIn(app, '2001:db8:abcd:1301::1').expect(200);
 
     expect(signInWithApple).toHaveBeenCalledTimes(2);
+  });
+
+  it('enforces the invitation-create policy independently on the scan invitation route', async () => {
+    const { app } = createTestApp({
+      apiRateLimitMaxRequests: 100,
+      invitationCreateRateLimitMaxRequests: 1,
+    });
+    const scanId = '11111111-1111-4111-8111-111111111111';
+
+    await request(app)
+      .post(`/api/v1/scans/${scanId}/invitations`)
+      .set('authorization', 'Bearer token')
+      .send({ recipientEmail: 'viewer@example.com' });
+    const blocked = await request(app)
+      .post(`/api/v1/scans/${scanId}/invitations`)
+      .set('authorization', 'Bearer token')
+      .send({ recipientEmail: 'viewer@example.com' })
+      .expect(429);
+
+    expect(blocked.headers.ratelimit).toContain('"invitation-create"');
+    expect(blocked.headers['retry-after']).toEqual(expect.any(String));
+  });
+
+  it('does not let invitation preview share the invitation-accept quota', async () => {
+    const { app } = createTestApp({
+      apiRateLimitMaxRequests: 100,
+      invitationAcceptRateLimitMaxRequests: 1,
+    });
+    const token = 'A'.repeat(43);
+
+    const first = await request(app)
+      .get(`/api/v1/invitations/${token}`)
+      .set('authorization', 'Bearer token');
+    const second = await request(app)
+      .get(`/api/v1/invitations/${token}`)
+      .set('authorization', 'Bearer token');
+
+    expect(first.status).not.toBe(429);
+    expect(second.status).not.toBe(429);
+  });
+
+  it('enforces the invitation-accept policy on the accept route', async () => {
+    const { app } = createTestApp({
+      apiRateLimitMaxRequests: 100,
+      invitationAcceptRateLimitMaxRequests: 1,
+    });
+    const token = 'A'.repeat(43);
+
+    await request(app)
+      .post(`/api/v1/invitations/${token}/accept`)
+      .set('authorization', 'Bearer token');
+    const blocked = await request(app)
+      .post(`/api/v1/invitations/${token}/accept`)
+      .set('authorization', 'Bearer token')
+      .expect(429);
+
+    expect(blocked.headers.ratelimit).toContain('"invitation-accept"');
+  });
+
+  it('enforces the upload-session-create policy independently from the asset list route', async () => {
+    const { app } = createTestApp({
+      apiRateLimitMaxRequests: 100,
+      uploadSessionCreateRateLimitMaxRequests: 1,
+    });
+    const scanId = '22222222-2222-4222-8222-222222222222';
+    const body = {
+      assetType: 'MODEL',
+      contentType: 'model/gltf-binary',
+      sizeBytes: 1_000_000,
+      checksum: 'abc-checksum',
+      modelVersion: '1',
+    };
+
+    await request(app)
+      .post(`/api/v1/scans/${scanId}/assets/upload-sessions`)
+      .set('authorization', 'Bearer token')
+      .set('idempotency-key', 'test-key-1')
+      .send(body);
+    const blocked = await request(app)
+      .post(`/api/v1/scans/${scanId}/assets/upload-sessions`)
+      .set('authorization', 'Bearer token')
+      .set('idempotency-key', 'test-key-2')
+      .send(body)
+      .expect(429);
+    const listResponse = await request(app)
+      .get(`/api/v1/scans/${scanId}/assets`)
+      .set('authorization', 'Bearer token');
+
+    expect(blocked.headers.ratelimit).toContain('"upload-session-create"');
+    expect(listResponse.status).not.toBe(429);
+  });
+
+  it('enforces the download-url policy independently from the asset list route', async () => {
+    const { app } = createTestApp({
+      apiRateLimitMaxRequests: 100,
+      downloadUrlRateLimitMaxRequests: 1,
+    });
+    const scanId = '33333333-3333-4333-8333-333333333333';
+
+    await request(app)
+      .get(`/api/v1/scans/${scanId}/assets/MODEL/download-url`)
+      .set('authorization', 'Bearer token');
+    const blocked = await request(app)
+      .get(`/api/v1/scans/${scanId}/assets/MODEL/download-url`)
+      .set('authorization', 'Bearer token')
+      .expect(429);
+    const listResponse = await request(app)
+      .get(`/api/v1/scans/${scanId}/assets`)
+      .set('authorization', 'Bearer token');
+
+    expect(blocked.headers.ratelimit).toContain('"download-url"');
+    expect(listResponse.status).not.toBe(429);
   });
 
   it('fails open and logs when the rate-limit store is unavailable', async () => {

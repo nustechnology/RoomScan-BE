@@ -86,6 +86,9 @@ function createService(overrides: Partial<ShareRepository> = {}) {
     createInvitation: vi
       .fn<ShareRepository['createInvitation']>()
       .mockResolvedValue(invitationRecord()),
+    expirePendingInvitations: vi
+      .fn<ShareRepository['expirePendingInvitations']>()
+      .mockResolvedValue(0),
     findByTokenHash: vi
       .fn<ShareRepository['findByTokenHash']>()
       .mockResolvedValue(invitationWithProject()),

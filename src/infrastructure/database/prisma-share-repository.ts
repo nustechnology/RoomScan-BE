@@ -289,6 +289,20 @@ export class PrismaShareRepository implements ShareRepository {
     return scan !== null;
   }
 
+  async expirePendingInvitations(now: Date): Promise<number> {
+    const result = await this.#client.invitation.updateMany({
+      where: {
+        status: InvitationStatus.PENDING,
+        expiresAt: { lte: now },
+      },
+      data: {
+        status: InvitationStatus.REVOKED,
+        revokedAt: now,
+      },
+    });
+    return result.count;
+  }
+
   async createInvitation(data: InvitationCreateData): Promise<InvitationRecord> {
     return await this.#client.$transaction(async (transaction) => {
       const scopeWhere =

@@ -57,4 +57,8 @@ export class LocalStorageAdapter implements StorageAdapter {
   verifyObject(_objectKey: string, _expected: StorageVerifyOptions): Promise<boolean> {
     return Promise.resolve(true);
   }
+
+  deleteObject(_objectKey: string): Promise<void> {
+    return Promise.resolve();
+  }
 }

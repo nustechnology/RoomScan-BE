@@ -1363,4 +1363,29 @@ describe('PrismaShareRepository', () => {
       }),
     );
   });
+
+  describe('expirePendingInvitations', () => {
+    it('bulk-revokes only PENDING invitations past expiresAt', async () => {
+      const { client, invitation } = createClient();
+      const now = new Date('2026-08-05T10:00:00.000Z');
+
+      const count = await new PrismaShareRepository(client).expirePendingInvitations(now);
+
+      expect(invitation.updateMany).toHaveBeenCalledWith({
+        where: { status: 'PENDING', expiresAt: { lte: now } },
+        data: { status: 'REVOKED', revokedAt: now },
+      });
+      expect(count).toBe(1);
+    });
+
+    it('is idempotent: a re-run with nothing left to expire returns zero', async () => {
+      const { client, invitation } = createClient();
+      invitation.updateMany.mockResolvedValueOnce({ count: 0 });
+      const now = new Date('2026-08-05T10:00:00.000Z');
+
+      const count = await new PrismaShareRepository(client).expirePendingInvitations(now);
+
+      expect(count).toBe(0);
+    });
+  });
 });

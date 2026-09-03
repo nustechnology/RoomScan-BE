@@ -57,11 +57,16 @@ function createClient() {
     findFirst: vi.fn().mockResolvedValue(createAssetRow()),
     create: vi.fn().mockResolvedValue(createAssetRow()),
     update: vi.fn().mockResolvedValue(createAssetRow()),
+    updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+    deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
     findMany: vi.fn().mockResolvedValue([createAssetRow()]),
   };
   const client = {
     scanAsset,
-    $transaction: vi.fn(),
+    $transaction: vi.fn(async (operation: unknown) => {
+      if (typeof operation !== 'function') return undefined;
+      return (operation as (transaction: unknown) => Promise<unknown>)({ scanAsset });
+    }),
   } as unknown as Pick<PrismaClient, 'scanAsset' | '$transaction'>;
 
   return { client, scanAsset };
@@ -601,5 +606,362 @@ describe('PrismaScanAssetRepository', () => {
       select: activeScanAssetSelect,
     });
     expect(result).toHaveLength(1);
+  });
+
+  describe('updateGuarded', () => {
+    it('applies the update when the current status matches', async () => {
+      const { client, scanAsset } = createClient();
+      const repository = new PrismaScanAssetRepository(client);
+
+      const result = await repository.updateGuarded(ASSET_ID, ['PENDING', 'UPLOADING'], {
+        status: 'FAILED',
+      });
+
+      expect(scanAsset.updateMany).toHaveBeenCalledWith({
+        where: { id: ASSET_ID, status: { in: ['PENDING', 'UPLOADING'] } },
+        data: { status: 'FAILED' },
+      });
+      expect(scanAsset.findUnique).toHaveBeenCalledWith({
+        where: { id: ASSET_ID },
+        select: scanAssetSelect,
+      });
+      expect(result?.id).toBe(ASSET_ID);
+    });
+
+    it('returns null when the current status no longer matches', async () => {
+      const { client, scanAsset } = createClient();
+      scanAsset.updateMany.mockResolvedValueOnce({ count: 0 });
+      const repository = new PrismaScanAssetRepository(client);
+
+      const result = await repository.updateGuarded(ASSET_ID, ['PENDING', 'UPLOADING'], {
+        status: 'FAILED',
+      });
+
+      expect(scanAsset.findUnique).not.toHaveBeenCalled();
+      expect(result).toBeNull();
+    });
+
+    it('applies a guarded update and rolls up the scan when idempotency is configured', async () => {
+      const scanAssetUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
+      const scanAssetFindUniqueOrThrow = vi
+        .fn()
+        .mockResolvedValue(createAssetRow({ revision: 2, deletedAt: null }));
+      const scanFindFirst = vi.fn().mockResolvedValue({ projectId: 'project-id' });
+      const scanUpdate = vi.fn().mockResolvedValue({});
+      const projectUpdate = vi.fn().mockResolvedValue({});
+      const tx = {
+        scanAsset: {
+          updateMany: scanAssetUpdateMany,
+          findUniqueOrThrow: scanAssetFindUniqueOrThrow,
+        },
+        scan: { findFirst: scanFindFirst, update: scanUpdate },
+        project: { update: projectUpdate },
+      };
+      const $transaction = vi.fn(async (operation: unknown) => {
+        return (operation as (t: unknown) => Promise<unknown>)(tx);
+      });
+      const client = {
+        scanAsset: {},
+        $transaction,
+      } as unknown as Pick<PrismaClient, 'scanAsset' | '$transaction'>;
+      const repository = new PrismaScanAssetRepository(client, {} as PrismaIdempotencyExecutor);
+
+      const result = await repository.updateGuarded(ASSET_ID, ['PENDING', 'UPLOADING'], {
+        status: 'FAILED',
+      });
+
+      expect(scanAssetUpdateMany).toHaveBeenCalledWith({
+        where: { id: ASSET_ID, status: { in: ['PENDING', 'UPLOADING'] } },
+        data: { status: 'FAILED', revision: { increment: 1 }, updatedAt: expect.any(Date) as Date },
+      });
+      expect(scanUpdate).toHaveBeenCalledWith({
+        where: { id: SCAN_ID },
+        data: { updatedAt: expect.any(Date) as Date },
+      });
+      expect(result?.revision).toBe(2);
+    });
+
+    it('returns null inside a transaction when a concurrent writer already moved the row', async () => {
+      const scanAssetUpdateMany = vi.fn().mockResolvedValue({ count: 0 });
+      const scanAssetFindUniqueOrThrow = vi.fn();
+      const tx = {
+        scanAsset: {
+          updateMany: scanAssetUpdateMany,
+          findUniqueOrThrow: scanAssetFindUniqueOrThrow,
+        },
+      };
+      const $transaction = vi.fn(async (operation: unknown) => {
+        return (operation as (t: unknown) => Promise<unknown>)(tx);
+      });
+      const client = {
+        scanAsset: {},
+        $transaction,
+      } as unknown as Pick<PrismaClient, 'scanAsset' | '$transaction'>;
+      const repository = new PrismaScanAssetRepository(client, {} as PrismaIdempotencyExecutor);
+
+      const result = await repository.updateGuarded(ASSET_ID, ['PENDING', 'UPLOADING'], {
+        status: 'FAILED',
+      });
+
+      expect(scanAssetFindUniqueOrThrow).not.toHaveBeenCalled();
+      expect(result).toBeNull();
+    });
+  });
+
+  describe('failStuckUploadSessions', () => {
+    it('bulk-fails stuck sessions past the cutoff when idempotency is not configured', async () => {
+      const { client, scanAsset } = createClient();
+      const repository = new PrismaScanAssetRepository(client);
+      const cutoff = new Date('2026-07-29T09:00:00.000Z');
+
+      const count = await repository.failStuckUploadSessions(cutoff, 200);
+
+      expect(scanAsset.updateMany).toHaveBeenCalledWith({
+        where: {
+          status: { in: ['PENDING', 'UPLOADING'] },
+          uploadUrlExpiresAt: { not: null, lte: cutoff },
+        },
+        data: { status: 'FAILED' },
+      });
+      expect(count).toBe(1);
+    });
+
+    it('guards each candidate individually when idempotency is configured', async () => {
+      const cutoff = new Date('2026-07-29T09:00:00.000Z');
+      const { client, scanAsset } = createClient();
+      scanAsset.findMany.mockResolvedValueOnce([{ id: ASSET_ID }, { id: 'other-id' }]);
+      const repository = new PrismaScanAssetRepository(client, {} as PrismaIdempotencyExecutor);
+      const guardedSpy = vi
+        .spyOn(repository, 'updateGuarded')
+        .mockResolvedValueOnce(createAssetRow() as never)
+        .mockResolvedValueOnce(null);
+
+      const count = await repository.failStuckUploadSessions(cutoff, 200);
+
+      expect(scanAsset.findMany).toHaveBeenCalledWith({
+        where: {
+          deletedAt: null,
+          status: { in: ['PENDING', 'UPLOADING'] },
+          uploadUrlExpiresAt: { not: null, lte: cutoff },
+        },
+        orderBy: { id: 'asc' },
+        take: 200,
+        select: { id: true },
+      });
+      expect(guardedSpy).toHaveBeenCalledTimes(2);
+      expect(guardedSpy).toHaveBeenCalledWith(ASSET_ID, ['PENDING', 'UPLOADING'], {
+        status: 'FAILED',
+      });
+      expect(count).toBe(1);
+    });
+
+    it('repeats the query/update cycle across multiple full batches', async () => {
+      const cutoff = new Date('2026-07-29T09:00:00.000Z');
+      const { client, scanAsset } = createClient();
+      scanAsset.findMany
+        .mockResolvedValueOnce([{ id: 'asset-1' }, { id: 'asset-2' }])
+        .mockResolvedValueOnce([{ id: 'asset-3' }]);
+      const repository = new PrismaScanAssetRepository(client, {} as PrismaIdempotencyExecutor);
+      const guardedSpy = vi
+        .spyOn(repository, 'updateGuarded')
+        .mockResolvedValue(createAssetRow() as never);
+
+      const count = await repository.failStuckUploadSessions(cutoff, 2);
+
+      expect(scanAsset.findMany).toHaveBeenCalledTimes(2);
+      expect(guardedSpy).toHaveBeenCalledTimes(3);
+      expect(count).toBe(3);
+    });
+  });
+
+  describe('listOrphanCandidates', () => {
+    it('lists FAILED and stuck rows oldest-first, bounded by the limit', async () => {
+      const { client, scanAsset } = createClient();
+      const repository = new PrismaScanAssetRepository(client);
+      const cutoff = new Date('2026-07-29T09:00:00.000Z');
+
+      const result = await repository.listOrphanCandidates(cutoff, 200);
+
+      expect(scanAsset.findMany).toHaveBeenCalledWith({
+        where: {
+          OR: [
+            { status: 'FAILED' },
+            {
+              status: { in: ['PENDING', 'UPLOADING'] },
+              uploadUrlExpiresAt: { not: null, lte: cutoff },
+            },
+          ],
+        },
+        orderBy: [{ updatedAt: 'asc' }, { id: 'asc' }],
+        take: 200,
+        select: scanAssetSelect,
+      });
+      expect(result).toHaveLength(1);
+    });
+
+    it('filters out soft-deleted rows when idempotency is configured', async () => {
+      const scanAsset = {
+        findMany: vi.fn().mockResolvedValue([createAssetRow({ revision: 1, deletedAt: null })]),
+      };
+      const client = {
+        scanAsset,
+        $transaction: vi.fn(),
+      } as unknown as Pick<PrismaClient, 'scanAsset' | '$transaction'>;
+      const repository = new PrismaScanAssetRepository(client, {} as PrismaIdempotencyExecutor);
+      const cutoff = new Date('2026-07-29T09:00:00.000Z');
+
+      await repository.listOrphanCandidates(cutoff, 50);
+
+      expect(scanAsset.findMany).toHaveBeenCalledWith({
+        where: {
+          deletedAt: null,
+          OR: [
+            { status: 'FAILED' },
+            {
+              status: { in: ['PENDING', 'UPLOADING'] },
+              uploadUrlExpiresAt: { not: null, lte: cutoff },
+            },
+          ],
+        },
+        orderBy: [{ updatedAt: 'asc' }, { id: 'asc' }],
+        take: 50,
+        select: activeScanAssetSelect,
+      });
+    });
+  });
+
+  describe('deleteOrphanAsset', () => {
+    it('hard-deletes a matching row when idempotency is not configured', async () => {
+      const { client, scanAsset } = createClient();
+      const repository = new PrismaScanAssetRepository(client);
+
+      const result = await repository.deleteOrphanAsset(ASSET_ID, {
+        status: 'FAILED',
+        uploadUrlExpiresAt: null,
+      });
+
+      expect(scanAsset.deleteMany).toHaveBeenCalledWith({
+        where: { id: ASSET_ID, status: 'FAILED', uploadUrlExpiresAt: null },
+      });
+      expect(result).toBe(true);
+    });
+
+    it('returns false when no row matches in legacy mode', async () => {
+      const { client, scanAsset } = createClient();
+      scanAsset.deleteMany.mockResolvedValueOnce({ count: 0 });
+      const repository = new PrismaScanAssetRepository(client);
+
+      const result = await repository.deleteOrphanAsset(ASSET_ID, {
+        status: 'FAILED',
+        uploadUrlExpiresAt: null,
+      });
+
+      expect(result).toBe(false);
+    });
+
+    it('re-verifies the orphan condition, atomically claims the row, writes a delete change, and rolls up the scan', async () => {
+      const scanAssetFindFirst = vi.fn().mockResolvedValue({
+        id: ASSET_ID,
+        scanId: SCAN_ID,
+        revision: 3,
+        scan: { projectId: 'project-id', project: { ownerId: 'owner-id' } },
+      });
+      const scanAssetDeleteMany = vi.fn().mockResolvedValue({ count: 1 });
+      const scanFindFirst = vi.fn().mockResolvedValue({ projectId: 'project-id' });
+      const scanUpdate = vi.fn().mockResolvedValue({});
+      const projectUpdate = vi.fn().mockResolvedValue({});
+      const tx = {
+        scanAsset: { findFirst: scanAssetFindFirst, deleteMany: scanAssetDeleteMany },
+        scan: { findFirst: scanFindFirst, update: scanUpdate },
+        project: { update: projectUpdate },
+      };
+      const $transaction = vi.fn(async (operation: unknown) => {
+        return (operation as (t: unknown) => Promise<unknown>)(tx);
+      });
+      const client = {
+        scanAsset: {},
+        $transaction,
+      } as unknown as Pick<PrismaClient, 'scanAsset' | '$transaction'>;
+      const repository = new PrismaScanAssetRepository(client, {} as PrismaIdempotencyExecutor);
+
+      const result = await repository.deleteOrphanAsset(ASSET_ID, {
+        status: 'FAILED',
+        uploadUrlExpiresAt: null,
+      });
+
+      expect(scanAssetFindFirst).toHaveBeenCalledWith({
+        where: { id: ASSET_ID, deletedAt: null, status: 'FAILED', uploadUrlExpiresAt: null },
+        select: {
+          id: true,
+          scanId: true,
+          revision: true,
+          scan: { select: { projectId: true, project: { select: { ownerId: true } } } },
+        },
+      });
+      expect(scanAssetDeleteMany).toHaveBeenCalledWith({
+        where: { id: ASSET_ID, deletedAt: null, status: 'FAILED', uploadUrlExpiresAt: null },
+      });
+      expect(scanUpdate).toHaveBeenCalledWith({
+        where: { id: SCAN_ID },
+        data: { updatedAt: expect.any(Date) as Date },
+      });
+      expect(result).toBe(true);
+    });
+
+    it('aborts without writing a sync change when a concurrent run already claimed the row', async () => {
+      const scanAssetFindFirst = vi.fn().mockResolvedValue({
+        id: ASSET_ID,
+        scanId: SCAN_ID,
+        revision: 3,
+        scan: { projectId: 'project-id', project: { ownerId: 'owner-id' } },
+      });
+      const scanAssetDeleteMany = vi.fn().mockResolvedValue({ count: 0 });
+      const scanUpdate = vi.fn();
+      const tx = {
+        scanAsset: { findFirst: scanAssetFindFirst, deleteMany: scanAssetDeleteMany },
+        scan: { update: scanUpdate },
+      };
+      const $transaction = vi.fn(async (operation: unknown) => {
+        return (operation as (t: unknown) => Promise<unknown>)(tx);
+      });
+      const client = {
+        scanAsset: {},
+        $transaction,
+      } as unknown as Pick<PrismaClient, 'scanAsset' | '$transaction'>;
+      const repository = new PrismaScanAssetRepository(client, {} as PrismaIdempotencyExecutor);
+
+      const result = await repository.deleteOrphanAsset(ASSET_ID, {
+        status: 'FAILED',
+        uploadUrlExpiresAt: null,
+      });
+
+      expect(scanAssetDeleteMany).toHaveBeenCalledOnce();
+      expect(scanUpdate).not.toHaveBeenCalled();
+      expect(result).toBe(false);
+    });
+
+    it('returns false when the row no longer matches the orphan condition inside the transaction', async () => {
+      const scanAssetFindFirst = vi.fn().mockResolvedValue(null);
+      const scanAssetDeleteMany = vi.fn();
+      const tx = {
+        scanAsset: { findFirst: scanAssetFindFirst, deleteMany: scanAssetDeleteMany },
+      };
+      const $transaction = vi.fn(async (operation: unknown) => {
+        return (operation as (t: unknown) => Promise<unknown>)(tx);
+      });
+      const client = {
+        scanAsset: {},
+        $transaction,
+      } as unknown as Pick<PrismaClient, 'scanAsset' | '$transaction'>;
+      const repository = new PrismaScanAssetRepository(client, {} as PrismaIdempotencyExecutor);
+
+      const result = await repository.deleteOrphanAsset(ASSET_ID, {
+        status: 'FAILED',
+        uploadUrlExpiresAt: null,
+      });
+
+      expect(scanAssetDeleteMany).not.toHaveBeenCalled();
+      expect(result).toBe(false);
+    });
   });
 });

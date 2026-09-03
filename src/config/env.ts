@@ -121,6 +121,14 @@ export const environmentSchema = z
     RATE_LIMIT_APPLE_AUTH_MAX_REQUESTS: rateLimitMaxRequestsSchema.default(20),
     RATE_LIMIT_REFRESH_AUTH_WINDOW_SECONDS: rateLimitWindowSecondsSchema.default(900),
     RATE_LIMIT_REFRESH_AUTH_MAX_REQUESTS: rateLimitMaxRequestsSchema.default(10),
+    RATE_LIMIT_INVITATION_CREATE_WINDOW_SECONDS: rateLimitWindowSecondsSchema.default(900),
+    RATE_LIMIT_INVITATION_CREATE_MAX_REQUESTS: rateLimitMaxRequestsSchema.default(20),
+    RATE_LIMIT_INVITATION_ACCEPT_WINDOW_SECONDS: rateLimitWindowSecondsSchema.default(300),
+    RATE_LIMIT_INVITATION_ACCEPT_MAX_REQUESTS: rateLimitMaxRequestsSchema.default(30),
+    RATE_LIMIT_UPLOAD_SESSION_CREATE_WINDOW_SECONDS: rateLimitWindowSecondsSchema.default(900),
+    RATE_LIMIT_UPLOAD_SESSION_CREATE_MAX_REQUESTS: rateLimitMaxRequestsSchema.default(30),
+    RATE_LIMIT_DOWNLOAD_URL_WINDOW_SECONDS: rateLimitWindowSecondsSchema.default(300),
+    RATE_LIMIT_DOWNLOAD_URL_MAX_REQUESTS: rateLimitMaxRequestsSchema.default(60),
     APPLE_CLIENT_ID: z.string().trim().min(1).max(255),
     AUTH_ACCESS_TOKEN_SECRET: z.string().min(32),
     AUTH_REFRESH_TOKEN_SECRET: z.string().min(32),
@@ -156,6 +164,8 @@ export const environmentSchema = z
       .url()
       .default('http://localhost:3000')
       .transform((value) => value.replace(/\/+$/, '')),
+    UPLOAD_SESSION_EXPIRY_GRACE_SECONDS: z.coerce.number().int().positive().default(300),
+    ORPHAN_ASSET_CLEANUP_BATCH_SIZE: z.coerce.number().int().positive().default(200),
     MAIL_PROVIDER: z.enum(['log', 'smtp']).default('log'),
     SMTP_HOST: z.string().trim().default(''),
     SMTP_PORT: z.coerce.number().int().positive().max(65_535).default(2525),
@@ -258,6 +268,14 @@ export interface AppConfig {
   appleAuthRateLimitMaxRequests: number;
   refreshAuthRateLimitWindowSeconds: number;
   refreshAuthRateLimitMaxRequests: number;
+  invitationCreateRateLimitWindowSeconds: number;
+  invitationCreateRateLimitMaxRequests: number;
+  invitationAcceptRateLimitWindowSeconds: number;
+  invitationAcceptRateLimitMaxRequests: number;
+  uploadSessionCreateRateLimitWindowSeconds: number;
+  uploadSessionCreateRateLimitMaxRequests: number;
+  downloadUrlRateLimitWindowSeconds: number;
+  downloadUrlRateLimitMaxRequests: number;
   appleClientId: string;
   accessTokenSecret: string;
   refreshTokenSecret: string;
@@ -281,6 +299,8 @@ export interface AppConfig {
   assetMaxThumbnailSizeBytes: number;
   invitationTtlSeconds: number;
   invitationBaseUrl: string;
+  uploadSessionExpiryGraceSeconds: number;
+  orphanAssetCleanupBatchSize: number;
   mailProvider: 'log' | 'smtp';
   smtpHost: string;
   smtpPort: number;
@@ -312,6 +332,16 @@ export function loadConfig(input: NodeJS.ProcessEnv = process.env): AppConfig {
     appleAuthRateLimitMaxRequests: environment.RATE_LIMIT_APPLE_AUTH_MAX_REQUESTS,
     refreshAuthRateLimitWindowSeconds: environment.RATE_LIMIT_REFRESH_AUTH_WINDOW_SECONDS,
     refreshAuthRateLimitMaxRequests: environment.RATE_LIMIT_REFRESH_AUTH_MAX_REQUESTS,
+    invitationCreateRateLimitWindowSeconds: environment.RATE_LIMIT_INVITATION_CREATE_WINDOW_SECONDS,
+    invitationCreateRateLimitMaxRequests: environment.RATE_LIMIT_INVITATION_CREATE_MAX_REQUESTS,
+    invitationAcceptRateLimitWindowSeconds: environment.RATE_LIMIT_INVITATION_ACCEPT_WINDOW_SECONDS,
+    invitationAcceptRateLimitMaxRequests: environment.RATE_LIMIT_INVITATION_ACCEPT_MAX_REQUESTS,
+    uploadSessionCreateRateLimitWindowSeconds:
+      environment.RATE_LIMIT_UPLOAD_SESSION_CREATE_WINDOW_SECONDS,
+    uploadSessionCreateRateLimitMaxRequests:
+      environment.RATE_LIMIT_UPLOAD_SESSION_CREATE_MAX_REQUESTS,
+    downloadUrlRateLimitWindowSeconds: environment.RATE_LIMIT_DOWNLOAD_URL_WINDOW_SECONDS,
+    downloadUrlRateLimitMaxRequests: environment.RATE_LIMIT_DOWNLOAD_URL_MAX_REQUESTS,
     appleClientId: environment.APPLE_CLIENT_ID,
     accessTokenSecret: environment.AUTH_ACCESS_TOKEN_SECRET,
     refreshTokenSecret: environment.AUTH_REFRESH_TOKEN_SECRET,
@@ -341,6 +371,8 @@ export function loadConfig(input: NodeJS.ProcessEnv = process.env): AppConfig {
     assetMaxThumbnailSizeBytes: environment.ASSET_MAX_THUMBNAIL_SIZE_BYTES,
     invitationTtlSeconds: environment.INVITATION_TTL_SECONDS,
     invitationBaseUrl: environment.INVITATION_BASE_URL,
+    uploadSessionExpiryGraceSeconds: environment.UPLOAD_SESSION_EXPIRY_GRACE_SECONDS,
+    orphanAssetCleanupBatchSize: environment.ORPHAN_ASSET_CLEANUP_BATCH_SIZE,
     mailProvider: environment.MAIL_PROVIDER,
     smtpHost: environment.SMTP_HOST,
     smtpPort: environment.SMTP_PORT,

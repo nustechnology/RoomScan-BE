@@ -194,4 +194,16 @@ export class MinioStorageAdapter implements StorageAdapter {
   createDisplayUrl(objectKey: string): Promise<string> {
     return Promise.resolve(`${this.#displayBaseUrl}/${this.#bucket}/${objectKey}`);
   }
+
+  async deleteObject(objectKey: string): Promise<void> {
+    await this.#ensureBucket();
+    try {
+      await this.#client.removeObject(this.#bucket, objectKey);
+    } catch (error) {
+      if (isObjectNotFound(error)) {
+        return;
+      }
+      throw error;
+    }
+  }
 }

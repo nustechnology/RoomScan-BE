@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, type RequestHandler } from 'express';
 
 import { AppError } from '../../common/errors/app-error.js';
 import {
@@ -46,6 +46,8 @@ export interface ScanAssetRouterDependencies {
   scanAssetService: ScanAssetService;
   accessTokenVerifier: AccessTokenVerifier;
   currentUserRepository: CurrentUserRepository;
+  uploadSessionCreateRateLimiter: RequestHandler;
+  downloadUrlRateLimiter: RequestHandler;
 }
 
 function mapError(error: unknown): AppError | undefined {
@@ -117,6 +119,8 @@ export function createScanAssetRouter({
   scanAssetService,
   accessTokenVerifier,
   currentUserRepository,
+  uploadSessionCreateRateLimiter,
+  downloadUrlRateLimiter,
 }: ScanAssetRouterDependencies): Router {
   const router = Router();
   const requireAuth = authenticate(accessTokenVerifier, currentUserRepository);
@@ -124,6 +128,7 @@ export function createScanAssetRouter({
   router.post(
     '/scans/:scanId/assets/upload-sessions',
     requireAuth,
+    uploadSessionCreateRateLimiter,
     validateRequest({
       body: CreateUploadSessionBodySchema,
       params: ScanIdParamSchema,
@@ -209,6 +214,7 @@ export function createScanAssetRouter({
   router.get(
     '/scans/:scanId/assets/:assetType/download-url',
     requireAuth,
+    downloadUrlRateLimiter,
     validateRequest({ params: ScanIdParamSchema.merge(AssetTypeParamSchema) }),
     async (request, response, next) => {
       try {
