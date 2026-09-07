@@ -389,6 +389,7 @@ export class PrismaScanRepository implements ScanRepository {
     const where = {
       projectId,
       deletedAt: null,
+      ...(options.viewer === true ? { assetStatus: 'UPLOADED' as const } : {}),
     };
     const [rows, total] = await this.#client.$transaction([
       this.#client.scan.findMany({

@@ -375,9 +375,11 @@ emits a self-access tombstone, after which no later project event is visible to
 that Viewer.
 
 `GET /api/v1/sync/status` accepts optional `projectId` and always returns
-`{ "items": [...] }`. Without it, results include every owned or actively
-shared project; with it, an inaccessible project is hidden as
-`404 PROJECT_NOT_FOUND`. Counts classify active scans by required MODEL asset
+`{ "items": [...] }`. Without it, results include every project the current user
+owns (projects shared with them as a Viewer are not included, since a Viewer has
+no upload/pending work to sync); with it, a non-owned or otherwise inaccessible
+project is hidden as `404 PROJECT_NOT_FOUND`. Counts classify active scans by
+required MODEL asset
 lifecycle. `requiredAssetsUploaded` is true only when every active scan has an
 UPLOADED MODEL; it is also true for zero scans. Status priority is `CONFLICT >
 FAILED > SYNCING > PENDING > SYNCED`.
@@ -459,8 +461,12 @@ Project response:
 
 `owner.email` and `owner.displayName` are nullable. An active Viewer receives role `VIEWER` with only
 `canView: true`. `sharedCount` counts active Viewer access records.
-`scanCount` counts active (non-deleted) scans in the project, and `scans` lists
-those scans ordered by newest `createdAt` first with `id`, `name`,
+For the Owner, `scanCount` counts active (non-deleted) scans in the project and
+`scans` lists those scans ordered by newest `createdAt` first. An active Viewer
+sees only the scans that have successfully uploaded a model: for a Viewer,
+`scanCount` counts only active scans with `assetStatus = UPLOADED` and `scans`
+lists only those, so scans stuck in `PENDING`/`UPLOADING`/`FAILED`/`NONE` are
+never exposed to a Viewer. Each listed scan carries `id`, `name`,
 `description`, `thumbnail`, `noteCount`, `assetStatus`, `syncStatus`, and
 `createdAt`. `thumbnail` remains nullable. Project `syncStatus` and
 `lastSyncedAt` are persisted readiness fields; a new zero-scan project starts
@@ -628,7 +634,10 @@ The scan list supports page-based pagination and an allow-listed sort. `page`
 defaults to 1; `limit` defaults to 20 and may not exceed 100. `sort` defaults to
 `createdAt:desc`. Supported values are `createdAt:desc`, `createdAt:asc`,
 `updatedAt:desc`, `updatedAt:asc`, `name:asc`, and `name:desc`. Every order uses
-`id` as its final stable tie-breaker.
+`id` as its final stable tie-breaker. When the current user is an active Viewer,
+the list returns only scans with a successfully uploaded model
+(`assetStatus = UPLOADED`) and the pagination totals reflect that filtered set,
+so a Viewer never sees scans still pending upload here either.
 
 Validation rules:
 
@@ -972,9 +981,11 @@ project-scope invitation preview:
 ```
 
 For a project-scope link, `project` includes the Owner info (`owner.id`, nullable
-`owner.email` and `owner.displayName`), `scanCount` (number of active, non-deleted
-scans), and `thumbnail`
-set to the thumbnail of the project's most recently created scan (nullable). The
+`owner.email` and `owner.displayName`), `scanCount` (number of active scans that
+have successfully uploaded a model, i.e. `assetStatus = UPLOADED` — scans still
+pending upload are not counted so the accept-invite screen shows only what the
+Viewer will actually see), and `thumbnail`
+set to the thumbnail of the project's most recently created uploaded scan (nullable). The
 `owner` and `scanCount` fields are always present for a project-scope link and are
 absent for a scan-scope link, where `project` is `null`.
 
@@ -1253,13 +1264,17 @@ returns `scans`):
 ```
 
 `GET /api/v1/shared-projects/:projectId` additionally returns the project's
-active scans ordered by newest `createdAt` first, with the same `scans` array
+active scans that have successfully uploaded a model (`assetStatus = UPLOADED`),
+ordered by newest `createdAt` first, with the same `scans` array
 shape (`id`, `name`, `description`, `thumbnail`, `noteCount`, `assetStatus`,
-`syncStatus`, `createdAt`) as the canonical project detail. The Shared With Me
+`syncStatus`, `createdAt`) as the canonical project detail. Scans still pending
+upload are never returned to the Viewer. The Shared With Me
 list response omits `scans` to keep each list item lightweight.
 
-`owner.email` and `owner.displayName` are nullable. `scanCount` counts active (non-deleted) scans in the
-project. `thumbnail` is `null` until the thumbnail persistence feature is
+`owner.email` and `owner.displayName` are nullable. `scanCount` counts active
+scans in the project that have successfully uploaded a model (`assetStatus =
+UPLOADED`); scans still pending upload are not counted for the Viewer.
+`thumbnail` is `null` until the thumbnail persistence feature is
 present. `permissions` is always `VIEWER` and read-only; `canView` is `true`
 only while the project is `ACTIVE`. `status` is one of:
 

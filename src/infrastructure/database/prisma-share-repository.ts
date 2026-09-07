@@ -93,6 +93,7 @@ const shareProjectSummarySelect = {
     scans: {
       where: {
         deletedAt: null,
+        assetStatus: AssetStatus.UPLOADED,
       },
       orderBy: {
         createdAt: 'desc',
@@ -107,6 +108,7 @@ const shareProjectSummarySelect = {
         scans: {
           where: {
             deletedAt: null,
+            assetStatus: AssetStatus.UPLOADED,
           },
         },
       },

@@ -385,15 +385,8 @@ export class PrismaSyncRepository implements SyncRepository {
     const projects = await this.#client.project.findMany({
       where: {
         deletedAt: null,
+        ownerId: userId,
         ...(projectId === undefined ? {} : { id: projectId }),
-        OR: [
-          { ownerId: userId },
-          {
-            accesses: {
-              some: { userId, role: 'VIEWER', revokedAt: null, deletedAt: null },
-            },
-          },
-        ],
       },
       orderBy: [{ updatedAt: 'desc' }, { id: 'asc' }],
       select: {

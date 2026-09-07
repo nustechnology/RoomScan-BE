@@ -378,6 +378,45 @@ describe('PrismaScanRepository', () => {
     expect(result.items).toHaveLength(1);
   });
 
+  it('limits a Viewer scan list to scans with an uploaded model', async () => {
+    const { client, scan } = createClient();
+    const repository = new PrismaScanRepository(client);
+
+    await repository.listByProject(PROJECT_ID, {
+      page: 1,
+      limit: 20,
+      sort: 'createdAt:desc',
+      viewer: true,
+    });
+
+    expect(scan.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { projectId: PROJECT_ID, deletedAt: null, assetStatus: 'UPLOADED' },
+      }),
+    );
+    expect(scan.count).toHaveBeenCalledWith({
+      where: { projectId: PROJECT_ID, deletedAt: null, assetStatus: 'UPLOADED' },
+    });
+  });
+
+  it('does not filter a scan list for an Owner', async () => {
+    const { client, scan } = createClient();
+    const repository = new PrismaScanRepository(client);
+
+    await repository.listByProject(PROJECT_ID, {
+      page: 1,
+      limit: 20,
+      sort: 'createdAt:desc',
+      viewer: false,
+    });
+
+    expect(scan.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { projectId: PROJECT_ID, deletedAt: null },
+      }),
+    );
+  });
+
   it('returns the projectId for an existing scan', async () => {
     const { client, scan } = createClient();
     scan.findFirst.mockResolvedValueOnce(createScanRow());

@@ -111,6 +111,7 @@ export interface ScanListOptions {
   page: number;
   limit: number;
   sort: ScanSort;
+  viewer?: boolean;
 }
 
 export interface ScanListResult {

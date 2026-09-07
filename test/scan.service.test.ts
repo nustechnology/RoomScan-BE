@@ -259,6 +259,7 @@ describe('ScanService', () => {
       page: 1,
       limit: 20,
       sort: 'createdAt:desc',
+      viewer: false,
     });
     expect(result.items).toHaveLength(1);
     expect(result.items[0]?.permissions.role).toBe('OWNER');
@@ -277,6 +278,7 @@ describe('ScanService', () => {
       page: 1,
       limit: 20,
       sort: 'createdAt:desc',
+      viewer: true,
     });
     expect(result.items[0]?.permissions.role).toBe('VIEWER');
   });
