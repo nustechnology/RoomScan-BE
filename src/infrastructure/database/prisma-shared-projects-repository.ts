@@ -1,5 +1,5 @@
 import type { PrismaClient } from '../../generated/prisma/client.js';
-import { ProjectRole as PrismaProjectRole } from '../../generated/prisma/enums.js';
+import { AssetStatus, ProjectRole as PrismaProjectRole } from '../../generated/prisma/enums.js';
 import { buildOrderBy, buildSearchWhere, toSkipTake } from '../../common/pagination/pagination.js';
 import type {
   SharedProjectDetailRecord,
@@ -32,6 +32,7 @@ const sharedProjectSelect = {
           scans: {
             where: {
               deletedAt: null,
+              assetStatus: AssetStatus.UPLOADED,
             },
           },
         },
@@ -119,6 +120,7 @@ const sharedProjectDetailSelect = {
       scans: {
         where: {
           deletedAt: null,
+          assetStatus: AssetStatus.UPLOADED,
         },
         orderBy: {
           createdAt: 'desc',

@@ -301,9 +301,23 @@ export class PrismaProjectRepository implements ProjectRepository {
       return null;
     }
 
+    const role = row.ownerId === userId ? 'OWNER' : 'VIEWER';
+
+    if (role === 'VIEWER') {
+      const uploadedScans = row.scans.filter((scan) => scan.assetStatus === 'UPLOADED');
+      return {
+        record: toProjectRecord({
+          ...row,
+          scans: uploadedScans,
+          _count: { ...row._count, scans: uploadedScans.length },
+        }),
+        role,
+      };
+    }
+
     return {
       record: toProjectRecord(row),
-      role: row.ownerId === userId ? 'OWNER' : 'VIEWER',
+      role,
     };
   }
 

@@ -309,6 +309,93 @@ describe('PrismaProjectRepository', () => {
     });
   });
 
+  it('hides scans without an uploaded model from a Viewer detail lookup', async () => {
+    const { client, project } = createClient();
+    project.findFirst.mockResolvedValue({
+      ...createRow(),
+      ownerId: OWNER_ID,
+      _count: { accesses: 1, scans: 2 },
+      scans: [
+        {
+          id: 'f1e2d3c4-a5b6-7890-abcd-ef1234567890',
+          name: 'Living Room',
+          description: null,
+          thumbnail: null,
+          assetStatus: 'UPLOADED',
+          syncStatus: 'SYNCED',
+          createdAt: NOW,
+          _count: { notes: 3 },
+        },
+        {
+          id: 'c0ffee00-0000-4000-8000-000000000001',
+          name: 'Kitchen',
+          description: null,
+          thumbnail: null,
+          assetStatus: 'PENDING',
+          syncStatus: 'PENDING',
+          createdAt: NOW,
+          _count: { notes: 0 },
+        },
+      ],
+    });
+    const repository = new PrismaProjectRepository(client);
+
+    const result = await repository.findByIdForUser(PROJECT_ID, VIEWER_ID);
+
+    expect(result?.role).toBe('VIEWER');
+    expect(result?.record.scanCount).toBe(1);
+    expect(result?.record.scans).toEqual([
+      {
+        id: 'f1e2d3c4-a5b6-7890-abcd-ef1234567890',
+        name: 'Living Room',
+        description: null,
+        thumbnail: null,
+        noteCount: 3,
+        assetStatus: 'UPLOADED',
+        syncStatus: 'SYNCED',
+        createdAt: NOW,
+      },
+    ]);
+  });
+
+  it('keeps all scans visible to the Owner detail lookup even when some are pending', async () => {
+    const { client, project } = createClient();
+    project.findFirst.mockResolvedValue({
+      ...createRow(),
+      ownerId: OWNER_ID,
+      _count: { accesses: 1, scans: 2 },
+      scans: [
+        {
+          id: 'f1e2d3c4-a5b6-7890-abcd-ef1234567890',
+          name: 'Living Room',
+          description: null,
+          thumbnail: null,
+          assetStatus: 'UPLOADED',
+          syncStatus: 'SYNCED',
+          createdAt: NOW,
+          _count: { notes: 3 },
+        },
+        {
+          id: 'c0ffee00-0000-4000-8000-000000000001',
+          name: 'Kitchen',
+          description: null,
+          thumbnail: null,
+          assetStatus: 'PENDING',
+          syncStatus: 'PENDING',
+          createdAt: NOW,
+          _count: { notes: 0 },
+        },
+      ],
+    });
+    const repository = new PrismaProjectRepository(client);
+
+    const result = await repository.findByIdForUser(PROJECT_ID, OWNER_ID);
+
+    expect(result?.role).toBe('OWNER');
+    expect(result?.record.scanCount).toBe(2);
+    expect(result?.record.scans).toHaveLength(2);
+  });
+
   it('recognizes the Owner through the shared access lookup', async () => {
     const { client, project } = createClient();
     project.findFirst.mockResolvedValue({ ownerId: OWNER_ID });

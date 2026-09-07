@@ -176,7 +176,10 @@ export class ScanService {
       throw error;
     }
 
-    const { items, total } = await this.#repository.listByProject(projectId, options);
+    const { items, total } = await this.#repository.listByProject(projectId, {
+      ...options,
+      viewer: role === 'VIEWER',
+    });
 
     return {
       items: items.map((item) => toResult(item, role)),

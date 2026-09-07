@@ -187,6 +187,61 @@ describe('PrismaSharedProjectsRepository', () => {
     );
   });
 
+  it('list counts only scans with an uploaded model for the Viewer', async () => {
+    const { client, projectAccess } = createClient();
+
+    await new PrismaSharedProjectsRepository(client).list(USER_ID, {
+      page: 1,
+      limit: 5,
+      sort: 'updatedAt:desc',
+    });
+
+    const args = projectAccess.findMany.mock.calls[0]?.[0] as {
+      select?: {
+        project?: {
+          select?: { _count?: { select?: { scans?: { where?: unknown } } } };
+        };
+      };
+    };
+    expect(args?.select?.project?.select?._count?.select?.scans?.where).toEqual({
+      deletedAt: null,
+      assetStatus: 'UPLOADED',
+    });
+  });
+
+  it('detail lists only scans with an uploaded model for the Viewer', async () => {
+    const { client, projectAccess } = createClient();
+    projectAccess.findFirst.mockResolvedValue(
+      createAccessRow({
+        project: {
+          ...createAccessRow().project,
+          scans: [
+            {
+              id: 'f1e2d3c4-a5b6-7890-abcd-ef1234567890',
+              name: 'Living Room',
+              description: null,
+              thumbnail: null,
+              assetStatus: 'UPLOADED',
+              syncStatus: 'SYNCED',
+              createdAt: NOW,
+              _count: { notes: 3 },
+            },
+          ],
+        },
+      }),
+    );
+
+    await new PrismaSharedProjectsRepository(client).findSharedForUser(PROJECT_ID, USER_ID);
+
+    const args = projectAccess.findFirst.mock.calls[0]?.[0] as {
+      select?: { project?: { select?: { scans?: { where?: unknown } } } };
+    };
+    expect(args?.select?.project?.select?.scans?.where).toEqual({
+      deletedAt: null,
+      assetStatus: 'UPLOADED',
+    });
+  });
+
   it('findAccessStatus reads the revocation and removal state of the access row', async () => {
     const { client, projectAccess } = createClient();
     projectAccess.findFirst.mockResolvedValue({ revokedAt: NOW, deletedAt: null });

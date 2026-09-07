@@ -354,6 +354,43 @@ describe('PrismaShareRepository', () => {
     );
   });
 
+  it('findByTokenHash counts only uploaded scans in the project summary', async () => {
+    const { client, invitation } = createClient();
+    invitation.findFirst.mockResolvedValue({
+      ...createInvitationRow(),
+      project: {
+        id: PROJECT_ID,
+        name: 'District 2 Apartment',
+        description: null,
+        owner: { id: OWNER_ID, email: 'owner@example.com' },
+        scans: [],
+        _count: { scans: 2 },
+      },
+      scan: null,
+    });
+
+    await new PrismaShareRepository(client).findByTokenHash(TOKEN_HASH);
+
+    const args = invitation.findFirst.mock.calls[0]?.[0] as {
+      select?: {
+        project?: {
+          select?: {
+            scans?: { where?: unknown };
+            _count?: { select?: { scans?: { where?: unknown } } };
+          };
+        };
+      };
+    };
+    expect(args?.select?.project?.select?.scans?.where).toEqual({
+      deletedAt: null,
+      assetStatus: 'UPLOADED',
+    });
+    expect(args?.select?.project?.select?._count?.select?.scans?.where).toEqual({
+      deletedAt: null,
+      assetStatus: 'UPLOADED',
+    });
+  });
+
   it('findByTokenHash returns null for an unknown token', async () => {
     const { client, invitation } = createClient();
     invitation.findFirst.mockResolvedValue(null);

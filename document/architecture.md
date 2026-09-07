@@ -151,7 +151,11 @@ active-owner listing ordered by latest activity. Every project read embeds its
 active scans as lightweight summaries (`id`, `name`, `description`, `thumbnail`,
 `noteCount`, `assetStatus`, `syncStatus`, `createdAt`) ordered newest-first, so
 project list and detail responses carry the scans without a second round trip;
-`scanCount` counts the same non-deleted scans.
+`scanCount` counts the same non-deleted scans. When the project detail is read
+by an active Viewer, only scans with a successfully uploaded model
+(`assetStatus = UPLOADED`) are exposed: pending/uploading/failed scans and the
+count are filtered out, so a Viewer never sees scans that have not finished
+uploading.
 
 Pagination query parsing, the `skip`/`take` and `id`-tiebreaker `orderBy`
 mechanics, and the `{ items, pagination }` response envelope are shared across
@@ -189,7 +193,10 @@ Owner-only updates, and soft deletion. Scans belong to exactly one project
 `ProjectPermissionService`, so it reuses the same Owner/active-Viewer access
 rules as the Project module. Every project-level permission failure is converted
 to `ScanNotFoundError`, so scan endpoints expose the same hidden 404 behavior as
-projects.
+projects. When the current user is an active Viewer, the scan list is filtered to
+scans with a successfully uploaded model (`assetStatus = UPLOADED`) at the
+repository boundary, so the Viewer never sees scans still pending upload and the
+list pagination totals stay consistent with what is shown.
 
 `PrismaScanRepository` performs the `clientMutationId` idempotency check at the
 database boundary scoped to the parent project, backed by the composite
@@ -458,8 +465,10 @@ from existing rows. `ProjectAccess` rows distinguish lifecycle state with two
 independent timestamps: `revokedAt` (set only when the Owner revokes a Viewer)
 and `deletedAt` (set only when the Viewer removes the project from their own
 Shared With Me list). The module reads `ProjectAccess` membership, the `Project`
-row (including `deletedAt` and `updatedAt`), the `owner` relation, and a
-non-deleted scan count. The migration
+row (including `deletedAt` and `updatedAt`), the `owner` relation, and a count
+of non-deleted scans that have successfully uploaded a model
+(`assetStatus = UPLOADED`); the detail also lists only those uploaded scans, so
+a Viewer never sees scans still pending upload. The migration
 that introduced `ProjectAccess.deletedAt` also keeps the access-row list index
 (`userId, deletedAt, revokedAt, projectId`) aligned with the list predicate.
 
