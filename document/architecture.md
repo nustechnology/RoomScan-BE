@@ -430,10 +430,13 @@ prior state (Owner-revoked or Viewer-self-removed) by clearing `revokedAt` and
 
 Revoked (`409 INVITATION_REVOKED`), expired (`409 INVITATION_EXPIRED`), accepted
 (`409 INVITATION_ALREADY_ACCEPTED`), and declined (`409 INVITATION_DECLINED`)
-invitations cannot be accepted, declined, resend, or revoked, and a revoked or
-expired invitation token can no longer be redeemed (it is not reusable);
-revoking an already revoked invitation remains idempotent and returns its
-existing revocation timestamp.
+invitations cannot be accepted, declined, or resent, and a revoked or expired
+invitation token can no longer be redeemed (it is not reusable). An expired
+invitation can still be revoked by its Owner to clean up a stale link (returning
+the normal revoke `200` rather than `409 INVITATION_EXPIRED`); revoking an
+already revoked invitation remains idempotent and returns its existing
+revocation timestamp. Accepted and declined invitations are terminal and cannot
+be revoked.
 
 Preview (`GET /invitations/:token`) requires no authentication and resolves
 either an invitation or a generic share link, returning a discriminated response

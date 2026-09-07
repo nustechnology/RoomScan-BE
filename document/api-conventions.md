@@ -899,7 +899,7 @@ its assets without granting project-level access.
 | `GET`    | `/api/v1/invitations/:token`                           | Preview an invitation or share link; requires authentication      |
 | `POST`   | `/api/v1/invitations/:token/accept`                    | Accept and gain Viewer access; `200`                              |
 | `POST`   | `/api/v1/invitations/:token/decline`                   | Decline an invitation for the current user; `200`                 |
-| `DELETE` | `/api/v1/invitations/:invitationId`                    | Revoke a pending invitation; Owner only; `200`                    |
+| `DELETE` | `/api/v1/invitations/:invitationId`                    | Revoke a pending or expired invitation; Owner only; `200`         |
 | `GET`    | `/api/v1/projects/:projectId/shares`                   | List project pending invitations and accepted Viewers; Owner only |
 | `DELETE` | `/api/v1/projects/:projectId/shares/:userId`           | Revoke project Viewer access; Owner only; `200`                   |
 | `GET`    | `/api/v1/scans/:scanId/shares`                         | List scan pending invitations and accepted Viewers; Owner only    |
@@ -1134,8 +1134,10 @@ INVITATION_ALREADY_SENT`. Re-inviting an email whose earlier invitation is
   again. Previewing, accepting, or declining a per-recipient invitation requires
   the current user's email to match the invited email; otherwise the endpoint
   returns `403 INVITATION_NOT_FOR_USER`.
-- An invitation can be revoked while pending; revocation is idempotent. Expired,
-  accepted, and declined invitations cannot be revoked.
+- An invitation can be revoked while pending or expired; revocation is
+  idempotent. Revoking an expired invitation lets the owner clean up a stale link
+  and returns the normal revoke `200` instead of `409 INVITATION_EXPIRED`.
+  Accepted and declined invitations cannot be revoked.
 - Resend requires a pending, unexpired invitation; it rotates the token and
   re-sends the email. Resend works for both project and scan invitations and
   uses the matching email template.
