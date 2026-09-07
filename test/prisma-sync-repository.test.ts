@@ -71,7 +71,7 @@ describe('PrismaSyncRepository', () => {
     ]);
   });
 
-  it('computes status counts and priority for owned or actively shared projects', async () => {
+  it('computes status counts and priority for projects the user owns', async () => {
     const findMany = vi.fn().mockResolvedValue([
       {
         id: PROJECT_ID,
@@ -98,10 +98,10 @@ describe('PrismaSyncRepository', () => {
     const result = await repository.listStatuses(USER_ID);
 
     const [findArguments] = findMany.mock.calls[0] as unknown as [
-      { where: { deletedAt: unknown; OR: unknown[] } },
+      { where: { deletedAt: unknown; ownerId: unknown } },
     ];
     expect(findArguments.where.deletedAt).toBeNull();
-    expect(findArguments.where.OR).toContainEqual({ ownerId: USER_ID });
+    expect(findArguments.where.ownerId).toBe(USER_ID);
     expect(result[0]).toEqual({
       projectId: PROJECT_ID,
       syncStatus: 'CONFLICT',
@@ -117,6 +117,32 @@ describe('PrismaSyncRepository', () => {
       requiredAssetsUploaded: true,
       lastSyncedAt: NOW.toISOString(),
     });
+  });
+
+  it('scopes status lookup to projects owned by the user, excluding shared ones', async () => {
+    const findMany = vi.fn().mockResolvedValue([
+      {
+        id: PROJECT_ID,
+        lastSyncedAt: null,
+        scans: [{ assets: [{ status: 'UPLOADED' }] }],
+        _count: { syncConflicts: 0 },
+      },
+    ]);
+    const repository = new PrismaSyncRepository({
+      project: { findMany },
+    } as unknown as PrismaClient);
+
+    const result = await repository.listStatuses(USER_ID, PROJECT_ID);
+
+    const [findArguments] = findMany.mock.calls[0] as unknown as [
+      { where: { id: string; ownerId: string; deletedAt: null } },
+    ];
+    expect(findArguments.where).toEqual({
+      deletedAt: null,
+      ownerId: USER_ID,
+      id: PROJECT_ID,
+    });
+    expect(result).toHaveLength(1);
   });
 
   it('acknowledges refresh events, marks a ready project synced, and emits a targeted snapshot', async () => {

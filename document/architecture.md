@@ -315,7 +315,9 @@ ordered by sequence. Cursors are versioned, user-bound payloads authenticated
 with HMAC; cross-user, malformed, or tampered cursors fail closed. Status is
 derived from active MODEL asset lifecycles plus unresolved per-user
 `SyncConflict` rows, with priority `CONFLICT > FAILED > SYNCING > PENDING >
-SYNCED`. A zero-scan project is fully synced.
+SYNCED`. A zero-scan project is fully synced. Status is scoped to projects the
+user owns: projects shared with the user as a Viewer are excluded because a
+Viewer has no upload/pending work of their own to sync.
 
 Selected creates store an encrypted `IdempotencyReceipt` in the same Prisma
 transaction as domain writes, revision roll-ups, and sync events. Scope is

@@ -375,9 +375,11 @@ emits a self-access tombstone, after which no later project event is visible to
 that Viewer.
 
 `GET /api/v1/sync/status` accepts optional `projectId` and always returns
-`{ "items": [...] }`. Without it, results include every owned or actively
-shared project; with it, an inaccessible project is hidden as
-`404 PROJECT_NOT_FOUND`. Counts classify active scans by required MODEL asset
+`{ "items": [...] }`. Without it, results include every project the current user
+owns (projects shared with them as a Viewer are not included, since a Viewer has
+no upload/pending work to sync); with it, a non-owned or otherwise inaccessible
+project is hidden as `404 PROJECT_NOT_FOUND`. Counts classify active scans by
+required MODEL asset
 lifecycle. `requiredAssetsUploaded` is true only when every active scan has an
 UPLOADED MODEL; it is also true for zero scans. Status priority is `CONFLICT >
 FAILED > SYNCING > PENDING > SYNCED`.
