@@ -743,11 +743,6 @@ describe('ShareService.revokeInvitation', () => {
       invitationRecord({ status: 'DECLINED', declinedAt: NOW }),
       InvitationDeclinedError,
     ],
-    [
-      'expired',
-      invitationRecord({ expiresAt: new Date(NOW.getTime() - 1) }),
-      InvitationExpiredError,
-    ],
   ])('rejects revoking an invitation that is %s', async (_label, record, errorClass) => {
     const { service } = createService({
       findInvitationById: vi.fn().mockResolvedValue(record),
@@ -756,6 +751,23 @@ describe('ShareService.revokeInvitation', () => {
     await expect(service.revokeInvitation(OWNER_ID, INVITATION_ID)).rejects.toBeInstanceOf(
       errorClass,
     );
+  });
+
+  it('revokes an invitation that has expired so the owner can clean up stale links', async () => {
+    const { service, mocks } = createService({
+      findInvitationById: vi
+        .fn()
+        .mockResolvedValue(invitationRecord({ expiresAt: new Date(NOW.getTime() - 1) })),
+    });
+
+    const result = await service.revokeInvitation(OWNER_ID, INVITATION_ID);
+
+    expect(result).toEqual({
+      invitationId: INVITATION_ID,
+      status: 'REVOKED',
+      revokedAt: NOW.toISOString(),
+    });
+    expect(mocks.revokeInvitation).toHaveBeenCalledWith(INVITATION_ID, NOW);
   });
 });
 

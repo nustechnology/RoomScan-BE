@@ -325,7 +325,7 @@ shareOpenApiRegistry.registerPath({
   method: 'delete',
   path: '/api/v1/invitations/{invitationId}',
   tags: ['Shares'],
-  summary: 'Revoke a pending invitation link',
+  summary: 'Revoke a pending or expired invitation link',
   security: [{ [bearerAuth.name]: [] }],
   request: {
     params: InvitationIdParamSchema,

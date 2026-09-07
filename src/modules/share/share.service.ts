@@ -774,9 +774,6 @@ export class ShareService {
     if (record.status === 'DECLINED') {
       throw new InvitationDeclinedError();
     }
-    if (record.expiresAt.getTime() <= this.#clock().getTime()) {
-      throw new InvitationExpiredError();
-    }
 
     const now = this.#clock();
     const updated = await this.#repository.revokeInvitation(invitationId, now);
