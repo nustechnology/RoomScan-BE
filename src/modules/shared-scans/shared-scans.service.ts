@@ -32,6 +32,7 @@ function toResult(record: SharedScanRecord): SharedScanResult {
   return {
     id: record.id,
     projectId: record.projectId,
+    project: record.project,
     name: record.name,
     description: record.description,
     thumbnail: record.thumbnail,

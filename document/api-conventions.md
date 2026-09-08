@@ -1393,6 +1393,10 @@ Shared scan item (list and detail share the same shape):
 {
   "id": "a1b2c3d4-e5f6-4890-abcd-ef1234567890",
   "projectId": "11111111-2222-4333-8444-555555555555",
+  "project": {
+    "id": "11111111-2222-4333-8444-555555555555",
+    "name": "District 2 Apartment"
+  },
   "name": "Living Room Scan",
   "description": null,
   "thumbnail": null,
@@ -1416,7 +1420,15 @@ Shared scan item (list and detail share the same shape):
 }
 ```
 
-`creator.email` and `creator.displayName` are nullable. `noteCount` counts notes on the scan. `permissions`
+`creator.email` and `creator.displayName` are nullable. `noteCount` counts active notes on the scan.
+`project` carries the parent project's `id` and `name` and is always present and
+non-nullable, because a scan cannot exist without its project. It is included
+deliberately: scan-level sharing grants no `ProjectAccess`, so a Viewer here
+cannot call `GET /api/v1/projects/:projectId` (it answers
+`404 PROJECT_NOT_FOUND`) and would otherwise hold a `projectId` it can never
+resolve to a name. Sharing a scan therefore also discloses the parent project's
+name to that Viewer. `projectId` is retained alongside `project.id` for
+backward compatibility. `permissions`
 is always `VIEWER` and read-only; `canView` is `true` only while the scan is
 `ACTIVE`. `status` is one of:
 

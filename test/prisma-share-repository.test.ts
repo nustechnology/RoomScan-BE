@@ -391,6 +391,45 @@ describe('PrismaShareRepository', () => {
     });
   });
 
+  it('findByTokenHash returns a scan-scope invitation summary counting only active notes', async () => {
+    const { client, invitation } = createClient();
+    invitation.findFirst.mockResolvedValue({
+      ...createInvitationRow({ projectId: null, scanId: SCAN_ID }),
+      project: null,
+      scan: {
+        id: SCAN_ID,
+        projectId: PROJECT_ID,
+        name: 'Living Room Scan',
+        description: null,
+        thumbnail: 'http://storage.local/thumb/scan1.jpg',
+        creator: { id: OWNER_ID, email: 'owner@example.com' },
+        project: { ownerId: OWNER_ID },
+        _count: { notes: 3 },
+      },
+    });
+
+    const result = await new PrismaShareRepository(client).findByTokenHash(TOKEN_HASH);
+
+    expect(result?.project).toBeNull();
+    expect(result?.scan).toEqual({
+      id: SCAN_ID,
+      projectId: PROJECT_ID,
+      name: 'Living Room Scan',
+      description: null,
+      thumbnail: 'http://storage.local/thumb/scan1.jpg',
+      noteCount: 3,
+      creator: { id: OWNER_ID, email: 'owner@example.com' },
+      ownerId: OWNER_ID,
+    });
+
+    const args = invitation.findFirst.mock.calls[0]?.[0] as {
+      select?: { scan?: { select?: { _count?: { select?: { notes?: unknown } } } } };
+    };
+    expect(args?.select?.scan?.select?._count?.select?.notes).toEqual({
+      where: { deletedAt: null },
+    });
+  });
+
   it('findByTokenHash returns null for an unknown token', async () => {
     const { client, invitation } = createClient();
     invitation.findFirst.mockResolvedValue(null);
@@ -1011,6 +1050,53 @@ describe('PrismaShareRepository', () => {
         },
       }),
     );
+  });
+
+  it('findShareLinkByTokenHash returns a scan-scope summary counting only active notes', async () => {
+    const { client, shareLink } = createClient();
+    shareLink.findFirst.mockResolvedValue({
+      id: SHARE_LINK_ID,
+      projectId: null,
+      scanId: SCAN_ID,
+      createdById: OWNER_ID,
+      tokenHash: TOKEN_HASH,
+      expiresAt: NOW,
+      revokedAt: null,
+      createdAt: NOW,
+      updatedAt: NOW,
+      project: null,
+      scan: {
+        id: SCAN_ID,
+        projectId: PROJECT_ID,
+        name: 'Living Room Scan',
+        description: null,
+        thumbnail: null,
+        creator: { id: OWNER_ID, email: 'owner@example.com' },
+        project: { ownerId: OWNER_ID },
+        _count: { notes: 3 },
+      },
+    });
+
+    const result = await new PrismaShareRepository(client).findShareLinkByTokenHash(TOKEN_HASH);
+
+    expect(result?.project).toBeNull();
+    expect(result?.scan).toEqual({
+      id: SCAN_ID,
+      projectId: PROJECT_ID,
+      name: 'Living Room Scan',
+      description: null,
+      thumbnail: null,
+      noteCount: 3,
+      creator: { id: OWNER_ID, email: 'owner@example.com' },
+      ownerId: OWNER_ID,
+    });
+
+    const args = shareLink.findFirst.mock.calls[0]?.[0] as {
+      select?: { scan?: { select?: { _count?: { select?: { notes?: unknown } } } } };
+    };
+    expect(args?.select?.scan?.select?._count?.select?.notes).toEqual({
+      where: { deletedAt: null },
+    });
   });
 
   it('findShareLinkById returns the stored share link', async () => {

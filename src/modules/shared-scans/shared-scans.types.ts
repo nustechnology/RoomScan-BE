@@ -5,6 +5,10 @@ export type SharedScanStatus = 'ACTIVE' | 'REVOKED' | 'SCAN_DELETED' | 'TEMPORAR
 export interface SharedScanRecord {
   id: string;
   projectId: string;
+  project: {
+    id: string;
+    name: string;
+  };
   name: string;
   description: string | null;
   thumbnail: string | null;
@@ -26,6 +30,10 @@ export interface SharedScanRecord {
 export interface SharedScanResult {
   id: string;
   projectId: string;
+  project: {
+    id: string;
+    name: string;
+  };
   name: string;
   description: string | null;
   thumbnail: string | null;
