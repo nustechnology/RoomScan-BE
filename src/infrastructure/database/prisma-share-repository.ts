@@ -137,7 +137,7 @@ const shareScanSummarySelect = {
     },
     _count: {
       select: {
-        notes: true,
+        notes: { where: { deletedAt: null } },
       },
     },
   },

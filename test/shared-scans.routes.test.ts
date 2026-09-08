@@ -235,6 +235,7 @@ describe('Shared With Me scan HTTP endpoints', () => {
         {
           id: SCAN_ID,
           projectId: PROJECT_ID,
+          project: { id: PROJECT_ID, name: 'District 2 Apartment' },
           name: 'Living Room Scan',
           description: null,
           thumbnail: null,
@@ -253,6 +254,7 @@ describe('Shared With Me scan HTTP endpoints', () => {
     detail.mockResolvedValue({
       id: SCAN_ID,
       projectId: PROJECT_ID,
+      project: { id: PROJECT_ID, name: 'District 2 Apartment' },
       name: 'Living Room Scan',
       description: null,
       thumbnail: null,
@@ -279,6 +281,10 @@ describe('Shared With Me scan HTTP endpoints', () => {
       expect(body.items).toHaveLength(1);
       expect(body.items[0]?.status).toBe('ACTIVE');
       expect(body.items[0]?.permissions.role).toBe('VIEWER');
+      expect(body.items[0]?.project).toEqual({
+        id: PROJECT_ID,
+        name: 'District 2 Apartment',
+      });
       expect(list).toHaveBeenCalledWith(USER_VIEWER, {
         page: 1,
         limit: 5,

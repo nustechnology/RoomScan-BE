@@ -24,6 +24,7 @@ function createRecord(overrides: Partial<SharedScanRecord> = {}): SharedScanReco
   return {
     id: SCAN_ID,
     projectId: PROJECT_ID,
+    project: { id: PROJECT_ID, name: 'District 2 Apartment' },
     name: 'Living Room Scan',
     description: null,
     thumbnail: null,
@@ -133,6 +134,7 @@ describe('SharedScansService', () => {
           {
             id: SCAN_ID,
             projectId: PROJECT_ID,
+            project: { id: PROJECT_ID, name: 'District 2 Apartment' },
             name: 'Living Room Scan',
             description: null,
             thumbnail: null,
@@ -148,6 +150,7 @@ describe('SharedScansService', () => {
           {
             id: SCAN_ID,
             projectId: PROJECT_ID,
+            project: { id: PROJECT_ID, name: 'District 2 Apartment' },
             name: 'Living Room Scan',
             description: null,
             thumbnail: null,

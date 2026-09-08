@@ -519,8 +519,13 @@ lets the user remove a scan from their own list. It depends on a narrow
 `ScanAccess` membership (using the same two-timestamp lifecycle as
 `ProjectAccess`, with `revokedAt` for Owner revocation and `deletedAt` for
 Viewer self-removal), the `Scan` row (including `deletedAt`, `updatedAt`, and
-the creator relation), and a non-deleted note count. The migration that added
-`ScanAccess.deletedAt` also aligns the access-row list index
+the creator relation), a non-deleted note count, and the parent project's `id`
+and `name`. The project name is joined because scan-level sharing materializes
+only a `ScanAccess` row and no `ProjectAccess`, so a Viewer here is refused by
+`viewableProjectWhere` and cannot resolve the project itself; carrying the name
+in the shared-scan payload is the only way it can label the scan's parent, at
+the deliberate cost of disclosing that name to the Viewer. The migration that
+added `ScanAccess.deletedAt` also aligns the access-row list index
 (`userId, deletedAt, revokedAt, scanId`).
 
 `SharedScansService` computes a `status` for each entry, mirroring the project

@@ -15,6 +15,12 @@ const sharedScanSelect = {
     select: {
       id: true,
       projectId: true,
+      project: {
+        select: {
+          id: true,
+          name: true,
+        },
+      },
       name: true,
       description: true,
       thumbnail: true,
@@ -32,7 +38,7 @@ const sharedScanSelect = {
       },
       _count: {
         select: {
-          notes: true,
+          notes: { where: { deletedAt: null } },
         },
       },
     },
@@ -45,6 +51,10 @@ interface SharedScanRow {
   scan: {
     id: string;
     projectId: string;
+    project: {
+      id: string;
+      name: string;
+    };
     name: string;
     description: string | null;
     thumbnail: string | null;
@@ -70,6 +80,7 @@ function toSharedScanRecord(row: SharedScanRow): SharedScanRecord {
   return {
     id: row.scan.id,
     projectId: row.scan.projectId,
+    project: row.scan.project,
     name: row.scan.name,
     description: row.scan.description,
     thumbnail: row.scan.thumbnail,

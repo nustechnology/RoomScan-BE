@@ -242,6 +242,28 @@ describe('PrismaSharedProjectsRepository', () => {
     });
   });
 
+  it('detail counts only active notes so soft-deleted notes stay out of noteCount', async () => {
+    const { client, projectAccess } = createClient();
+    projectAccess.findFirst.mockResolvedValue(
+      createAccessRow({
+        project: { ...createAccessRow().project, scans: [] },
+      }),
+    );
+
+    await new PrismaSharedProjectsRepository(client).findSharedForUser(PROJECT_ID, USER_ID);
+
+    const args = projectAccess.findFirst.mock.calls[0]?.[0] as {
+      select?: {
+        project?: {
+          select?: { scans?: { select?: { _count?: { select?: { notes?: unknown } } } } };
+        };
+      };
+    };
+    expect(args?.select?.project?.select?.scans?.select?._count?.select?.notes).toEqual({
+      where: { deletedAt: null },
+    });
+  });
+
   it('findAccessStatus reads the revocation and removal state of the access row', async () => {
     const { client, projectAccess } = createClient();
     projectAccess.findFirst.mockResolvedValue({ revokedAt: NOW, deletedAt: null });

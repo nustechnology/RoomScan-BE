@@ -16,6 +16,10 @@ export const SharedScanStatusSchema = z.enum([
 export const SharedScanResponseSchema = z.object({
   id: z.uuid(),
   projectId: z.uuid(),
+  project: z.object({
+    id: z.uuid(),
+    name: z.string(),
+  }),
   name: z.string(),
   description: z.string().nullable(),
   thumbnail: z.url().nullable(),

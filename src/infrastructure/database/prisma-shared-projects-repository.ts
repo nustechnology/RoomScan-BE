@@ -135,7 +135,7 @@ const sharedProjectDetailSelect = {
           createdAt: true,
           _count: {
             select: {
-              notes: true,
+              notes: { where: { deletedAt: null } },
             },
           },
         },

@@ -17,6 +17,7 @@ function createAccessRow(overrides: Record<string, unknown> = {}) {
     scan: {
       id: SCAN_ID,
       projectId: PROJECT_ID,
+      project: { id: PROJECT_ID, name: 'District 2 Apartment' },
       name: 'Living Room Scan',
       description: null,
       thumbnail: null,
@@ -86,6 +87,7 @@ describe('PrismaSharedScansRepository', () => {
       {
         id: SCAN_ID,
         projectId: PROJECT_ID,
+        project: { id: PROJECT_ID, name: 'District 2 Apartment' },
         name: 'Living Room Scan',
         description: null,
         thumbnail: null,
@@ -148,6 +150,43 @@ describe('PrismaSharedScansRepository', () => {
     expect(result?.accessRevokedAt).toEqual(NOW);
     expect(result?.accessDeletedAt).toBeNull();
     expect(result?.scanDeletedAt).toBeNull();
+  });
+
+  it('counts only active notes so soft-deleted notes stay out of noteCount', async () => {
+    const { client, scanAccess } = createClient();
+    const repository = new PrismaSharedScansRepository(client);
+
+    await repository.list(USER_ID, { page: 1, limit: 5, sort: 'updatedAt:desc' });
+    await repository.findSharedForUser(SCAN_ID, USER_ID);
+
+    for (const delegate of [scanAccess.findMany, scanAccess.findFirst]) {
+      const args = delegate.mock.calls[0]?.[0] as {
+        select?: { scan?: { select?: { _count?: { select?: { notes?: unknown } } } } };
+      };
+      expect(args?.select?.scan?.select?._count?.select?.notes).toEqual({
+        where: { deletedAt: null },
+      });
+    }
+  });
+
+  it('selects the parent project name so a scan-level Viewer gets project context', async () => {
+    const { client, scanAccess } = createClient();
+    const repository = new PrismaSharedScansRepository(client);
+
+    const list = await repository.list(USER_ID, { page: 1, limit: 5, sort: 'updatedAt:desc' });
+    const detail = await repository.findSharedForUser(SCAN_ID, USER_ID);
+
+    for (const delegate of [scanAccess.findMany, scanAccess.findFirst]) {
+      const args = delegate.mock.calls[0]?.[0] as {
+        select?: { scan?: { select?: { project?: unknown } } };
+      };
+      expect(args?.select?.scan?.select?.project).toEqual({
+        select: { id: true, name: true },
+      });
+    }
+
+    expect(list.items[0]?.project).toEqual({ id: PROJECT_ID, name: 'District 2 Apartment' });
+    expect(detail?.project).toEqual({ id: PROJECT_ID, name: 'District 2 Apartment' });
   });
 
   it('findSharedForUser returns null without an access record', async () => {
