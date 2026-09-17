@@ -104,13 +104,14 @@ optional/nullable or the client will crash on an id-addressed invitation.**
 
 Errors worth handling distinctly:
 
-| Code                                           | HTTP | Show the user                                          |
-| ---------------------------------------------- | ---- | ------------------------------------------------------ |
-| `RECIPIENT_USER_NOT_FOUND`                     | 404  | "No user with that ID" — likely a typo                 |
-| `CANNOT_INVITE_SELF`                           | 409  | "That's your own ID"                                   |
-| `INVITATION_ALREADY_SENT`                      | 409  | A pending invitation already exists for this recipient |
-| `PROJECT_NOT_SHAREABLE` / `SCAN_NOT_SHAREABLE` | 409  | Nothing is uploaded yet                                |
-| `NOT_OWNER`                                    | 403  | Only the Owner can share                               |
+| Code                                           | HTTP | Show the user                                                      |
+| ---------------------------------------------- | ---- | ------------------------------------------------------------------ |
+| `VALIDATION_ERROR`                             | 400  | The id is not 10 valid characters — show it inline, before sending |
+| `RECIPIENT_USER_NOT_FOUND`                     | 404  | The id is well formed but matches no user                          |
+| `CANNOT_INVITE_SELF`                           | 409  | "That's your own ID"                                               |
+| `INVITATION_ALREADY_SENT`                      | 409  | A pending invitation already exists for this recipient             |
+| `PROJECT_NOT_SHAREABLE` / `SCAN_NOT_SHAREABLE` | 409  | Nothing is uploaded yet                                            |
+| `NOT_OWNER`                                    | 403  | Only the Owner can share                                           |
 
 Rate limit: 20 invitation creations per 15 minutes per IP by default
 (`RATE_LIMIT_INVITATION_CREATE_*`).
@@ -120,6 +121,10 @@ Rate limit: 20 invitation creations per 15 minutes per IP by default
 Trim, uppercase, and check against `^[23456789ABCDEFGHJKMNPQRSTVWXYZ]{10}$`
 before sending, so a typo shows inline instead of costing a round trip. Reject
 `0`, `1`, `I`, `L`, `O`, `U` with a hint that the id never contains them.
+
+The two failures are distinct and must not share a message: a wrong **shape**
+(too short, illegal character) is `400 VALIDATION_ERROR`, while a well-formed id
+that matches nobody is `404 RECIPIENT_USER_NOT_FOUND`.
 
 ## Flow 3 — the invitation inbox
 

@@ -930,9 +930,10 @@ resolves is the feature rather than a leak, and refusing to distinguish "unknown
 id" from "typo" would make the invite screen unusable. The exposure is bounded:
 the id space is 30^10 (~5.9 × 10^14), invitation creation is the only endpoint
 that resolves an id, and it is rate limited to 20 requests per 15 minutes per IP.
-A malformed id and an unknown id return the identical response, so the endpoint
-never reveals which of the two it was. Do not copy this exception to other
-surfaces.
+Among well-formed ids the endpoint reveals only whether one resolves, which is
+the feature itself; input that is not a well-formed id never reaches the lookup
+and is rejected as `400 VALIDATION_ERROR`, so it discloses nothing. Do not copy
+this exception to other surfaces.
 
 Addressing an invitation by `recipientEmail` keeps the flow available for someone
 who has not signed up yet and therefore has no public user id. Such an invitation
@@ -987,7 +988,9 @@ or by email address:
 
 Exactly one of `recipientEmail` and `recipientPublicUserId` is required; sending
 both, or neither, returns `400 VALIDATION_ERROR`. An unknown public user id
-returns `404 RECIPIENT_USER_NOT_FOUND`, and an Owner addressing themselves
+returns `404 RECIPIENT_USER_NOT_FOUND` (a value that is not a well-formed id is
+rejected as `400 VALIDATION_ERROR` before the lookup), and an Owner addressing
+themselves
 returns `409 CANNOT_INVITE_SELF`. `expiresInSeconds` is optional; it defaults to
 the configured `INVITATION_TTL_SECONDS` and must be between 60 and 2,592,000 (30
 days). Create response `201`:
@@ -1369,7 +1372,9 @@ Error behavior:
   is unusable.
 - `404 ACCESS_NOT_FOUND`: no access record exists for the user being unshared.
 - `404 RECIPIENT_USER_NOT_FOUND`: no user matches the supplied
-  `recipientPublicUserId`, or it is malformed.
+  `recipientPublicUserId`. A value that is not a well-formed id is rejected
+  earlier as `400 VALIDATION_ERROR`, so this code always means "well-formed but
+  unknown".
 - `409 CANNOT_INVITE_SELF`: the Owner addressed an invitation to their own
   public user id.
 - `409 INVITATION_ALREADY_SENT`: a pending invitation already targets this

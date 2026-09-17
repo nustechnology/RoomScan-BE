@@ -8,6 +8,13 @@
 -- 1. users."publicId": nullable first so existing rows can be backfilled in place.
 ALTER TABLE "users" ADD COLUMN "publicId" VARCHAR(10);
 
+-- The unique index is created before the backfill, not after it. PostgreSQL
+-- treats NULLs as distinct, so it happily covers the not-yet-filled rows, and
+-- the collision probe inside the backfill becomes an index lookup instead of a
+-- sequential scan per candidate — the difference between O(N) and O(N^2) over
+-- the whole table.
+CREATE UNIQUE INDEX "users_publicId_key" ON "users"("publicId");
+
 -- Backfill every pre-existing user with a random 10-character identifier drawn
 -- from an alphabet that omits characters people confuse when reading an id out
 -- loud (0, 1, I, L, O, U are all absent).
@@ -55,8 +62,6 @@ BEGIN
 END $$;
 
 ALTER TABLE "users" ALTER COLUMN "publicId" SET NOT NULL;
-
-CREATE UNIQUE INDEX "users_publicId_key" ON "users"("publicId");
 
 -- 2. invitations: optional recipient user binding.
 ALTER TABLE "invitations" ALTER COLUMN "recipientEmail" DROP NOT NULL;

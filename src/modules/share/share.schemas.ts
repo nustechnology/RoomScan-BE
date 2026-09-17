@@ -1,3 +1,4 @@
+import { isInvitationReference } from '../../common/identifiers/invitation-reference.js';
 import {
   paginatedResponseSchema,
   paginationQuerySchema,
@@ -8,10 +9,6 @@ import {
 } from '../../common/schemas/public-user-id.js';
 import { z } from '../../openapi/zod.js';
 
-const INVITATION_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
-const UUID_PATTERN =
-  /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
-
 /**
  * Preview, accept and decline address an invitation either by its raw link token
  * or, for an invitation the caller found in their own inbox, by its id. The two
@@ -20,10 +17,7 @@ const UUID_PATTERN =
 export const InvitationTokenParamSchema = z.object({
   reference: z
     .string()
-    .refine(
-      (value) => INVITATION_TOKEN_PATTERN.test(value) || UUID_PATTERN.test(value),
-      'Invitation reference is malformed',
-    )
+    .refine(isInvitationReference, 'Invitation reference is malformed')
     .openapi({ description: 'Invitation link token, or the id of an invitation addressed to you' }),
 });
 

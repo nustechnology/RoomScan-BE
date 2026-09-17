@@ -2,6 +2,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 
 import type { Logger } from 'pino';
 
+import { isInvitationToken } from '../../common/identifiers/invitation-reference.js';
 import { normalizePublicUserId } from '../../common/identifiers/public-user-id.js';
 import { toPaginationMeta, type PaginationParams } from '../../common/pagination/pagination.js';
 import type {
@@ -84,18 +85,6 @@ export function generateInvitationToken(): string {
 
 export function hashInvitationToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
-}
-
-const INVITATION_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
-
-/**
- * Preview, accept and decline take an invitation *reference*: either the raw
- * link token (from the invitation email or a share link) or, for an invitation
- * the caller found in their own inbox, the invitation id. The two forms never
- * overlap, so the reference alone tells us how to resolve it.
- */
-export function isInvitationToken(reference: string): boolean {
-  return INVITATION_TOKEN_PATTERN.test(reference);
 }
 
 function toPreviewProject(project: ShareProjectSummary | null): ShareProjectPreview | null {
