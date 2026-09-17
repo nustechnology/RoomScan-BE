@@ -11,6 +11,7 @@ export interface AppleIdentityVerifier {
 
 export interface AuthenticatedUser {
   id: string;
+  publicUserId: string;
   email: string | null;
   displayName: string | null;
   provider: 'apple';

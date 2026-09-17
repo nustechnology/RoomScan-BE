@@ -4,11 +4,13 @@ import { Prisma, type PrismaClient } from '../src/generated/prisma/client.js';
 import { PrismaCurrentUserRepository } from '../src/infrastructure/database/prisma-current-user-repository.js';
 
 const USER_ID = 'eb5d278f-c857-45c7-887d-7be65288cb75';
+const PUBLIC_USER_ID = 'GP5HS2WKBE';
 
 describe('PrismaCurrentUserRepository', () => {
   it('loads the authenticated user by ID without exposing private fields', async () => {
     const findUnique = vi.fn().mockResolvedValue({
       id: USER_ID,
+      publicId: PUBLIC_USER_ID,
       email: 'user@example.com',
       displayName: null,
     });
@@ -19,6 +21,7 @@ describe('PrismaCurrentUserRepository', () => {
 
     await expect(repository.findById(USER_ID)).resolves.toEqual({
       id: USER_ID,
+      publicUserId: PUBLIC_USER_ID,
       email: 'user@example.com',
       displayName: null,
     });
@@ -26,6 +29,7 @@ describe('PrismaCurrentUserRepository', () => {
       where: { id: USER_ID },
       select: {
         id: true,
+        publicId: true,
         email: true,
         displayName: true,
       },
@@ -47,6 +51,7 @@ describe('PrismaCurrentUserRepository', () => {
   it('updates the displayName and returns the refreshed profile', async () => {
     const update = vi.fn().mockResolvedValue({
       id: USER_ID,
+      publicId: PUBLIC_USER_ID,
       email: 'user@example.com',
       displayName: 'Nguyen Minh Anh',
     });
@@ -57,6 +62,7 @@ describe('PrismaCurrentUserRepository', () => {
 
     await expect(repository.updateDisplayName(USER_ID, 'Nguyen Minh Anh')).resolves.toEqual({
       id: USER_ID,
+      publicUserId: PUBLIC_USER_ID,
       email: 'user@example.com',
       displayName: 'Nguyen Minh Anh',
     });
@@ -65,6 +71,7 @@ describe('PrismaCurrentUserRepository', () => {
       data: { displayName: 'Nguyen Minh Anh' },
       select: {
         id: true,
+        publicId: true,
         email: true,
         displayName: true,
       },

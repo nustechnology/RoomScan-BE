@@ -213,6 +213,7 @@ describe('RoomScan HTTP application', () => {
       refreshToken: 'roomscan-refresh-token',
       user: {
         id: 'eb5d278f-c857-45c7-887d-7be65288cb75',
+        publicUserId: 'GP5HS2WKBE',
         email: 'user@example.com',
         displayName: null,
         provider: 'apple',
@@ -455,6 +456,7 @@ describe('RoomScan HTTP application', () => {
       refreshToken: 'roomscan-refresh-token',
       user: {
         id: 'eb5d278f-c857-45c7-887d-7be65288cb75',
+        publicUserId: 'GP5HS2WKBE',
         email: 'user@example.com',
         displayName: null,
         provider: 'apple',
@@ -482,6 +484,7 @@ describe('RoomScan HTTP application', () => {
       refreshToken: 'roomscan-refresh-token',
       user: {
         id: 'eb5d278f-c857-45c7-887d-7be65288cb75',
+        publicUserId: 'GP5HS2WKBE',
         email: 'user@example.com',
         displayName: null,
         provider: 'apple',
@@ -617,6 +620,7 @@ describe('RoomScan HTTP application', () => {
       scan: null,
       status: 'PENDING',
       recipientEmail: 'recipient@example.com',
+      recipientPublicUserId: null,
       sentAt: '2026-07-29T10:00:00.000Z',
       expiresAt: '2026-08-05T10:00:00.000Z',
     });
@@ -625,7 +629,9 @@ describe('RoomScan HTTP application', () => {
       .get(`/api/v1/invitations/${token}`)
       .set('Authorization', 'Bearer some-token')
       .expect(200);
-    await request(loggingApp).get(`/api/v1/invitations?token=${token}`).expect(404);
+    // GET /api/v1/invitations is the invitation inbox and requires authentication;
+    // the request is made anonymously here only to exercise query redaction.
+    await request(loggingApp).get(`/api/v1/invitations?token=${token}`).expect(401);
 
     const pathLog = records.find((record) => record.req?.url?.startsWith('/api/v1/invitations/'));
     expect(pathLog?.req?.url).toBe('/api/v1/invitations/[REDACTED]');

@@ -119,7 +119,7 @@ the seeded pending-invitation recipient so the accept flow is testable locally:
 ```
 
 This returns JWTs for `pending-invite@roomscan.dev`, the recipient of the
-seed's demo invitation, so `POST /invitations/{token}/accept` can be exercised
+seed's demo invitation, so `POST /invitations/{reference}/accept` can be exercised
 with the printed `invitationUrl` instead of as the owner. Other identity tokens
 continue through Apple verification. The production-style Compose API sets
 `NODE_ENV=production`, so it never enables this shortcut and it also rejects
@@ -295,6 +295,39 @@ works via case-insensitive `contains`, and no schema-level extension
 full-text/fuzzy search index is out of scope for this pass and would need its
 own migration and operational sign-off (elevated DB privilege to create the
 extension).
+
+The `add_public_user_id_and_invitation_recipient_user` migration adds
+`users."publicId"` (the shareable identifier other users type to send an
+invitation) and lets an invitation bind to a user instead of a typed-in address.
+It adds `publicId` as nullable, backfills every existing row in a `DO` block,
+then applies `SET NOT NULL` and the unique index — all in one migration, so the
+column is never observably null and no separate backfill script has to be run
+before the constraint holds. New users get their id from
+`generatePublicUserId()` at provisioning, with the repository retrying on the
+unique-index collision.
+
+The backfill draws its randomness from `gen_random_uuid()` (cryptographically
+strong and built in from PostgreSQL 13, so no extension is required), which
+matches the quality of the `node:crypto` source the application uses. Two
+corrections keep the output uniform: bytes 6 and 8 of a v4 UUID hold the fixed
+version and variant bits and are skipped, and bytes at or above `240`
+(the largest multiple of the 30-character alphabet that fits in a byte) are
+rejected to remove modulo bias. A public user id is an address, not a secret —
+knowing one only lets you address an invitation to that account — so it must
+never be reused as a token, an unsubscribe key, or any other bearer credential.
+
+**Operational note:** this migration rewrites every row of `users`, and
+`SET NOT NULL` takes an `ACCESS EXCLUSIVE` lock on the table. On a large `users`
+table that blocks sign-in for the duration, so run it in a maintenance window.
+If the table is too large for that, split it first into add-nullable, batched
+backfill, and constrain migrations. The same migration makes `invitations."recipientEmail"`
+nullable, adds `invitations."recipientUserId"` with a cascading foreign key, adds
+the `invitations_recipient_channel_check` constraint
+(`num_nonnulls("recipientEmail", "recipientUserId") = 1`) so every invitation
+carries exactly one recipient channel, and adds the
+`(projectId|scanId, recipientUserId)` partial unique indexes for `PENDING` rows
+that mirror the existing per-email ones. All statements are regular, non-`CONCURRENTLY`
+DDL and run as one transaction.
 
 `SYNC_CRYPTO_KEY` must be configured before the migrated application starts and
 must remain unchanged. V1 ciphertext/cursor formats are versioned but do not

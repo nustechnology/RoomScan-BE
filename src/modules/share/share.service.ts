@@ -2,6 +2,8 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 
 import type { Logger } from 'pino';
 
+import { normalizePublicUserId } from '../../common/identifiers/public-user-id.js';
+import { toPaginationMeta, type PaginationParams } from '../../common/pagination/pagination.js';
 import type {
   IdempotencyGateway,
   IdempotencyResult,
@@ -13,6 +15,7 @@ import { buildInvitationEmail } from './share.email.js';
 import {
   AccessAlreadyExistsError,
   CannotAcceptOwnInvitationError,
+  CannotInviteSelfError,
   InvitationAlreadyAcceptedError,
   InvitationDeclinedError,
   InvitationExpiredError,
@@ -21,6 +24,7 @@ import {
   InvitationRevokedError,
   NotOwnerError,
   ProjectNotShareableError,
+  RecipientUserNotFoundError,
   ScanNotShareableError,
   ShareLinkExpiredError,
   ShareLinkNotFoundError,
@@ -30,6 +34,7 @@ import {
 import type {
   InvitationAcceptResult,
   InvitationCreateInput,
+  InvitationRecipientData,
   InvitationCreateResult,
   InvitationDeclineResult,
   InvitationPreviewResult,
@@ -38,6 +43,10 @@ import type {
   InvitationRevokeResult,
   InvitationViewStatus,
   InvitationWithEntity,
+  PendingInvitationResult,
+  PendingInvitationRow,
+  ReceivedInvitationResult,
+  ReceivedInvitationsResult,
   ShareLinkAcceptResult,
   ShareLinkPreviewResult,
   ShareLinkRecord,
@@ -77,6 +86,18 @@ export function hashInvitationToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
 }
 
+const INVITATION_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
+
+/**
+ * Preview, accept and decline take an invitation *reference*: either the raw
+ * link token (from the invitation email or a share link) or, for an invitation
+ * the caller found in their own inbox, the invitation id. The two forms never
+ * overlap, so the reference alone tells us how to resolve it.
+ */
+export function isInvitationToken(reference: string): boolean {
+  return INVITATION_TOKEN_PATTERN.test(reference);
+}
+
 function toPreviewProject(project: ShareProjectSummary | null): ShareProjectPreview | null {
   if (project === null) {
     return null;
@@ -103,6 +124,33 @@ function toPreviewScan(scan: ShareScanSummary | null): ShareScanPreview | null {
     thumbnail: scan.thumbnail,
     noteCount: scan.noteCount,
     creator: scan.creator,
+  };
+}
+
+/**
+ * Idempotency receipts stored before invitations became addressable by public
+ * user id hold a response body without the recipient fields. Replaying one
+ * verbatim fails the response schema, so a retry of a pre-existing key would
+ * answer `400` instead of the original `201`. Receipts are never pruned, so this
+ * fills the fields in rather than assuming the old bodies age out.
+ */
+function withRecipientFields(body: InvitationCreateResult): InvitationCreateResult {
+  return {
+    ...body,
+    recipientEmail: body.recipientEmail ?? null,
+    recipientPublicUserId: body.recipientPublicUserId ?? null,
+  };
+}
+
+function toPendingInvitation(row: PendingInvitationRow, now: Date): PendingInvitationResult {
+  return {
+    invitationId: row.invitation.id,
+    recipientEmail: row.invitation.recipientEmail,
+    recipientPublicUserId: row.recipient?.publicUserId ?? null,
+    recipientDisplayName: row.recipient?.displayName ?? null,
+    status: row.invitation.expiresAt.getTime() <= now.getTime() ? 'EXPIRED' : 'PENDING',
+    sentAt: row.invitation.sentAt.toISOString(),
+    expiresAt: row.invitation.expiresAt.toISOString(),
   };
 }
 
@@ -219,16 +267,28 @@ export class ShareService {
 
   async #sendInvitationEmail(input: {
     scope: ShareScope;
-    recipientEmail: string;
+    recipientEmail: string | null;
     ownerDisplay: string;
     entityName: string;
     invitationUrl: string;
     expiresInSeconds: number;
   }): Promise<void> {
+    if (input.recipientEmail === null) {
+      // A user invited by public id may have no address on file (Apple can omit
+      // the email claim). The invitation still exists and is reachable from the
+      // recipient's in-app invitation list.
+      this.#logger.info(
+        { scope: input.scope },
+        'Skipped invitation email delivery: the recipient has no email address on file',
+      );
+      return;
+    }
+
+    const recipientEmail = input.recipientEmail;
     const email = buildInvitationEmail({
       scope: input.scope,
       ownerDisplay: input.ownerDisplay,
-      recipientEmail: input.recipientEmail,
+      recipientEmail,
       entityName: input.entityName,
       invitationUrl: input.invitationUrl,
       expiresInSeconds: input.expiresInSeconds,
@@ -236,27 +296,105 @@ export class ShareService {
 
     try {
       await this.#mailer.sendMail({
-        to: input.recipientEmail,
+        to: recipientEmail,
         subject: email.subject,
         html: email.html,
         text: email.text,
       });
     } catch (error) {
       this.#logger.warn(
-        { err: error, to: input.recipientEmail },
+        { err: error, to: recipientEmail },
         'Failed to deliver an invitation email',
       );
     }
   }
 
-  #assertRecipientMatch(recipientEmail: string, currentUser: PreviewContextUser): void {
-    const matches =
-      currentUser.email !== null &&
-      recipientEmail.toLowerCase() === currentUser.email.toLowerCase();
+  /**
+   * Resolves who an invitation is addressed to. A public user id binds the
+   * invitation to that account, so acceptance no longer depends on the address
+   * the Owner happened to type; an email address keeps the older, bearer-style
+   * flow that also works for people who have not installed the app yet.
+   */
+  async #resolveRecipient(
+    data: InvitationCreateInput,
+    ownerId: string,
+  ): Promise<{
+    recipient: InvitationRecipientData;
+    deliveryEmail: string | null;
+    publicUserId: string | null;
+  }> {
+    if (data.recipientPublicUserId !== undefined) {
+      const normalized = normalizePublicUserId(data.recipientPublicUserId);
 
-    if (!matches) {
+      // A malformed id and an unknown id answer identically on purpose: the
+      // caller learns only "this is not a usable recipient", never which of the
+      // two it was. Route-level validation already rejects malformed input, so
+      // this branch mainly guards direct service callers.
+      if (normalized === null) {
+        throw new RecipientUserNotFoundError();
+      }
+
+      const user = await this.#repository.findUserByPublicId(normalized);
+
+      if (user === null) {
+        throw new RecipientUserNotFoundError();
+      }
+      if (user.id === ownerId) {
+        throw new CannotInviteSelfError();
+      }
+
+      return {
+        recipient: { recipientUserId: user.id },
+        deliveryEmail: user.email,
+        publicUserId: user.publicUserId,
+      };
+    }
+
+    if (data.recipientEmail === undefined) {
+      // Unreachable through HTTP: InvitationCreateInput requires exactly one
+      // recipient field and the body schema enforces it. Surfacing a programming
+      // error as a 500 is honest; a 404 here would misreport a caller bug.
+      throw new Error('Invitation input carries neither a recipient email nor a public user id');
+    }
+
+    return {
+      recipient: { recipientEmail: data.recipientEmail },
+      deliveryEmail: data.recipientEmail,
+      publicUserId: null,
+    };
+  }
+
+  /**
+   * An invitation bound to a user may only be used by that user. An invitation
+   * addressed to an email address is bearer-style — the raw token is the secret,
+   * exactly as it already is for share links — because the address the Owner
+   * typed says nothing about which account the recipient signs in with (Apple's
+   * Hide My Email in particular hands the account a different address entirely).
+   */
+  #assertRecipientAllowed(record: InvitationRecord, userId: string): void {
+    if (record.recipientUserId !== null && record.recipientUserId !== userId) {
       throw new InvitationNotForUserError();
     }
+  }
+
+  #recipientPublicUserIdOf(context: InvitationWithEntity): string | null {
+    return context.invitation.recipientUserId === null
+      ? null
+      : (context.recipient?.publicUserId ?? null);
+  }
+
+  /** Resolves a reference to an invitation, or `null` when it is not one. */
+  async #findInvitationByReference(
+    reference: string,
+    userId: string,
+  ): Promise<InvitationWithEntity | null> {
+    if (isInvitationToken(reference)) {
+      return await this.#repository.findByTokenHash(hashInvitationToken(reference));
+    }
+
+    // An invitation id is not a secret — the Owner sees it in the share list — so
+    // it only resolves for the user the invitation is bound to.
+    return await this.#repository.findInvitationForRecipient(reference, userId);
   }
 
   async #hasActiveAccess(scope: ShareScope, entityId: string, userId: string): Promise<boolean> {
@@ -330,6 +468,7 @@ export class ShareService {
       throw new ProjectNotShareableError();
     }
 
+    const { recipient, deliveryEmail, publicUserId } = await this.#resolveRecipient(data, userId);
     const now = this.#clock();
     const ttlSeconds = data.expiresInSeconds ?? this.#invitationTtlSeconds;
     const expiresAt = new Date(now.getTime() + ttlSeconds * 1000);
@@ -337,7 +476,7 @@ export class ShareService {
     const record = await this.#repository.createInvitation({
       projectId,
       createdById: userId,
-      recipientEmail: data.recipientEmail,
+      ...recipient,
       tokenHash: hashInvitationToken(rawToken),
       expiresAt,
       sentAt: now,
@@ -346,7 +485,7 @@ export class ShareService {
     const invitationUrl = this.#inviteUrl(rawToken, 'project');
     await this.#sendInvitationEmail({
       scope: 'project',
-      recipientEmail: data.recipientEmail,
+      recipientEmail: deliveryEmail,
       ownerDisplay: info.ownerEmail ?? 'the project owner',
       entityName: info.name,
       invitationUrl,
@@ -357,6 +496,7 @@ export class ShareService {
       invitationId: record.id,
       invitationUrl,
       recipientEmail: record.recipientEmail,
+      recipientPublicUserId: publicUserId,
       expiresAt: expiresAt.toISOString(),
       status: 'PENDING',
       sentAt: now.toISOString(),
@@ -383,7 +523,9 @@ export class ShareService {
       request: data,
     });
     const replay = await this.#idempotency.lookup<InvitationCreateResult>(context);
-    if (replay !== null) return replay;
+    if (replay !== null) {
+      return { ...replay, body: withRecipientFields(replay.body) };
+    }
 
     const info = await this.#repository.findProjectInfo(projectId);
     if (info === null) throw new ProjectNotFoundError();
@@ -392,16 +534,18 @@ export class ShareService {
       throw new ProjectNotShareableError();
     }
 
+    const { recipient, deliveryEmail, publicUserId } = await this.#resolveRecipient(data, userId);
     const now = this.#clock();
     const ttlSeconds = data.expiresInSeconds ?? this.#invitationTtlSeconds;
     const expiresAt = new Date(now.getTime() + ttlSeconds * 1000);
     const rawToken = generateInvitationToken();
     const invitationId = randomUUID();
-    const invitationUrl = `${this.#invitationBaseUrl}/invitations/${rawToken}`;
+    const invitationUrl = this.#inviteUrl(rawToken, 'project');
     const responseBody: InvitationCreateResult = {
       invitationId,
       invitationUrl,
-      recipientEmail: data.recipientEmail,
+      recipientEmail: recipient.recipientEmail ?? null,
+      recipientPublicUserId: publicUserId,
       expiresAt: expiresAt.toISOString(),
       status: 'PENDING',
       sentAt: now.toISOString(),
@@ -411,7 +555,7 @@ export class ShareService {
         id: invitationId,
         projectId,
         createdById: userId,
-        recipientEmail: data.recipientEmail,
+        ...recipient,
         tokenHash: hashInvitationToken(rawToken),
         expiresAt,
         sentAt: now,
@@ -422,7 +566,7 @@ export class ShareService {
     if (!result.replayed) {
       await this.#sendInvitationEmail({
         scope: 'project',
-        recipientEmail: data.recipientEmail,
+        recipientEmail: deliveryEmail,
         ownerDisplay: info.ownerEmail ?? 'the project owner',
         entityName: info.name,
         invitationUrl,
@@ -449,6 +593,7 @@ export class ShareService {
       throw new ScanNotShareableError();
     }
 
+    const { recipient, deliveryEmail, publicUserId } = await this.#resolveRecipient(data, userId);
     const now = this.#clock();
     const ttlSeconds = data.expiresInSeconds ?? this.#invitationTtlSeconds;
     const expiresAt = new Date(now.getTime() + ttlSeconds * 1000);
@@ -456,7 +601,7 @@ export class ShareService {
     const record = await this.#repository.createInvitation({
       scanId,
       createdById: userId,
-      recipientEmail: data.recipientEmail,
+      ...recipient,
       tokenHash: hashInvitationToken(rawToken),
       expiresAt,
       sentAt: now,
@@ -465,7 +610,7 @@ export class ShareService {
     const invitationUrl = this.#inviteUrl(rawToken, 'scan');
     await this.#sendInvitationEmail({
       scope: 'scan',
-      recipientEmail: data.recipientEmail,
+      recipientEmail: deliveryEmail,
       ownerDisplay: info.ownerEmail ?? 'the scan owner',
       entityName: info.name,
       invitationUrl,
@@ -476,6 +621,7 @@ export class ShareService {
       invitationId: record.id,
       invitationUrl,
       recipientEmail: record.recipientEmail,
+      recipientPublicUserId: publicUserId,
       expiresAt: expiresAt.toISOString(),
       status: 'PENDING',
       sentAt: now.toISOString(),
@@ -483,14 +629,13 @@ export class ShareService {
   }
 
   async previewInvitation(
-    rawToken: string,
+    reference: string,
     currentUser: PreviewContextUser,
   ): Promise<TokenPreviewResult> {
-    const tokenHash = hashInvitationToken(rawToken);
-    const invitation = await this.#repository.findByTokenHash(tokenHash);
+    const invitation = await this.#findInvitationByReference(reference, currentUser.id);
 
     if (invitation !== null) {
-      this.#assertRecipientMatch(invitation.invitation.recipientEmail, currentUser);
+      this.#assertRecipientAllowed(invitation.invitation, currentUser.id);
 
       if (invitation.invitation.status === 'REVOKED') {
         throw new ShareNoLongerAvailableError();
@@ -503,6 +648,7 @@ export class ShareService {
         scan: toPreviewScan(invitation.scan),
         status: this.#viewStatus(invitation.invitation),
         recipientEmail: invitation.invitation.recipientEmail,
+        recipientPublicUserId: this.#recipientPublicUserIdOf(invitation),
         sentAt: invitation.invitation.sentAt.toISOString(),
         expiresAt: invitation.invitation.expiresAt.toISOString(),
       };
@@ -514,9 +660,12 @@ export class ShareService {
       return result;
     }
 
-    const shareLink = await this.#repository.findShareLinkByTokenHash(
-      hashInvitationToken(rawToken),
-    );
+    if (!isInvitationToken(reference)) {
+      throw new InvitationNotFoundError();
+    }
+
+    const tokenHash = hashInvitationToken(reference);
+    const shareLink = await this.#repository.findShareLinkByTokenHash(tokenHash);
 
     if (shareLink !== null) {
       if (shareLink.shareLink.revokedAt !== null) {
@@ -559,15 +708,19 @@ export class ShareService {
 
   async acceptInvitation(
     currentUser: PreviewContextUser,
-    rawToken: string,
+    reference: string,
   ): Promise<TokenAcceptResult> {
-    const tokenHash = hashInvitationToken(rawToken);
-    const invitation = await this.#repository.findByTokenHash(tokenHash);
+    const invitation = await this.#findInvitationByReference(reference, currentUser.id);
 
     if (invitation !== null) {
       return await this.#acceptEmailInvitation(invitation, currentUser);
     }
 
+    if (!isInvitationToken(reference)) {
+      throw new InvitationNotFoundError();
+    }
+
+    const tokenHash = hashInvitationToken(reference);
     const shareLink = await this.#repository.findShareLinkByTokenHash(tokenHash);
 
     if (shareLink !== null) {
@@ -579,6 +732,29 @@ export class ShareService {
     }
 
     throw new InvitationNotFoundError();
+  }
+
+  /** The signed-in user's pending invitations, addressed to them by public id. */
+  async listReceivedInvitations(
+    userId: string,
+    pagination: PaginationParams,
+  ): Promise<ReceivedInvitationsResult> {
+    const { items: invitations, total } = await this.#repository.listReceivedInvitations(
+      userId,
+      pagination,
+    );
+    const items: ReceivedInvitationResult[] = invitations.map((context) => ({
+      invitationId: context.invitation.id,
+      scope: this.#scopeOf(context.invitation),
+      project: toPreviewProject(context.project),
+      scan: toPreviewScan(context.scan),
+      status: this.#viewStatus(context.invitation),
+      invitedBy: context.creator ?? null,
+      sentAt: context.invitation.sentAt.toISOString(),
+      expiresAt: context.invitation.expiresAt.toISOString(),
+    }));
+
+    return { items, pagination: toPaginationMeta(pagination, total) };
   }
 
   async #acceptEmailInvitation(
@@ -611,7 +787,7 @@ export class ShareService {
       if (project.owner.id === userId) {
         throw new CannotAcceptOwnInvitationError();
       }
-      this.#assertRecipientMatch(invitation.recipientEmail, currentUser);
+      this.#assertRecipientAllowed(invitation, userId);
       if (await this.#hasActiveAccess(scope, project.id, userId)) {
         throw new AccessAlreadyExistsError();
       }
@@ -644,7 +820,7 @@ export class ShareService {
     if (scan.ownerId === userId) {
       throw new CannotAcceptOwnInvitationError();
     }
-    this.#assertRecipientMatch(invitation.recipientEmail, currentUser);
+    this.#assertRecipientAllowed(invitation, userId);
     if (await this.#hasActiveAccess(scope, scan.id, userId)) {
       throw new AccessAlreadyExistsError();
     }
@@ -699,13 +875,16 @@ export class ShareService {
 
   async declineInvitation(
     currentUser: PreviewContextUser,
-    rawToken: string,
+    reference: string,
   ): Promise<InvitationDeclineResult> {
-    const tokenHash = hashInvitationToken(rawToken);
-    const invitation = await this.#repository.findByTokenHash(tokenHash);
+    const invitation = await this.#findInvitationByReference(reference, currentUser.id);
 
     if (invitation === null) {
-      if ((await this.#repository.findTokenSourceKindByTokenHash(tokenHash)) !== null) {
+      if (
+        isInvitationToken(reference) &&
+        (await this.#repository.findTokenSourceKindByTokenHash(hashInvitationToken(reference))) !==
+          null
+      ) {
         throw new ShareNoLongerAvailableError();
       }
       throw new InvitationNotFoundError();
@@ -732,7 +911,7 @@ export class ShareService {
     if (ownerId === userId) {
       throw new CannotAcceptOwnInvitationError();
     }
-    this.#assertRecipientMatch(record.recipientEmail, currentUser);
+    this.#assertRecipientAllowed(record, userId);
     const entityId = scope === 'project' ? project?.id : scan?.id;
     if (entityId !== undefined && (await this.#hasActiveAccess(scope, entityId, userId))) {
       throw new AccessAlreadyExistsError();
@@ -826,6 +1005,7 @@ export class ShareService {
 
     const scope = this.#scopeOf(updated);
     const invitationUrl = this.#inviteUrl(rawToken, scope);
+    const recipient = await this.#resolveResendRecipient(updated);
 
     if (scope === 'project') {
       if (updated.projectId === null) {
@@ -837,7 +1017,7 @@ export class ShareService {
       }
       await this.#sendInvitationEmail({
         scope: 'project',
-        recipientEmail: updated.recipientEmail,
+        recipientEmail: recipient.deliveryEmail,
         ownerDisplay: info.ownerEmail ?? 'the project owner',
         entityName: info.name,
         invitationUrl,
@@ -853,7 +1033,7 @@ export class ShareService {
       }
       await this.#sendInvitationEmail({
         scope: 'scan',
-        recipientEmail: updated.recipientEmail,
+        recipientEmail: recipient.deliveryEmail,
         ownerDisplay: info.ownerEmail ?? 'the scan owner',
         entityName: info.name,
         invitationUrl,
@@ -865,10 +1045,24 @@ export class ShareService {
       invitationId: updated.id,
       invitationUrl,
       recipientEmail: updated.recipientEmail,
+      recipientPublicUserId: recipient.publicUserId,
       expiresAt: expiresAt.toISOString(),
       status: 'PENDING',
       sentAt: now.toISOString(),
     };
+  }
+
+  /** Re-reads the bound recipient so a resend uses the address on file today. */
+  async #resolveResendRecipient(
+    record: InvitationRecord,
+  ): Promise<{ deliveryEmail: string | null; publicUserId: string | null }> {
+    if (record.recipientUserId === null) {
+      return { deliveryEmail: record.recipientEmail, publicUserId: null };
+    }
+
+    const user = await this.#repository.findUserById(record.recipientUserId);
+
+    return { deliveryEmail: user?.email ?? null, publicUserId: user?.publicUserId ?? null };
   }
 
   async listShares(userId: string, projectId: string): Promise<SharesListResult> {
@@ -879,13 +1073,7 @@ export class ShareService {
     const now = this.#clock();
 
     return {
-      pendingInvitations: invitations.map((invitation) => ({
-        invitationId: invitation.id,
-        recipientEmail: invitation.recipientEmail,
-        status: invitation.expiresAt.getTime() <= now.getTime() ? 'EXPIRED' : 'PENDING',
-        sentAt: invitation.sentAt.toISOString(),
-        expiresAt: invitation.expiresAt.toISOString(),
-      })),
+      pendingInvitations: invitations.map((row) => toPendingInvitation(row, now)),
       viewers: viewers.map((viewer) => ({
         userId: viewer.userId,
         revision: viewer.revision,
@@ -910,13 +1098,7 @@ export class ShareService {
     const now = this.#clock();
 
     return {
-      pendingInvitations: invitations.map((invitation) => ({
-        invitationId: invitation.id,
-        recipientEmail: invitation.recipientEmail,
-        status: invitation.expiresAt.getTime() <= now.getTime() ? 'EXPIRED' : 'PENDING',
-        sentAt: invitation.sentAt.toISOString(),
-        expiresAt: invitation.expiresAt.toISOString(),
-      })),
+      pendingInvitations: invitations.map((row) => toPendingInvitation(row, now)),
       viewers: viewers.map((viewer) => ({
         userId: viewer.userId,
         recipientUser: viewer.user,

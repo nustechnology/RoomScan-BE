@@ -20,9 +20,10 @@
   `POST /api/v1/projects/:projectId/invitations`,
   `POST /api/v1/scans/:scanId/invitations`,
   `POST /api/v1/invitations/:invitationId/resend`, and
-  `DELETE /api/v1/invitations/:invitationId`; recipients preview, accept, and
-  decline at `GET`, `POST`, and `POST` under `/api/v1/invitations/:token`; and
-  share management lists and revokes Viewer access at
+  `DELETE /api/v1/invitations/:invitationId`; recipients list the invitations
+  addressed to them at `GET /api/v1/invitations` and preview, accept, and
+  decline at `GET`, `POST`, and `POST` under `/api/v1/invitations/:reference`;
+  and share management lists and revokes Viewer access at
   `GET /api/v1/projects/:projectId/shares`,
   `DELETE /api/v1/projects/:projectId/shares/:userId`,
   `GET /api/v1/scans/:scanId/shares`, and
@@ -30,8 +31,8 @@
 - Generic share links (reusable, no recipient email) are created, listed, and
   revoked at `POST`, `GET`, and `DELETE` under
   `/api/v1/projects/:projectId/share-links` and `/api/v1/scans/:scanId/share-links`;
-  their tokens resolve through the same `/api/v1/invitations/:token` preview and
-  accept endpoints as invitations.
+  their tokens resolve through the same `/api/v1/invitations/:reference` preview
+  and accept endpoints as invitations.
 - Shared With Me lists, opens, and self-removes accepted projects for the
   current Viewer at `GET /api/v1/shared-projects`,
   `GET /api/v1/shared-projects/:projectId`, and
@@ -103,7 +104,7 @@ top of the general `/api/v1` policy (a request can be blocked by either):
 - `POST /api/v1/projects/:projectId/invitations` and
   `POST /api/v1/scans/:scanId/invitations` (invitation creation) allow 20
   requests per 15 minutes.
-- `POST /api/v1/invitations/:token/accept` (invitation acceptance) allows 30
+- `POST /api/v1/invitations/:reference/accept` (invitation acceptance) allows 30
   requests per 5 minutes.
 - `POST /api/v1/scans/:scanId/assets/upload-sessions` (upload-session
   creation) allows 30 requests per 15 minutes.
@@ -111,8 +112,8 @@ top of the general `/api/v1` policy (a request can be blocked by either):
   generation) allows 60 requests per 5 minutes.
 
 These policies apply only to the exact route named above — invitation
-preview (`GET /api/v1/invitations/:token`) and decline
-(`POST /api/v1/invitations/:token/decline`) are not subject to the
+preview (`GET /api/v1/invitations/:reference`) and decline
+(`POST /api/v1/invitations/:reference/decline`) are not subject to the
 invitation-accept policy, and listing scan assets
 (`GET /api/v1/scans/:scanId/assets`) is not subject to either scan-asset
 policy. All four counts, defaults, and windows are configurable via
@@ -160,6 +161,7 @@ Successful authentication always returns 200:
   "refreshToken": "roomscan-refresh-jwt",
   "user": {
     "id": "eb5d278f-c857-45c7-887d-7be65288cb75",
+    "publicUserId": "GP5HS2WKBE",
     "email": "user@example.com",
     "displayName": null,
     "provider": "apple"
@@ -167,8 +169,10 @@ Successful authentication always returns 200:
 }
 ```
 
-`user.email` and `user.displayName` may be `null`. The response never contains the Apple
-subject, verification claims, signing details or secrets.
+`user.email` and `user.displayName` may be `null`; `user.publicUserId` is always
+present and is assigned when the account is first provisioned. The response
+never contains the Apple subject, verification claims, signing details or
+secrets.
 
 Malformed or unverifiable Apple tokens return 401 with
 `INVALID_APPLE_IDENTITY_TOKEN`. Apple JWKS fetch failures return 503 with
@@ -230,8 +234,8 @@ The same per-IP rate-limit headers (`RateLimit`, `RateLimit-Policy`, and
 ## Current user profile
 
 `GET /api/v1/users/me` returns the authenticated current user's profile
-(`email` and `displayName`). `PATCH /api/v1/users/me` updates the current
-user's `displayName` and returns the full profile.
+(`publicUserId`, `email`, and `displayName`). `PATCH /api/v1/users/me` updates
+the current user's `displayName` and returns the full profile.
 
 | Method  | Endpoint           | Result                              |
 | ------- | ------------------ | ----------------------------------- |
@@ -242,12 +246,15 @@ user's `displayName` and returns the full profile.
 
 ```json
 {
+  "publicUserId": "GP5HS2WKBE",
   "email": "user@example.com",
   "displayName": null
 }
 ```
 
-`email` and `displayName` are nullable. The endpoint requires a valid Bearer
+`publicUserId` is the user's shareable identifier; see
+[Addressing an invitation](#addressing-an-invitation). `email` and `displayName`
+are nullable. The endpoint requires a valid Bearer
 access token. Errors: `401 UNAUTHORIZED` (missing/invalid token),
 `404 USER_NOT_FOUND` (the listening user no longer exists), and
 `500 INTERNAL_SERVER_ERROR`.
@@ -266,13 +273,15 @@ clear the stored value. The request body is strict and rejects unknown fields.
 ```json
 {
   "id": "eb5d278f-c857-45c7-887d-7be65288cb75",
+  "publicUserId": "GP5HS2WKBE",
   "email": "user@example.com",
   "displayName": "Nguyen Minh Anh",
   "provider": "apple"
 }
 ```
 
-`email` and `displayName` are nullable. The endpoint requires a valid Bearer
+`email` and `displayName` are nullable; `publicUserId` is always present. The
+endpoint requires a valid Bearer
 access token. Errors: `400 VALIDATION_ERROR` (invalid body),
 `401 UNAUTHORIZED` (missing/invalid token), `404 USER_NOT_FOUND` (the listening
 user no longer exists), and `500 INTERNAL_SERVER_ERROR`.
@@ -303,6 +312,16 @@ characters) returns `400 VALIDATION_ERROR`. Create Upload Session validates the
 header through the `validateRequest` middleware with `IdempotencyKeyHeaderSchema`,
 so a missing or malformed key returns `400 VALIDATION_ERROR` before the
 deprecated body alias is reconciled.
+
+A replayed body must still satisfy the current response contract, because the
+route parses every response whether it is fresh or replayed. Receipts are stored
+indefinitely and no job prunes them, so a response field added after a receipt
+was written has to be reconciled on the replay path rather than assumed absent.
+`POST /api/v1/projects/:projectId/invitations` does this for `recipientEmail`
+and `recipientPublicUserId`: a receipt written before invitations became
+addressable by public user id is replayed with both fields filled in as `null`
+where missing, so the retry answers its original `201` instead of
+`400 VALIDATION_ERROR`.
 
 Project, Scan, and Note single-resource responses include `revision` and return
 the strong `ETag: "N"` header. Project PATCH/DELETE, Scan PATCH/DELETE, and Note
@@ -869,16 +888,58 @@ Error behavior:
 Projects and scans are shared through expiring, token-based links. There are two
 kinds of shareable links:
 
-- **Per-recipient invitations** addressed to a specific recipient email. The
-  Owner creates an invitation, and the API sends an invitation email whose CTA
-  opens the link; the recipient (or any signed-in user who possesses the link)
-  accepts it and receives Viewer access. Each invitation is per-recipient:
-  creating a second invitation for the same email and scope while the first is
-  still pending returns `409 INVITATION_ALREADY_SENT`.
+- **Per-recipient invitations** addressed either to a public user id or to an
+  email address — exactly one of the two, never both. The Owner creates an
+  invitation, the API emails the recipient a link whose CTA opens it, and the
+  recipient accepts it and receives Viewer access. Creating a second invitation
+  for the same recipient and scope while the first is still pending returns
+  `409 INVITATION_ALREADY_SENT`; uniqueness is enforced per recipient channel by
+  the partial indexes `invitations_projectId_recipientEmail_pending_key`,
+  `invitations_scanId_recipientEmail_pending_key`,
+  `invitations_projectId_recipientUserId_pending_key`, and
+  `invitations_scanId_recipientUserId_pending_key`.
 - **Generic share links** with no recipient. Copying the link does not send an
   email; any signed-in user with the link can accept it and receive Viewer
   access. A share link is reusable and stays valid until it expires or the Owner
   revokes it, so multiple users can accept the same link.
+
+### Addressing an invitation
+
+Every user has a `publicUserId`: a random, unique, ten-character identifier over
+the alphabet `23456789ABCDEFGHJKMNPQRSTVWXYZ`, which omits `0`, `1`, `I`, `L`,
+`O`, and `U` so it survives being read aloud or retyped. It is stored uppercase
+in `users.publicId`, accepted case-insensitively on input, and returned by
+`GET /api/v1/users/me`, `PATCH /api/v1/users/me`, and `POST /api/v1/auth/apple`
+so a user can share it with whoever wants to invite them.
+
+Addressing an invitation by `recipientPublicUserId` binds it to that account:
+acceptance, preview, and decline require the signed-in user to be that user, and
+a different user gets `403 INVITATION_NOT_FOR_USER`. This is the reliable form,
+because the email address an Owner types has no relationship to the account the
+recipient signs in with — Apple's Hide My Email hands the account a
+`@privaterelay.appleid.com` address, and a user's Apple ID may simply differ from
+the address the Owner knows. Binding by user id is also what lets the invitation
+appear in the recipient's in-app list, which does not depend on mail delivery.
+
+`404 RECIPIENT_USER_NOT_FOUND` is a deliberate, documented exception to the
+existence-disclosure rule that the rest of the API follows: everywhere else a
+missing, deleted, revoked, or inaccessible resource collapses into the same
+`404` so a caller cannot probe for existence. A public user id is published by
+its owner precisely so other people can address them, so confirming that an id
+resolves is the feature rather than a leak, and refusing to distinguish "unknown
+id" from "typo" would make the invite screen unusable. The exposure is bounded:
+the id space is 30^10 (~5.9 × 10^14), invitation creation is the only endpoint
+that resolves an id, and it is rate limited to 20 requests per 15 minutes per IP.
+A malformed id and an unknown id return the identical response, so the endpoint
+never reveals which of the two it was. Do not copy this exception to other
+surfaces.
+
+Addressing an invitation by `recipientEmail` keeps the flow available for someone
+who has not signed up yet and therefore has no public user id. Such an invitation
+is **bearer-style**: any signed-in user holding the raw token may accept it, the
+same rule generic share links already follow. The recipient's signed-in email is
+not compared against the invited address, because that comparison rejects the
+legitimate recipient in exactly the Hide My Email case above.
 
 The raw token is an opaque, random base64url string of 32 bytes; only its
 SHA-256 hash is stored, so a leaked database never exposes a usable link. The
@@ -896,9 +957,10 @@ its assets without granting project-level access.
 | `POST`   | `/api/v1/projects/:projectId/invitations`              | Create a project invitation for an email; Owner only; `201`       |
 | `POST`   | `/api/v1/scans/:scanId/invitations`                    | Create a scan invitation for an email; Owner only; `201`          |
 | `POST`   | `/api/v1/invitations/:invitationId/resend`             | Resend a pending invitation; Owner only; `200`                    |
-| `GET`    | `/api/v1/invitations/:token`                           | Preview an invitation or share link; requires authentication      |
-| `POST`   | `/api/v1/invitations/:token/accept`                    | Accept and gain Viewer access; `200`                              |
-| `POST`   | `/api/v1/invitations/:token/decline`                   | Decline an invitation for the current user; `200`                 |
+| `GET`    | `/api/v1/invitations`                                  | List invitations addressed to the current user; `200`             |
+| `GET`    | `/api/v1/invitations/:reference`                       | Preview an invitation or share link; requires authentication      |
+| `POST`   | `/api/v1/invitations/:reference/accept`                | Accept and gain Viewer access; `200`                              |
+| `POST`   | `/api/v1/invitations/:reference/decline`               | Decline an invitation for the current user; `200`                 |
 | `DELETE` | `/api/v1/invitations/:invitationId`                    | Revoke a pending or expired invitation; Owner only; `200`         |
 | `GET`    | `/api/v1/projects/:projectId/shares`                   | List project pending invitations and accepted Viewers; Owner only |
 | `DELETE` | `/api/v1/projects/:projectId/shares/:userId`           | Revoke project Viewer access; Owner only; `200`                   |
@@ -911,49 +973,130 @@ its assets without granting project-level access.
 | `GET`    | `/api/v1/scans/:scanId/share-links`                    | List active scan share links; Owner only; `200`                   |
 | `DELETE` | `/api/v1/scans/:scanId/share-links/:shareLinkId`       | Revoke a scan share link; Owner only; `200`                       |
 
-Create invitation body:
+Create invitation body, addressed by public user id:
+
+```json
+{ "recipientPublicUserId": "GP5HS2WKBE", "expiresInSeconds": 604800 }
+```
+
+or by email address:
 
 ```json
 { "recipientEmail": "recipient@example.com", "expiresInSeconds": 604800 }
 ```
 
-`recipientEmail` is required. `expiresInSeconds` is optional; it defaults to the
-configured `INVITATION_TTL_SECONDS` and must be between 60 and 2,592,000 (30
+Exactly one of `recipientEmail` and `recipientPublicUserId` is required; sending
+both, or neither, returns `400 VALIDATION_ERROR`. An unknown public user id
+returns `404 RECIPIENT_USER_NOT_FOUND`, and an Owner addressing themselves
+returns `409 CANNOT_INVITE_SELF`. `expiresInSeconds` is optional; it defaults to
+the configured `INVITATION_TTL_SECONDS` and must be between 60 and 2,592,000 (30
 days). Create response `201`:
 
 ```json
 {
   "invitationId": "b1a2c3d4-e5f6-4890-abcd-ef1234567890",
-  "invitationUrl": "https://invite.roomscan.dev/invitations/AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-ab?scope=project",
-  "recipientEmail": "recipient@example.com",
+  "invitationUrl": "https://invite.roomscan.dev/invitations/AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-abXYZ?scope=project",
+  "recipientEmail": null,
+  "recipientPublicUserId": "GP5HS2WKBE",
   "expiresAt": "2026-08-05T10:00:00.000Z",
   "status": "PENDING",
   "sentAt": "2026-07-29T10:00:00.000Z"
 }
 ```
 
+Exactly one of `recipientEmail` and `recipientPublicUserId` is non-null in the
+response, matching how the invitation was addressed. For a user-bound
+invitation the email is delivered to whatever address that account has on file,
+which may be an Apple private relay address; when the account has no address at
+all the send is skipped and logged, the invitation is still created, and the
+recipient reaches it through `GET /api/v1/invitations`. A mail delivery failure
+is logged and never fails the request.
+
 `invitationUrl` is `{INVITATION_BASE_URL}/invitations/{rawToken}?scope={scope}`,
 where `scope` is `project` or `scan`. The `scope` query parameter is an
 informational hint only that lets a client (such as the mobile universal-link
 parser) know whether the link targets a project or a scan before it previews the
 token; it is never trusted server-side, and the preview, accept, and decline
-endpoints always resolve the scope from the token. Creating the invitation
-sends an AC5-style invitation email to `recipientEmail`; a mail delivery failure
-is logged and does not fail the request.
+endpoints always resolve the scope from the token. Creating the invitation sends
+an AC5-style invitation email to the recipient's delivery address.
 
 Resend `200` has the same shape as the create response. Resending a pending
 invitation rotates the token (the previous link stops working), extends
 `expiresAt` to `now + INVITATION_TTL_SECONDS`, updates `sentAt`, and re-sends
-the email.
+the email. For a user-bound invitation the delivery address is re-read from the
+recipient's account at resend time, so a changed address is picked up.
+
+### The invitation reference
+
+`GET`, `POST .../accept`, and `POST .../decline` under `/api/v1/invitations/`
+take a **reference** that is either form below; the two cannot be confused, and
+anything else returns `400 VALIDATION_ERROR`.
+
+- The raw link token: 43 base64url characters, from the invitation email, a
+  share link, or a universal link.
+- An invitation id (UUID), for an invitation the caller found in their own
+  `GET /api/v1/invitations` list. An id resolves **only** when the invitation is
+  bound to the calling user through `recipientUserId`; every other id returns
+  `404 INVITATION_NOT_FOUND`, because invitation ids are not secrets — the Owner
+  already sees them in `GET /api/v1/projects/:projectId/shares`.
+
+### Invitation inbox
+
+`GET /api/v1/invitations` returns the pending invitations addressed to the
+signed-in user by public user id, newest first. Email-addressed invitations are
+not listed: they are not bound to an account, so their link is the only way to
+reach them.
+
+The list is paginated with the standard `page` and `limit` query parameters
+(`limit` defaults to 20, maximum 100) and returns the standard `pagination`
+envelope. Rows are selected on the stored status `PENDING`, while each item's
+reported `status` is derived at read time, so an invitation whose `expiresAt`
+has passed but which the expiry job has not swept yet is listed as `EXPIRED`.
+Clients must handle `EXPIRED` in this list rather than assuming every item is
+actionable.
+
+```json
+{
+  "pagination": { "page": 1, "limit": 20, "total": 1, "totalPages": 1 },
+  "items": [
+    {
+      "invitationId": "b1a2c3d4-e5f6-4890-abcd-ef1234567890",
+      "scope": "project",
+      "project": {
+        "id": "a1b2c3d4-e5f6-4890-abcd-ef1234567890",
+        "name": "District 2 Apartment",
+        "description": null,
+        "thumbnail": null,
+        "owner": {
+          "id": "eb5d278f-c857-45c7-887d-7be65288cb75",
+          "email": "owner@example.com",
+          "displayName": null
+        },
+        "scanCount": 4
+      },
+      "scan": null,
+      "status": "PENDING",
+      "invitedBy": {
+        "id": "eb5d278f-c857-45c7-887d-7be65288cb75",
+        "email": "owner@example.com",
+        "displayName": null
+      },
+      "sentAt": "2026-07-29T10:00:00.000Z",
+      "expiresAt": "2026-08-05T10:00:00.000Z"
+    }
+  ]
+}
+```
 
 Preview `200` resolves either an invitation or a generic share link and returns
 a `type` (`invitation` or `share-link`) and `scope` (`project` or `scan`) plus
 the matching entity (`project` or `scan`); the other entity is `null`. An
-invitation adds `sentAt` and its lifecycle `status`; a share link has no
-recipient and reports `ACTIVE`, `EXPIRED`, or `REVOKED`. The preview endpoint
-requires a valid Bearer access token. The invitation `recipientEmail` is always
-submitted, and `hasAccess` reports whether that user already has active access. A
-project-scope invitation preview:
+invitation adds `sentAt`, its lifecycle `status`, and how it was addressed;
+a share link has no recipient and reports `ACTIVE`, `EXPIRED`, or `REVOKED`. The
+preview endpoint requires a valid Bearer access token. An invitation preview
+always carries both `recipientEmail` and `recipientPublicUserId`, exactly one of
+which is non-null, and `hasAccess` reports whether the calling user already has
+active access. A project-scope invitation preview:
 
 ```json
 {
@@ -974,6 +1117,7 @@ project-scope invitation preview:
   "scan": null,
   "status": "PENDING",
   "recipientEmail": "recipient@example.com",
+  "recipientPublicUserId": null,
   "sentAt": "2026-07-29T10:00:00.000Z",
   "expiresAt": "2026-08-05T10:00:00.000Z",
   "hasAccess": false
@@ -1003,11 +1147,17 @@ message "This project/scan is no longer available." An unknown token or one that
 resolves to no record returns `404 INVITATION_NOT_FOUND` (or
 `SHARE_LINK_NOT_FOUND` for share links).
 
-Per-recipient invitations are restricted to the invited recipient: when the
-current user's email does not match the invited email (case-insensitive,
-null-safe), preview, accept, or decline returns `403 INVITATION_NOT_FOR_USER`
-with the message "You do not have permission to access this item." Generic share
-links (which have no recipient) are not subject to this check.
+An invitation bound to a user is restricted to that user: when the signed-in
+user is not the one named by `recipientUserId`, preview, accept, and decline
+return `403 INVITATION_NOT_FOR_USER` with the message "You do not have
+permission to access this item."
+
+An invitation addressed to an email address carries no such restriction, and
+neither do generic share links: any signed-in user holding the raw token may
+preview, accept, or decline it. The signed-in user's own email address is never
+compared against the invited address — the token is the secret, and the
+comparison would reject the real recipient whenever their Apple account uses a
+different address than the one the Owner typed.
 
 Accept `200` also discriminates on `type` and `scope` and returns the matching
 entity. A project-scope invitation accept:
@@ -1069,6 +1219,8 @@ List shares `200`:
     {
       "invitationId": "b1a2c3d4-e5f6-4890-abcd-ef1234567890",
       "recipientEmail": "recipient@example.com",
+      "recipientPublicUserId": null,
+      "recipientDisplayName": null,
       "status": "PENDING",
       "sentAt": "2026-07-29T10:00:00.000Z",
       "expiresAt": "2026-08-05T10:00:00.000Z"
@@ -1109,8 +1261,11 @@ Validation rules:
 
 - `projectId`, `userId`, `invitationId`: UUID.
 - `recipientEmail`: a valid email address.
-- `token`: exactly 43 characters from the base64url alphabet; anything else is
-  malformed.
+- `recipientPublicUserId`: exactly 10 characters from
+  `23456789ABCDEFGHJKMNPQRSTVWXYZ`, accepted in either case and normalized to
+  uppercase; anything else is malformed.
+- `reference`: either exactly 43 characters from the base64url alphabet (a link
+  token) or a UUID (an invitation id); anything else is malformed.
 - `expiresInSeconds`: optional integer, 60 to 2,592,000; unknown fields are
   rejected.
 
@@ -1126,14 +1281,20 @@ Business rules:
   `(scan, recipientEmail)`: creating a duplicate returns `409
 INVITATION_ALREADY_SENT`. Re-inviting an email whose earlier invitation is
   revoked, declined, accepted, or expired creates a fresh invitation. Partial
-  unique indexes on `(projectId, recipientEmail)` and `(scanId, recipientEmail)`
-  for `PENDING` rows make creation atomic, so concurrent duplicates resolve to
-  `409` instead of creating a second pending link.
+  unique indexes on `(projectId, recipientEmail)`, `(scanId, recipientEmail)`,
+  `(projectId, recipientUserId)`, and `(scanId, recipientUserId)` for `PENDING`
+  rows make creation atomic, so concurrent duplicates resolve to `409` instead of
+  creating a second pending link.
+- Every invitation carries exactly one recipient channel. The database enforces
+  this with the `invitations_recipient_channel_check` constraint
+  (`num_nonnulls("recipientEmail", "recipientUserId") = 1`), so a row can never
+  be addressed twice or not at all.
 - Invitations are per-recipient: the first acceptance marks the invitation
   `ACCEPTED`; an already accepted or declined invitation cannot be accepted
-  again. Previewing, accepting, or declining a per-recipient invitation requires
-  the current user's email to match the invited email; otherwise the endpoint
-  returns `403 INVITATION_NOT_FOR_USER`.
+  again. Previewing, accepting, or declining an invitation bound to a user
+  requires the signed-in user to be that user; otherwise the endpoint returns
+  `403 INVITATION_NOT_FOR_USER`. An invitation addressed to an email address is
+  bearer-style and carries no such check.
 - An invitation can be revoked while pending or expired; revocation is
   idempotent. Revoking an expired invitation lets the owner clean up a stale link
   and returns the normal revoke `200` instead of `409 INVITATION_EXPIRED`.
@@ -1166,7 +1327,7 @@ Share-link create `201`:
 ```json
 {
   "shareLinkId": "c0ffee00-0000-4000-8000-0000000000aa",
-  "shareLinkUrl": "https://invite.roomscan.dev/invitations/AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-ab?scope=project",
+  "shareLinkUrl": "https://invite.roomscan.dev/invitations/AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-abXYZ?scope=project",
   "scope": "project",
   "expiresAt": "2026-08-05T10:00:00.000Z"
 }
@@ -1195,8 +1356,8 @@ Error behavior:
 - `401 UNAUTHORIZED`: missing/invalid access token where authentication is
   required (preview, accept, decline, and all Owner-only endpoints).
 - `403 NOT_OWNER`: a non-owner attempts share management.
-- `403 INVITATION_NOT_FOR_USER`: an authenticated user's email does not match the
-  invited email (per-recipient invitations only); the caller lacks permission.
+- `403 INVITATION_NOT_FOR_USER`: the invitation is bound to a different user
+  (user-addressed invitations only); the caller lacks permission.
 - `404 PROJECT_NOT_FOUND`: project missing, deleted, or inaccessible.
 - `404 SCAN_NOT_FOUND`: scan missing, deleted, or inaccessible.
 - `404 INVITATION_NOT_FOUND`: unknown token or invitation, or the invitation's
@@ -1207,7 +1368,12 @@ Error behavior:
   deleted before the current user previewed, accepted, or declined it; the link
   is unusable.
 - `404 ACCESS_NOT_FOUND`: no access record exists for the user being unshared.
-- `409 INVITATION_ALREADY_SENT`: a pending invitation already targets this email.
+- `404 RECIPIENT_USER_NOT_FOUND`: no user matches the supplied
+  `recipientPublicUserId`, or it is malformed.
+- `409 CANNOT_INVITE_SELF`: the Owner addressed an invitation to their own
+  public user id.
+- `409 INVITATION_ALREADY_SENT`: a pending invitation already targets this
+  recipient.
 - `409 INVITATION_ALREADY_ACCEPTED`: the invitation was already accepted.
 - `409 INVITATION_EXPIRED`: the link is past its expiry.
 - `409 INVITATION_REVOKED`: the link was revoked.

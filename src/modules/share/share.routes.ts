@@ -17,9 +17,11 @@ import { ProjectIdParamSchema, type ProjectIdParam } from '../project/project.sc
 import { ScanNotFoundError } from '../scan/scan.errors.js';
 import { ScanIdParamSchema, type ScanIdParam } from '../scan/scan.schemas.js';
 import type { ShareLinkService } from './share-link.service.js';
+import type { InvitationCreateInput } from './share.types.js';
 import {
   AccessAlreadyExistsError,
   CannotAcceptOwnInvitationError,
+  CannotInviteSelfError,
   InvitationAlreadyAcceptedError,
   InvitationAlreadySentError,
   InvitationDeclinedError,
@@ -29,6 +31,7 @@ import {
   InvitationRevokedError,
   NotOwnerError,
   ProjectNotShareableError,
+  RecipientUserNotFoundError,
   ScanNotShareableError,
   ShareLinkExpiredError,
   ShareLinkNotFoundError,
@@ -45,7 +48,9 @@ import {
   InvitationResendResponseSchema,
   InvitationRevokeResponseSchema,
   InvitationTokenParamSchema,
+  ListReceivedInvitationsQuerySchema,
   ProjectShareLinkIdParamSchema,
+  ReceivedInvitationsResponseSchema,
   ScanShareLinkIdParamSchema,
   ScanShareRevokeParamsSchema,
   ScanSharesListResponseSchema,
@@ -59,6 +64,7 @@ import {
   type InvitationCreateBody,
   type InvitationIdParam,
   type InvitationTokenParam,
+  type ListReceivedInvitationsQuery,
   type ProjectShareLinkIdParam,
   type ScanShareLinkIdParam,
   type ScanShareRevokeParams,
@@ -162,6 +168,20 @@ function mapError(error: unknown): AppError | undefined {
       message: 'Invitation has already been declined',
     });
   }
+  if (error instanceof RecipientUserNotFoundError) {
+    return new AppError({
+      statusCode: 404,
+      code: 'RECIPIENT_USER_NOT_FOUND',
+      message: 'No user matches this user ID',
+    });
+  }
+  if (error instanceof CannotInviteSelfError) {
+    return new AppError({
+      statusCode: 409,
+      code: 'CANNOT_INVITE_SELF',
+      message: 'The resource owner cannot invite themselves',
+    });
+  }
   if (error instanceof InvitationNotForUserError) {
     return new AppError({
       statusCode: 403,
@@ -207,6 +227,25 @@ function mapError(error: unknown): AppError | undefined {
   return undefined;
 }
 
+/** The body schema guarantees exactly one recipient field is present. */
+function toInvitationCreateInput(body: InvitationCreateBody): InvitationCreateInput {
+  const ttl =
+    body.expiresInSeconds === undefined ? {} : { expiresInSeconds: body.expiresInSeconds };
+
+  if (body.recipientPublicUserId !== undefined) {
+    return { recipientPublicUserId: body.recipientPublicUserId, ...ttl };
+  }
+  if (body.recipientEmail !== undefined) {
+    return { recipientEmail: body.recipientEmail, ...ttl };
+  }
+
+  throw new AppError({
+    statusCode: 400,
+    code: 'VALIDATION_ERROR',
+    message: 'Provide exactly one of recipientEmail or recipientPublicUserId',
+  });
+}
+
 export function createShareRouter({
   shareService,
   shareLinkService,
@@ -236,12 +275,7 @@ export function createShareRouter({
           headers: { 'Idempotency-Key': string };
         };
         const key = resolveIdempotencyKey(headers['Idempotency-Key']);
-        const input = {
-          recipientEmail: body.recipientEmail,
-          ...(body.expiresInSeconds === undefined
-            ? {}
-            : { expiresInSeconds: body.expiresInSeconds }),
-        };
+        const input = toInvitationCreateInput(body);
         const result =
           typeof shareService.createInvitationIdempotently === 'function'
             ? await shareService.createInvitationIdempotently(userId, params.projectId, input, key)
@@ -270,12 +304,11 @@ export function createShareRouter({
           body: InvitationCreateBody;
           params: ScanIdParam;
         };
-        const result = await shareService.createScanInvitation(userId, params.scanId, {
-          recipientEmail: body.recipientEmail,
-          ...(body.expiresInSeconds === undefined
-            ? {}
-            : { expiresInSeconds: body.expiresInSeconds }),
-        });
+        const result = await shareService.createScanInvitation(
+          userId,
+          params.scanId,
+          toInvitationCreateInput(body),
+        );
         const responseBody = InvitationCreateResponseSchema.parse(result);
 
         response.status(201).json(responseBody);
@@ -304,14 +337,31 @@ export function createShareRouter({
   );
 
   router.get(
-    '/invitations/:token',
+    '/invitations',
+    requireAuth,
+    validateRequest({ query: ListReceivedInvitationsQuerySchema }),
+    async (request, response, next) => {
+      try {
+        const { query } = response.locals.validated as { query: ListReceivedInvitationsQuery };
+        const result = await shareService.listReceivedInvitations(getUserId(request), query);
+        const responseBody = ReceivedInvitationsResponseSchema.parse(result);
+
+        response.status(200).json(responseBody);
+      } catch (error) {
+        next(mapError(error) ?? error);
+      }
+    },
+  );
+
+  router.get(
+    '/invitations/:reference',
     requireAuth,
     validateRequest({ params: InvitationTokenParamSchema }),
     async (request, response, next) => {
       try {
         const { params } = response.locals.validated as { params: InvitationTokenParam };
         const currentUser = request.locals!.currentUser;
-        const result = await shareService.previewInvitation(params.token, {
+        const result = await shareService.previewInvitation(params.reference, {
           id: currentUser.id,
           email: currentUser.email,
         });
@@ -325,7 +375,7 @@ export function createShareRouter({
   );
 
   router.post(
-    '/invitations/:token/accept',
+    '/invitations/:reference/accept',
     requireAuth,
     invitationAcceptRateLimiter,
     validateRequest({ params: InvitationTokenParamSchema }),
@@ -335,7 +385,7 @@ export function createShareRouter({
         const { params } = response.locals.validated as { params: InvitationTokenParam };
         const result = await shareService.acceptInvitation(
           { id: currentUser.id, email: currentUser.email },
-          params.token,
+          params.reference,
         );
         const responseBody = InvitationAcceptResponseSchema.parse(result);
 
@@ -347,7 +397,7 @@ export function createShareRouter({
   );
 
   router.post(
-    '/invitations/:token/decline',
+    '/invitations/:reference/decline',
     requireAuth,
     validateRequest({ params: InvitationTokenParamSchema }),
     async (request, response, next) => {
@@ -356,7 +406,7 @@ export function createShareRouter({
         const { params } = response.locals.validated as { params: InvitationTokenParam };
         const result = await shareService.declineInvitation(
           { id: currentUser.id, email: currentUser.email },
-          params.token,
+          params.reference,
         );
         const responseBody = InvitationDeclineResponseSchema.parse(result);
 

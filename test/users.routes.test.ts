@@ -16,6 +16,7 @@ import { UserNotFoundError } from '../src/modules/users/users.errors.js';
 import { createUsersRouter } from '../src/modules/users/users.routes.js';
 
 const USER_ID = 'eb5d278f-c857-45c7-887d-7be65288cb75';
+const PUBLIC_USER_ID = 'GP5HS2WKBE';
 
 function buildApp() {
   const getMe = vi.fn<UserProfileService['getMe']>();
@@ -29,6 +30,7 @@ function buildApp() {
   };
   const findById = vi.fn<CurrentUserRepository['findById']>().mockResolvedValue({
     id: USER_ID,
+    publicUserId: PUBLIC_USER_ID,
     email: 'owner@example.com',
     displayName: null,
   });
@@ -57,6 +59,7 @@ describe('users router', () => {
   it('returns the current user email and displayName', async () => {
     const { app, getMe } = buildApp();
     getMe.mockResolvedValue({
+      publicUserId: PUBLIC_USER_ID,
       email: 'owner@example.com',
       displayName: 'Nguyen Minh Anh',
     });
@@ -66,6 +69,7 @@ describe('users router', () => {
       .expect(200);
     const body = GetMeResponseSchema.parse(response.body as unknown);
     expect(body).toEqual({
+      publicUserId: PUBLIC_USER_ID,
       email: 'owner@example.com',
       displayName: 'Nguyen Minh Anh',
     });
@@ -76,6 +80,7 @@ describe('users router', () => {
     const { app, updateMe } = buildApp();
     updateMe.mockResolvedValue({
       id: USER_ID,
+      publicUserId: PUBLIC_USER_ID,
       email: 'owner@example.com',
       displayName: 'Nguyen Minh Anh',
       provider: 'apple',
@@ -88,6 +93,7 @@ describe('users router', () => {
     const body = UserProfileResponseSchema.parse(response.body as unknown);
     expect(body).toEqual({
       id: USER_ID,
+      publicUserId: PUBLIC_USER_ID,
       email: 'owner@example.com',
       displayName: 'Nguyen Minh Anh',
       provider: 'apple',
@@ -99,6 +105,7 @@ describe('users router', () => {
     const { app, updateMe } = buildApp();
     updateMe.mockResolvedValue({
       id: USER_ID,
+      publicUserId: PUBLIC_USER_ID,
       email: 'owner@example.com',
       displayName: null,
       provider: 'apple',

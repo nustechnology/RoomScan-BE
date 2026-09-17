@@ -109,3 +109,17 @@ export class NotOwnerError extends Error {
     this.name = 'NotOwnerError';
   }
 }
+
+export class RecipientUserNotFoundError extends Error {
+  constructor() {
+    super('No user matches this user ID');
+    this.name = 'RecipientUserNotFoundError';
+  }
+}
+
+export class CannotInviteSelfError extends Error {
+  constructor() {
+    super('The resource owner cannot invite themselves');
+    this.name = 'CannotInviteSelfError';
+  }
+}

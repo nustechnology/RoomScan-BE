@@ -31,7 +31,12 @@ describe('Sync HTTP endpoints', () => {
   };
   const currentUserRepository: CurrentUserRepository = {
     findById: vi.fn((id: string) =>
-      Promise.resolve({ id, email: 'owner@example.com', displayName: null }),
+      Promise.resolve({
+        id,
+        publicUserId: 'GP5HS2WKBE',
+        email: 'owner@example.com',
+        displayName: null,
+      }),
     ),
     updateDisplayName: vi.fn(),
   };
