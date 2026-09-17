@@ -11,17 +11,24 @@ import type {
 import { InvitationAlreadySentError } from '../../modules/share/share.errors.js';
 import type {
   InvitationCreateData,
+  InvitationRecipientData,
   InvitationRecord,
   InvitationCreateResult,
   InvitationWithEntity,
+  PendingInvitationRow,
   ShareLinkCreateData,
   ShareLinkRecord,
   ShareLinkResourceData,
   ShareLinkWithEntity,
   ShareProjectInfo,
+  ShareProjectSummary,
+  ShareRecipientUser,
   ShareRepository,
   ShareScanInfo,
+  ShareScanSummary,
+  ShareUserSummary,
 } from '../../modules/share/share.types.js';
+import { toSkipTake, type PaginationParams } from '../../common/pagination/pagination.js';
 import type { PrismaIdempotencyExecutor } from './prisma-idempotency.js';
 import {
   refreshProjectRollup,
@@ -36,6 +43,7 @@ const invitationSelect = {
   scanId: true,
   createdById: true,
   recipientEmail: true,
+  recipientUserId: true,
   tokenHash: true,
   status: true,
   expiresAt: true,
@@ -53,7 +61,8 @@ interface InvitationRow {
   projectId: string | null;
   scanId: string | null;
   createdById: string;
-  recipientEmail: string;
+  recipientEmail: string | null;
+  recipientUserId: string | null;
   tokenHash: string;
   status: 'PENDING' | 'ACCEPTED' | 'DECLINED' | 'REVOKED';
   expiresAt: Date;
@@ -162,6 +171,7 @@ function toInvitationRecord(row: InvitationRow): InvitationRecord {
     scanId: row.scanId,
     createdById: row.createdById,
     recipientEmail: row.recipientEmail,
+    recipientUserId: row.recipientUserId,
     tokenHash: row.tokenHash,
     status: row.status,
     expiresAt: row.expiresAt,
@@ -189,9 +199,121 @@ function toShareLinkRecord(row: ShareLinkRow): ShareLinkRecord {
   };
 }
 
+const recipientUserSelect = {
+  select: {
+    id: true,
+    publicId: true,
+    email: true,
+    displayName: true,
+  },
+} as const;
+
+const creatorUserSelect = {
+  select: {
+    id: true,
+    email: true,
+    displayName: true,
+  },
+} as const;
+
+interface RecipientUserRow {
+  id: string;
+  publicId: string;
+  email: string | null;
+  displayName: string | null;
+}
+
+function toRecipientUser(row: RecipientUserRow | null | undefined): ShareRecipientUser | null {
+  return row === null || row === undefined
+    ? null
+    : { id: row.id, publicUserId: row.publicId, email: row.email, displayName: row.displayName };
+}
+
+interface ProjectSummaryRow {
+  id: string;
+  name: string;
+  description: string | null;
+  owner: ShareUserSummary;
+  scans: Array<{ thumbnail: string | null }>;
+  _count: { scans: number };
+}
+
+interface ScanSummaryRow {
+  id: string;
+  projectId: string;
+  name: string;
+  description: string | null;
+  thumbnail: string | null;
+  creator: ShareUserSummary;
+  project: { ownerId: string };
+  _count: { notes: number };
+}
+
+function toProjectSummary(row: ProjectSummaryRow | null): ShareProjectSummary | null {
+  return row === null
+    ? null
+    : {
+        id: row.id,
+        name: row.name,
+        description: row.description,
+        thumbnail: row.scans[0]?.thumbnail ?? null,
+        owner: row.owner,
+        scanCount: row._count.scans,
+      };
+}
+
+function toScanSummary(row: ScanSummaryRow | null): ShareScanSummary | null {
+  return row === null
+    ? null
+    : {
+        id: row.id,
+        projectId: row.projectId,
+        name: row.name,
+        description: row.description,
+        thumbnail: row.thumbnail,
+        noteCount: row._count.notes,
+        creator: row.creator,
+        ownerId: row.project.ownerId,
+      };
+}
+
+function toInvitationWithEntity(
+  row: InvitationRow & {
+    recipient: RecipientUserRow | null;
+    creator: ShareUserSummary;
+    project: ProjectSummaryRow | null;
+    scan: ScanSummaryRow | null;
+  },
+): InvitationWithEntity {
+  return {
+    invitation: toInvitationRecord(row),
+    recipient: toRecipientUser(row.recipient),
+    creator: row.creator,
+    project: toProjectSummary(row.project),
+    scan: toScanSummary(row.scan),
+  };
+}
+
+/** Matches the recipient binding an invitation stores; exactly one is set. */
+function recipientWhere(data: InvitationRecipientData): {
+  recipientEmail: string | null;
+  recipientUserId: string | null;
+} {
+  return data.recipientEmail !== undefined
+    ? { recipientEmail: data.recipientEmail, recipientUserId: null }
+    : { recipientEmail: null, recipientUserId: data.recipientUserId };
+}
+
 type ShareClient = Pick<
   PrismaClient,
-  'invitation' | 'projectAccess' | 'scanAccess' | 'shareLink' | 'project' | 'scan' | '$transaction'
+  | 'invitation'
+  | 'projectAccess'
+  | 'scanAccess'
+  | 'shareLink'
+  | 'project'
+  | 'scan'
+  | 'user'
+  | '$transaction'
 >;
 
 export class PrismaShareRepository implements ShareRepository {
@@ -311,11 +433,12 @@ export class PrismaShareRepository implements ShareRepository {
         data.projectId !== undefined
           ? { projectId: data.projectId, scanId: null }
           : { scanId: data.scanId, projectId: null };
+      const recipient = recipientWhere(data);
 
       await transaction.invitation.updateMany({
         where: {
           ...scopeWhere,
-          recipientEmail: data.recipientEmail,
+          ...recipient,
           status: InvitationStatus.PENDING,
           expiresAt: { lte: data.sentAt },
         },
@@ -329,8 +452,8 @@ export class PrismaShareRepository implements ShareRepository {
         const row = await transaction.invitation.create({
           data: {
             ...scopeWhere,
+            ...recipient,
             createdById: data.createdById,
-            recipientEmail: data.recipientEmail,
             tokenHash: data.tokenHash,
             status: InvitationStatus.PENDING,
             expiresAt: data.expiresAt,
@@ -353,21 +476,21 @@ export class PrismaShareRepository implements ShareRepository {
       id: string;
       projectId: string;
       createdById: string;
-      recipientEmail: string;
       tokenHash: string;
       expiresAt: Date;
       sentAt: Date;
-    },
+    } & InvitationRecipientData,
     context: IdempotencyContext,
     result: InvitationCreateResult,
   ): Promise<IdempotencyResult<InvitationCreateResult>> {
     if (this.#idempotency === undefined)
       throw new Error('Invitation idempotency is not configured');
+    const recipient = recipientWhere(data);
     return await this.#idempotency.execute(context, 201, async (transaction) => {
       await transaction.invitation.updateMany({
         where: {
           projectId: data.projectId,
-          recipientEmail: data.recipientEmail,
+          ...recipient,
           status: InvitationStatus.PENDING,
           expiresAt: { lte: data.sentAt },
         },
@@ -379,7 +502,7 @@ export class PrismaShareRepository implements ShareRepository {
             id: data.id,
             projectId: data.projectId,
             createdById: data.createdById,
-            recipientEmail: data.recipientEmail,
+            ...recipient,
             tokenHash: data.tokenHash,
             status: InvitationStatus.PENDING,
             expiresAt: data.expiresAt,
@@ -408,6 +531,8 @@ export class PrismaShareRepository implements ShareRepository {
       },
       select: {
         ...invitationSelect,
+        recipient: recipientUserSelect,
+        creator: creatorUserSelect,
         project: shareProjectSummarySelect,
         scan: shareScanSummarySelect,
       },
@@ -417,33 +542,7 @@ export class PrismaShareRepository implements ShareRepository {
       return null;
     }
 
-    return {
-      invitation: toInvitationRecord(row),
-      project:
-        row.project === null
-          ? null
-          : {
-              id: row.project.id,
-              name: row.project.name,
-              description: row.project.description,
-              thumbnail: row.project.scans[0]?.thumbnail ?? null,
-              owner: row.project.owner,
-              scanCount: row.project._count.scans,
-            },
-      scan:
-        row.scan === null
-          ? null
-          : {
-              id: row.scan.id,
-              projectId: row.scan.projectId,
-              name: row.scan.name,
-              description: row.scan.description,
-              thumbnail: row.scan.thumbnail,
-              noteCount: row.scan._count.notes,
-              creator: row.scan.creator,
-              ownerId: row.scan.project.ownerId,
-            },
-    };
+    return toInvitationWithEntity(row);
   }
 
   async findInvitationById(id: string): Promise<InvitationRecord | null> {
@@ -682,22 +781,100 @@ export class PrismaShareRepository implements ShareRepository {
     return row === null ? null : toInvitationRecord(row);
   }
 
-  async listPendingByProject(projectId: string): Promise<InvitationRecord[]> {
+  async listPendingByProject(projectId: string): Promise<PendingInvitationRow[]> {
     const rows = await this.#client.invitation.findMany({
       where: { projectId, status: InvitationStatus.PENDING },
       orderBy: [{ sentAt: 'desc' }, { id: 'desc' }],
-      select: invitationSelect,
+      select: { ...invitationSelect, recipient: recipientUserSelect },
     });
-    return rows.map(toInvitationRecord);
+    return rows.map((row) => ({
+      invitation: toInvitationRecord(row),
+      recipient: toRecipientUser(row.recipient),
+    }));
   }
 
-  async listPendingByScan(scanId: string): Promise<InvitationRecord[]> {
+  async listPendingByScan(scanId: string): Promise<PendingInvitationRow[]> {
     const rows = await this.#client.invitation.findMany({
       where: { scanId, status: InvitationStatus.PENDING },
       orderBy: [{ sentAt: 'desc' }, { id: 'desc' }],
-      select: invitationSelect,
+      select: { ...invitationSelect, recipient: recipientUserSelect },
     });
-    return rows.map(toInvitationRecord);
+    return rows.map((row) => ({
+      invitation: toInvitationRecord(row),
+      recipient: toRecipientUser(row.recipient),
+    }));
+  }
+
+  async findUserByPublicId(publicUserId: string): Promise<ShareRecipientUser | null> {
+    const row = await this.#client.user.findUnique({
+      where: { publicId: publicUserId },
+      select: recipientUserSelect.select,
+    });
+    return toRecipientUser(row);
+  }
+
+  async findUserById(userId: string): Promise<ShareRecipientUser | null> {
+    const row = await this.#client.user.findUnique({
+      where: { id: userId },
+      select: recipientUserSelect.select,
+    });
+    return toRecipientUser(row);
+  }
+
+  async findInvitationForRecipient(
+    invitationId: string,
+    userId: string,
+  ): Promise<InvitationWithEntity | null> {
+    const row = await this.#client.invitation.findFirst({
+      where: {
+        id: invitationId,
+        recipientUserId: userId,
+        OR: [
+          { projectId: { not: null }, project: { deletedAt: null } },
+          { scanId: { not: null }, scan: { deletedAt: null, project: { deletedAt: null } } },
+        ],
+      },
+      select: {
+        ...invitationSelect,
+        recipient: recipientUserSelect,
+        creator: creatorUserSelect,
+        project: shareProjectSummarySelect,
+        scan: shareScanSummarySelect,
+      },
+    });
+    return row === null ? null : toInvitationWithEntity(row);
+  }
+
+  async listReceivedInvitations(
+    userId: string,
+    pagination: PaginationParams,
+  ): Promise<{ items: InvitationWithEntity[]; total: number }> {
+    const where = {
+      recipientUserId: userId,
+      status: InvitationStatus.PENDING,
+      OR: [
+        { projectId: { not: null }, project: { deletedAt: null } },
+        { scanId: { not: null }, scan: { deletedAt: null, project: { deletedAt: null } } },
+      ],
+    };
+    const { skip, take } = toSkipTake(pagination);
+    const [rows, total] = await this.#client.$transaction([
+      this.#client.invitation.findMany({
+        where,
+        orderBy: [{ sentAt: 'desc' }, { id: 'desc' }],
+        skip,
+        take,
+        select: {
+          ...invitationSelect,
+          recipient: recipientUserSelect,
+          creator: creatorUserSelect,
+          project: shareProjectSummarySelect,
+          scan: shareScanSummarySelect,
+        },
+      }),
+      this.#client.invitation.count({ where }),
+    ]);
+    return { items: rows.map(toInvitationWithEntity), total };
   }
 
   async findActiveViewerAccess(projectId: string, userId: string): Promise<{ id: string } | null> {
@@ -908,30 +1085,8 @@ export class PrismaShareRepository implements ShareRepository {
 
     return {
       shareLink: toShareLinkRecord(row),
-      project:
-        row.project === null
-          ? null
-          : {
-              id: row.project.id,
-              name: row.project.name,
-              description: row.project.description,
-              thumbnail: row.project.scans[0]?.thumbnail ?? null,
-              owner: row.project.owner,
-              scanCount: row.project._count.scans,
-            },
-      scan:
-        row.scan === null
-          ? null
-          : {
-              id: row.scan.id,
-              projectId: row.scan.projectId,
-              name: row.scan.name,
-              description: row.scan.description,
-              thumbnail: row.scan.thumbnail,
-              noteCount: row.scan._count.notes,
-              creator: row.scan.creator,
-              ownerId: row.scan.project.ownerId,
-            },
+      project: toProjectSummary(row.project),
+      scan: toScanSummary(row.scan),
     };
   }
 

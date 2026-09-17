@@ -17,6 +17,7 @@ describe('AuthService', () => {
     });
     const upsertAppleUser = vi.fn<AppleUserRepository['upsertAppleUser']>().mockResolvedValue({
       id: 'eb5d278f-c857-45c7-887d-7be65288cb75',
+      publicUserId: 'GP5HS2WKBE',
       email: 'user@example.com',
       displayName: null,
       provider: 'apple',
@@ -40,6 +41,7 @@ describe('AuthService', () => {
       refreshToken: 'refresh-token',
       user: {
         id: 'eb5d278f-c857-45c7-887d-7be65288cb75',
+        publicUserId: 'GP5HS2WKBE',
         email: 'user@example.com',
         displayName: null,
         provider: 'apple',
@@ -86,6 +88,7 @@ describe('AuthService', () => {
     });
     const upsertAppleUser = vi.fn<AppleUserRepository['upsertAppleUser']>().mockResolvedValue({
       id: 'eb5d278f-c857-45c7-887d-7be65288cb75',
+      publicUserId: 'GP5HS2WKBE',
       email: 'user@example.com',
       displayName: null,
       provider: 'apple',

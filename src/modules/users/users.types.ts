@@ -1,5 +1,6 @@
 export interface ProfileRecord {
   id: string;
+  publicUserId: string;
   email: string | null;
   displayName: string | null;
 }
@@ -18,6 +19,7 @@ export interface UpdateMeInput {
 }
 
 export interface GetMeResult {
+  publicUserId: string;
   email: string | null;
   displayName: string | null;
 }

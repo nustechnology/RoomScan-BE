@@ -2,6 +2,7 @@ import type {
   IdempotencyContext,
   IdempotencyResult,
 } from '../../common/idempotency/idempotency.types.js';
+import type { PaginationMeta, PaginationParams } from '../../common/pagination/pagination.js';
 
 export type InvitationStatus = 'PENDING' | 'ACCEPTED' | 'DECLINED' | 'REVOKED';
 export type InvitationViewStatus = 'PENDING' | 'EXPIRED' | 'ACCEPTED' | 'DECLINED' | 'REVOKED';
@@ -10,6 +11,14 @@ export type ShareLinkViewStatus = 'ACTIVE' | 'EXPIRED' | 'REVOKED';
 
 export interface ShareUserSummary {
   id: string;
+  email: string | null;
+  displayName: string | null;
+}
+
+/** A user resolved from the public id an Owner typed when addressing an invitation. */
+export interface ShareRecipientUser {
+  id: string;
+  publicUserId: string;
   email: string | null;
   displayName: string | null;
 }
@@ -58,7 +67,8 @@ export interface InvitationRecord {
   projectId: string | null;
   scanId: string | null;
   createdById: string;
-  recipientEmail: string;
+  recipientEmail: string | null;
+  recipientUserId: string | null;
   tokenHash: string;
   status: InvitationStatus;
   expiresAt: Date;
@@ -75,17 +85,31 @@ export interface InvitationWithEntity {
   invitation: InvitationRecord;
   project: ShareProjectSummary | null;
   scan: ShareScanSummary | null;
+  /** Present only for invitations bound to a recipient user. */
+  recipient?: ShareRecipientUser | null;
+  creator?: ShareUserSummary | null;
 }
 
-export interface InvitationCreateInput {
-  recipientEmail: string;
-  expiresInSeconds?: number;
+/** An invitation row joined with the recipient fields the Owner's share list shows. */
+export interface PendingInvitationRow {
+  invitation: InvitationRecord;
+  recipient: ShareRecipientUser | null;
 }
+
+/**
+ * An invitation is addressed either to a typed-in email address or to a specific
+ * user identified by their public id — exactly one, never both.
+ */
+export type InvitationCreateInput = { expiresInSeconds?: number } & (
+  | { recipientEmail: string; recipientPublicUserId?: never }
+  | { recipientPublicUserId: string; recipientEmail?: never }
+);
 
 export interface InvitationSendResult {
   invitationId: string;
   invitationUrl: string;
-  recipientEmail: string;
+  recipientEmail: string | null;
+  recipientPublicUserId: string | null;
   expiresAt: string;
   status: 'PENDING';
   sentAt: string;
@@ -102,7 +126,8 @@ export interface InvitationPreviewResult {
   project: ShareProjectPreview | null;
   scan: ShareScanPreview | null;
   status: InvitationViewStatus;
-  recipientEmail?: string;
+  recipientEmail: string | null;
+  recipientPublicUserId: string | null;
   sentAt: string;
   expiresAt: string;
   hasAccess?: boolean;
@@ -162,10 +187,29 @@ export interface InvitationRevokeResult {
 
 export interface PendingInvitationResult {
   invitationId: string;
-  recipientEmail: string;
+  recipientEmail: string | null;
+  recipientPublicUserId: string | null;
+  recipientDisplayName: string | null;
   status: 'PENDING' | 'EXPIRED';
   sentAt: string;
   expiresAt: string;
+}
+
+/** One entry of the signed-in user's invitation inbox. */
+export interface ReceivedInvitationResult {
+  invitationId: string;
+  scope: ShareScope;
+  project: ShareProjectPreview | null;
+  scan: ShareScanPreview | null;
+  status: InvitationViewStatus;
+  invitedBy: ShareUserSummary | null;
+  sentAt: string;
+  expiresAt: string;
+}
+
+export interface ReceivedInvitationsResult {
+  items: ReceivedInvitationResult[];
+  pagination: PaginationMeta;
 }
 
 export interface ViewerResult {
@@ -256,13 +300,17 @@ export type ShareLinkCreateData = {
   expiresAt: Date;
 } & ({ projectId: string; scanId?: never } | { scanId: string; projectId?: never });
 
+export type InvitationRecipientData =
+  | { recipientEmail: string; recipientUserId?: never }
+  | { recipientUserId: string; recipientEmail?: never };
+
 export type InvitationCreateData = {
   createdById: string;
-  recipientEmail: string;
   tokenHash: string;
   expiresAt: Date;
   sentAt: Date;
-} & ({ projectId: string; scanId?: never } | { scanId: string; projectId?: never });
+} & InvitationRecipientData &
+  ({ projectId: string; scanId?: never } | { scanId: string; projectId?: never });
 
 export type ShareLinkResourceData =
   { projectId: string; scanId?: never } | { scanId: string; projectId?: never };
@@ -279,17 +327,28 @@ export interface ShareRepository {
       id: string;
       projectId: string;
       createdById: string;
-      recipientEmail: string;
       tokenHash: string;
       expiresAt: Date;
       sentAt: Date;
-    },
+    } & InvitationRecipientData,
     context: IdempotencyContext,
     result: InvitationCreateResult,
   ): Promise<IdempotencyResult<InvitationCreateResult>>;
   /** Bulk-transitions PENDING invitations past `expiresAt` to REVOKED. Returns the count affected. */
   expirePendingInvitations(now: Date): Promise<number>;
   findByTokenHash(tokenHash: string): Promise<InvitationWithEntity | null>;
+  findUserByPublicId(publicUserId: string): Promise<ShareRecipientUser | null>;
+  findUserById(userId: string): Promise<ShareRecipientUser | null>;
+  /** Resolves an invitation by id, but only when it is bound to `userId` as its recipient. */
+  findInvitationForRecipient(
+    invitationId: string,
+    userId: string,
+  ): Promise<InvitationWithEntity | null>;
+  /** Invitations addressed to `userId` by public id, newest first. */
+  listReceivedInvitations(
+    userId: string,
+    pagination: PaginationParams,
+  ): Promise<{ items: InvitationWithEntity[]; total: number }>;
   findTokenSourceKindByTokenHash(tokenHash: string): Promise<'invitation' | 'share-link' | null>;
   findInvitationById(id: string): Promise<InvitationRecord | null>;
   acceptInvitation(
@@ -310,8 +369,8 @@ export interface ShareRepository {
     id: string,
     data: { tokenHash: string; sentAt: Date; expiresAt: Date },
   ): Promise<InvitationRecord | null>;
-  listPendingByProject(projectId: string): Promise<InvitationRecord[]>;
-  listPendingByScan(scanId: string): Promise<InvitationRecord[]>;
+  listPendingByProject(projectId: string): Promise<PendingInvitationRow[]>;
+  listPendingByScan(scanId: string): Promise<PendingInvitationRow[]>;
   findActiveViewerAccess(projectId: string, userId: string): Promise<{ id: string } | null>;
   findActiveScanAccess(scanId: string, userId: string): Promise<{ id: string } | null>;
   listActiveViewers(projectId: string): Promise<

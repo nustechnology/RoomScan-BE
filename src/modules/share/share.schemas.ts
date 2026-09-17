@@ -1,7 +1,24 @@
+import { isInvitationReference } from '../../common/identifiers/invitation-reference.js';
+import {
+  paginatedResponseSchema,
+  paginationQuerySchema,
+} from '../../common/pagination/pagination.js';
+import {
+  PublicUserIdInputSchema,
+  PublicUserIdSchema,
+} from '../../common/schemas/public-user-id.js';
 import { z } from '../../openapi/zod.js';
 
+/**
+ * Preview, accept and decline address an invitation either by its raw link token
+ * or, for an invitation the caller found in their own inbox, by its id. The two
+ * forms cannot be confused: a token is 43 base64url characters, an id is a UUID.
+ */
 export const InvitationTokenParamSchema = z.object({
-  token: z.string().regex(/^[A-Za-z0-9_-]{43}$/, 'Invitation token is malformed'),
+  reference: z
+    .string()
+    .refine(isInvitationReference, 'Invitation reference is malformed')
+    .openapi({ description: 'Invitation link token, or the id of an invitation addressed to you' }),
 });
 
 export const InvitationIdParamSchema = z.object({
@@ -28,17 +45,28 @@ export const ScanShareRevokeParamsSchema = z.object({
   userId: z.uuid(),
 });
 
+/**
+ * An invitation is addressed to exactly one recipient: a public user id (binds
+ * the invitation to that account) or an email address (bearer-style, and the
+ * only option for someone who has not signed up yet).
+ */
 export const InvitationCreateBodySchema = z
   .object({
-    recipientEmail: z.email(),
+    recipientEmail: z.email().optional(),
+    recipientPublicUserId: PublicUserIdInputSchema.optional(),
     expiresInSeconds: z.number().int().min(60).max(2_592_000).optional(),
   })
-  .strict();
+  .strict()
+  .refine(
+    (body) => (body.recipientEmail === undefined) !== (body.recipientPublicUserId === undefined),
+    { message: 'Provide exactly one of recipientEmail or recipientPublicUserId' },
+  );
 
 export const InvitationCreateResponseSchema = z.object({
   invitationId: z.uuid(),
   invitationUrl: z.url(),
-  recipientEmail: z.email(),
+  recipientEmail: z.email().nullable(),
+  recipientPublicUserId: PublicUserIdSchema.nullable(),
   expiresAt: z.iso.datetime(),
   status: z.literal('PENDING'),
   sentAt: z.iso.datetime(),
@@ -97,7 +125,8 @@ const InvitationPreviewLiteralSchema = z.object({
   project: ProjectPreviewSchema.nullable(),
   scan: ScanPreviewSchema.nullable(),
   status: z.enum(['PENDING', 'EXPIRED', 'ACCEPTED', 'DECLINED']),
-  recipientEmail: z.email().optional(),
+  recipientEmail: z.email().nullable(),
+  recipientPublicUserId: PublicUserIdSchema.nullable(),
   sentAt: z.iso.datetime(),
   expiresAt: z.iso.datetime(),
   hasAccess: z.boolean().optional(),
@@ -149,6 +178,29 @@ export const InvitationAcceptResponseSchema = z.discriminatedUnion('type', [
   ShareLinkAcceptLiteralSchema,
 ]);
 
+export const ReceivedInvitationSchema = z.object({
+  invitationId: z.uuid(),
+  scope: ShareScopeSchema,
+  project: ProjectPreviewSchema.nullable(),
+  scan: ScanPreviewSchema.nullable(),
+  status: z.enum(['PENDING', 'EXPIRED', 'ACCEPTED', 'DECLINED', 'REVOKED']),
+  invitedBy: z
+    .object({
+      id: z.uuid(),
+      email: z.email().nullable(),
+      displayName: z.string().nullable(),
+    })
+    .nullable(),
+  sentAt: z.iso.datetime(),
+  expiresAt: z.iso.datetime(),
+});
+
+export const ReceivedInvitationsResponseSchema = paginatedResponseSchema(ReceivedInvitationSchema);
+
+export const ListReceivedInvitationsQuerySchema = z
+  .object({ ...paginationQuerySchema(20).shape })
+  .strict();
+
 export const InvitationDeclineResponseSchema = z.object({
   invitationId: z.uuid(),
   status: z.literal('DECLINED'),
@@ -165,7 +217,9 @@ export const SharesListResponseSchema = z.object({
   pendingInvitations: z.array(
     z.object({
       invitationId: z.uuid(),
-      recipientEmail: z.email(),
+      recipientEmail: z.email().nullable(),
+      recipientPublicUserId: PublicUserIdSchema.nullable(),
+      recipientDisplayName: z.string().nullable(),
       status: z.enum(['PENDING', 'EXPIRED']),
       sentAt: z.iso.datetime(),
       expiresAt: z.iso.datetime(),
@@ -237,6 +291,8 @@ export type InvitationPreviewResponse = z.infer<typeof InvitationPreviewResponse
 export type InvitationAcceptResponse = z.infer<typeof InvitationAcceptResponseSchema>;
 export type InvitationDeclineResponse = z.infer<typeof InvitationDeclineResponseSchema>;
 export type InvitationRevokeResponse = z.infer<typeof InvitationRevokeResponseSchema>;
+export type ReceivedInvitationsResponse = z.infer<typeof ReceivedInvitationsResponseSchema>;
+export type ListReceivedInvitationsQuery = z.infer<typeof ListReceivedInvitationsQuerySchema>;
 export type SharesListResponse = z.infer<typeof SharesListResponseSchema>;
 export type ViewerRevokeResponse = z.infer<typeof ViewerRevokeResponseSchema>;
 export type ShareLinkCreateResponse = z.infer<typeof ShareLinkCreateResponseSchema>;

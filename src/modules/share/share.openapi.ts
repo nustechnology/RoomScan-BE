@@ -14,6 +14,8 @@ import {
   InvitationResendResponseSchema,
   InvitationRevokeResponseSchema,
   InvitationTokenParamSchema,
+  ListReceivedInvitationsQuerySchema,
+  ReceivedInvitationsResponseSchema,
   ScanShareRevokeParamsSchema,
   ScanSharesListResponseSchema,
   ScanViewerRevokeResponseSchema,
@@ -54,6 +56,10 @@ const invitationPreviewResponse = shareOpenApiRegistry.register(
 const invitationAcceptResponse = shareOpenApiRegistry.register(
   'InvitationAcceptResponse',
   InvitationAcceptResponseSchema,
+);
+const receivedInvitationsResponse = shareOpenApiRegistry.register(
+  'ReceivedInvitationsResponse',
+  ReceivedInvitationsResponseSchema,
 );
 const invitationDeclineResponse = shareOpenApiRegistry.register(
   'InvitationDeclineResponse',
@@ -247,11 +253,39 @@ shareOpenApiRegistry.registerPath({
 
 shareOpenApiRegistry.registerPath({
   method: 'get',
-  path: '/api/v1/invitations/{token}',
+  path: '/api/v1/invitations',
+  tags: ['Shares'],
+  summary: 'List invitations addressed to the current user',
+  description:
+    'Pending invitations addressed to the signed-in user by public user id, newest first. Email-addressed invitations are not listed: they are not bound to an account, so they are reachable only through their link. An invitation whose expiry has passed but which the cleanup job has not swept yet is still listed, reported as EXPIRED.',
+  security: [{ [bearerAuth.name]: [] }],
+  request: {
+    query: ListReceivedInvitationsQuerySchema,
+  },
+  responses: {
+    200: {
+      description: 'The invitations waiting for the current user',
+      headers: rateLimitHeaders,
+      content: {
+        'application/json': {
+          schema: receivedInvitationsResponse,
+        },
+      },
+    },
+    400: errorResponses[400],
+    401: errorResponses[401],
+    429: errorResponses[429],
+    500: errorResponses[500],
+  },
+});
+
+shareOpenApiRegistry.registerPath({
+  method: 'get',
+  path: '/api/v1/invitations/{reference}',
   tags: ['Shares'],
   summary: 'Preview an invitation or share link',
   description:
-    'Requires a valid Bearer token. Resolves either an invitation or a generic share link for a project or scan and reports whether the current user already has access. For a per-recipient invitation, a preview whose email does not match the invited email returns 403.',
+    'Requires a valid Bearer token. The reference is either the raw link token or, for an invitation addressed to the current user by public user id, that invitation id. Resolves either an invitation or a generic share link for a project or scan and reports whether the current user already has access. An invitation bound to another user returns 403.',
   security: [{ [bearerAuth.name]: [] }],
   request: {
     params: InvitationTokenParamSchema,
@@ -277,7 +311,7 @@ shareOpenApiRegistry.registerPath({
 
 shareOpenApiRegistry.registerPath({
   method: 'post',
-  path: '/api/v1/invitations/{token}/accept',
+  path: '/api/v1/invitations/{reference}/accept',
   tags: ['Shares'],
   summary: 'Accept an invitation or share link and gain Viewer access',
   security: [{ [bearerAuth.name]: [] }],
@@ -300,7 +334,7 @@ shareOpenApiRegistry.registerPath({
 
 shareOpenApiRegistry.registerPath({
   method: 'post',
-  path: '/api/v1/invitations/{token}/decline',
+  path: '/api/v1/invitations/{reference}/decline',
   tags: ['Shares'],
   summary: 'Decline an invitation for the current user',
   security: [{ [bearerAuth.name]: [] }],

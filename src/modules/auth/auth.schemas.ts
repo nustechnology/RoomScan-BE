@@ -1,3 +1,4 @@
+import { PublicUserIdSchema } from '../../common/schemas/public-user-id.js';
 import { z } from '../../openapi/zod.js';
 
 export const AppleSignInRequestSchema = z
@@ -17,6 +18,9 @@ export const AppleSignInRequestSchema = z
 
 export const AuthenticatedUserSchema = z.object({
   id: z.uuid(),
+  publicUserId: PublicUserIdSchema.openapi({
+    description: 'Human-shareable identifier other users type to send an invitation',
+  }),
   email: z.email().nullable(),
   displayName: z.string().nullable(),
   provider: z.literal('apple'),

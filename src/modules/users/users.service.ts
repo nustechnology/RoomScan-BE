@@ -12,11 +12,13 @@ export interface UserProfileServiceDependencies {
 
 function toProfile(user: {
   id: string;
+  publicUserId: string;
   email: string | null;
   displayName: string | null;
 }): UserProfile {
   return {
     id: user.id,
+    publicUserId: user.publicUserId,
     email: user.email,
     displayName: user.displayName,
     provider: 'apple',
@@ -36,6 +38,7 @@ export class UserProfileService {
       throw new UserNotFoundError();
     }
     return {
+      publicUserId: user.publicUserId,
       email: user.email,
       displayName: user.displayName,
     };

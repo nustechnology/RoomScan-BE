@@ -69,6 +69,10 @@ function createService(overrides: Partial<ShareRepository> = {}) {
       .mockResolvedValue(shareLinkRecord()),
     findShareLinkByTokenHash: vi.fn<ShareRepository['findShareLinkByTokenHash']>(),
     findTokenSourceKindByTokenHash: vi.fn<ShareRepository['findTokenSourceKindByTokenHash']>(),
+    findUserByPublicId: vi.fn<ShareRepository['findUserByPublicId']>(),
+    findUserById: vi.fn<ShareRepository['findUserById']>(),
+    findInvitationForRecipient: vi.fn<ShareRepository['findInvitationForRecipient']>(),
+    listReceivedInvitations: vi.fn<ShareRepository['listReceivedInvitations']>(),
     listShareLinksByResource: vi
       .fn<ShareRepository['listShareLinksByResource']>()
       .mockResolvedValue([shareLinkRecord()]),

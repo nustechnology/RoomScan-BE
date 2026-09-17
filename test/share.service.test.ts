@@ -7,6 +7,7 @@ import { ScanNotFoundError } from '../src/modules/scan/scan.errors.js';
 import {
   AccessAlreadyExistsError,
   CannotAcceptOwnInvitationError,
+  CannotInviteSelfError,
   InvitationAlreadyAcceptedError,
   InvitationAlreadySentError,
   InvitationDeclinedError,
@@ -16,13 +17,25 @@ import {
   InvitationRevokedError,
   NotOwnerError,
   ProjectNotShareableError,
+  RecipientUserNotFoundError,
   ScanNotShareableError,
   ShareLinkExpiredError,
   ShareNoLongerAvailableError,
   ViewerAccessNotFoundError,
 } from '../src/modules/share/share.errors.js';
+import { InvitationCreateResponseSchema } from '../src/modules/share/share.schemas.js';
 import { ShareService } from '../src/modules/share/share.service.js';
-import type { InvitationRecord, ShareRepository } from '../src/modules/share/share.types.js';
+import type {
+  IdempotencyContext,
+  IdempotencyGateway,
+  IdempotencyResult,
+} from '../src/common/idempotency/idempotency.types.js';
+import type {
+  InvitationCreateResult,
+  InvitationRecord,
+  ShareRecipientUser,
+  ShareRepository,
+} from '../src/modules/share/share.types.js';
 
 const NOW = new Date('2026-07-29T10:00:00.000Z');
 const OWNER_ID = 'eb5d278f-c857-45c7-887d-7be65288cb75';
@@ -31,8 +44,11 @@ const OTHER_ID = '8c53d31d-2788-48de-82a0-c4f219ca3701';
 const PROJECT_ID = 'a1b2c3d4-e5f6-4890-abcd-ef1234567890';
 const SCAN_ID = 'f1e2d3c4-a5b6-7890-abcd-ef1234567890';
 const INVITATION_ID = 'b1a2c3d4-e5f6-4890-abcd-ef1234567890';
-const TOKEN = 'AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-ab';
+const TOKEN = 'AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-abXYZ';
 const RECIPIENT_EMAIL = 'recipient@example.com';
+const RECIPIENT_PUBLIC_ID = 'GP5HS2WKBE';
+const PAGE = { page: 1, limit: 20 };
+const OTHER_PUBLIC_ID = 'DAYR3AXX2A';
 const BASE_URL = 'https://invite.roomscan.dev';
 const TTL = 7 * 24 * 60 * 60;
 const RECIPIENT_USER = { id: RECIPIENT_ID, email: RECIPIENT_EMAIL };
@@ -45,6 +61,7 @@ function invitationRecord(overrides: Partial<InvitationRecord> = {}): Invitation
     scanId: null,
     createdById: OWNER_ID,
     recipientEmail: RECIPIENT_EMAIL,
+    recipientUserId: null,
     tokenHash: 'a'.repeat(64),
     status: 'PENDING',
     expiresAt: new Date(NOW.getTime() + TTL * 1000),
@@ -56,6 +73,28 @@ function invitationRecord(overrides: Partial<InvitationRecord> = {}): Invitation
     createdAt: NOW,
     updatedAt: NOW,
     ...overrides,
+  };
+}
+
+function recipientUser(overrides: Partial<ShareRecipientUser> = {}): ShareRecipientUser {
+  return {
+    id: RECIPIENT_ID,
+    publicUserId: RECIPIENT_PUBLIC_ID,
+    email: RECIPIENT_EMAIL,
+    displayName: null,
+    ...overrides,
+  };
+}
+
+/** An invitation bound to a recipient user rather than a typed-in email address. */
+function userBoundInvitation(overrides: Partial<InvitationRecord> = {}) {
+  return {
+    ...invitationWithProject({
+      recipientEmail: null,
+      recipientUserId: RECIPIENT_ID,
+      ...overrides,
+    }),
+    recipient: recipientUser(),
   };
 }
 
@@ -95,6 +134,16 @@ function createService(overrides: Partial<ShareRepository> = {}) {
     findTokenSourceKindByTokenHash: vi
       .fn<ShareRepository['findTokenSourceKindByTokenHash']>()
       .mockResolvedValue(null),
+    findUserByPublicId: vi
+      .fn<ShareRepository['findUserByPublicId']>()
+      .mockResolvedValue(recipientUser()),
+    findUserById: vi.fn<ShareRepository['findUserById']>().mockResolvedValue(recipientUser()),
+    findInvitationForRecipient: vi
+      .fn<ShareRepository['findInvitationForRecipient']>()
+      .mockResolvedValue(null),
+    listReceivedInvitations: vi
+      .fn<ShareRepository['listReceivedInvitations']>()
+      .mockResolvedValue({ items: [], total: 0 }),
     findInvitationById: vi
       .fn<ShareRepository['findInvitationById']>()
       .mockResolvedValue(invitationRecord()),
@@ -114,7 +163,7 @@ function createService(overrides: Partial<ShareRepository> = {}) {
       .mockResolvedValue(invitationRecord({ sentAt: NOW })),
     listPendingByProject: vi
       .fn<ShareRepository['listPendingByProject']>()
-      .mockResolvedValue([invitationRecord()]),
+      .mockResolvedValue([{ invitation: invitationRecord(), recipient: null }]),
     findActiveViewerAccess: vi
       .fn<ShareRepository['findActiveViewerAccess']>()
       .mockResolvedValue(null),
@@ -141,7 +190,7 @@ function createService(overrides: Partial<ShareRepository> = {}) {
       .mockResolvedValue(invitationRecord({ status: 'ACCEPTED', acceptedAt: NOW })),
     listPendingByScan: vi
       .fn<ShareRepository['listPendingByScan']>()
-      .mockResolvedValue([invitationRecord()]),
+      .mockResolvedValue([{ invitation: invitationRecord(), recipient: null }]),
     findActiveScanAccess: vi.fn<ShareRepository['findActiveScanAccess']>().mockResolvedValue(null),
     listActiveScanViewers: vi.fn<ShareRepository['listActiveScanViewers']>().mockResolvedValue([
       {
@@ -273,6 +322,96 @@ describe('ShareService.createInvitation', () => {
     expect(message?.html).toContain('View Project Invitation');
   });
 
+  it('binds the invitation to the user behind a public user id', async () => {
+    const createInvitation = vi
+      .fn()
+      .mockResolvedValue(invitationRecord({ recipientEmail: null, recipientUserId: RECIPIENT_ID }));
+    const { service, mocks, sendMail } = createService({ createInvitation });
+
+    const result = await service.createInvitation(OWNER_ID, PROJECT_ID, {
+      recipientPublicUserId: RECIPIENT_PUBLIC_ID,
+    });
+
+    expect(mocks.findUserByPublicId).toHaveBeenCalledWith(RECIPIENT_PUBLIC_ID);
+    expect(createInvitation).toHaveBeenCalledWith(
+      expect.objectContaining({ recipientUserId: RECIPIENT_ID }),
+    );
+    expect(result).toMatchObject({
+      recipientEmail: null,
+      recipientPublicUserId: RECIPIENT_PUBLIC_ID,
+    });
+    // Delivery still goes to whatever address the account has on file.
+    expect(sendMail).toHaveBeenCalledWith(expect.objectContaining({ to: RECIPIENT_EMAIL }));
+  });
+
+  it('accepts a public user id in any case', async () => {
+    const { service, mocks } = createService();
+
+    await service.createInvitation(OWNER_ID, PROJECT_ID, {
+      recipientPublicUserId: RECIPIENT_PUBLIC_ID.toLowerCase(),
+    });
+
+    expect(mocks.findUserByPublicId).toHaveBeenCalledWith(RECIPIENT_PUBLIC_ID);
+  });
+
+  it('skips email delivery when the invited user has no address on file', async () => {
+    const { service, sendMail } = createService({
+      findUserByPublicId: vi.fn().mockResolvedValue({
+        id: RECIPIENT_ID,
+        publicUserId: RECIPIENT_PUBLIC_ID,
+        email: null,
+        displayName: null,
+      }),
+    });
+
+    await expect(
+      service.createInvitation(OWNER_ID, PROJECT_ID, {
+        recipientPublicUserId: RECIPIENT_PUBLIC_ID,
+      }),
+    ).resolves.toMatchObject({ status: 'PENDING' });
+    expect(sendMail).not.toHaveBeenCalled();
+  });
+
+  it('rejects an unknown public user id', async () => {
+    const { service, mocks } = createService({
+      findUserByPublicId: vi.fn().mockResolvedValue(null),
+    });
+
+    await expect(
+      service.createInvitation(OWNER_ID, PROJECT_ID, {
+        recipientPublicUserId: OTHER_PUBLIC_ID,
+      }),
+    ).rejects.toBeInstanceOf(RecipientUserNotFoundError);
+    expect(mocks.createInvitation).not.toHaveBeenCalled();
+  });
+
+  it('rejects a malformed public user id without hitting the database', async () => {
+    const { service, mocks } = createService();
+
+    await expect(
+      service.createInvitation(OWNER_ID, PROJECT_ID, { recipientPublicUserId: 'not-an-id' }),
+    ).rejects.toBeInstanceOf(RecipientUserNotFoundError);
+    expect(mocks.findUserByPublicId).not.toHaveBeenCalled();
+  });
+
+  it('rejects an owner inviting themselves by public user id', async () => {
+    const { service, mocks } = createService({
+      findUserByPublicId: vi.fn().mockResolvedValue({
+        id: OWNER_ID,
+        publicUserId: OTHER_PUBLIC_ID,
+        email: 'owner@example.com',
+        displayName: null,
+      }),
+    });
+
+    await expect(
+      service.createInvitation(OWNER_ID, PROJECT_ID, {
+        recipientPublicUserId: OTHER_PUBLIC_ID,
+      }),
+    ).rejects.toBeInstanceOf(CannotInviteSelfError);
+    expect(mocks.createInvitation).not.toHaveBeenCalled();
+  });
+
   it('applies the requested expiresInSeconds', async () => {
     const { service } = createService();
 
@@ -360,6 +499,7 @@ describe('ShareService.previewInvitation', () => {
       scan: null,
       status: 'PENDING',
       recipientEmail: RECIPIENT_EMAIL,
+      recipientPublicUserId: null,
       sentAt: NOW.toISOString(),
       expiresAt: new Date(NOW.getTime() + TTL * 1000).toISOString(),
       hasAccess: false,
@@ -460,7 +600,7 @@ describe('ShareService.previewInvitation', () => {
     expect(result.hasAccess).toBe(false);
   });
 
-  it('rejects an authenticated preview whose email differs from the invited email', async () => {
+  it('previews an email invitation for any signed-in holder of the link', async () => {
     const { service } = createService();
 
     await expect(
@@ -468,15 +608,58 @@ describe('ShareService.previewInvitation', () => {
         id: RECIPIENT_ID,
         email: 'someone-else@example.com',
       }),
-    ).rejects.toBeInstanceOf(InvitationNotForUserError);
+    ).resolves.toMatchObject({ type: 'invitation', status: 'PENDING' });
   });
 
-  it('rejects an authenticated preview when the current user has no email', async () => {
+  it('previews an email invitation when the current user has no email on file', async () => {
     const { service } = createService();
 
     await expect(
       service.previewInvitation(TOKEN, { id: RECIPIENT_ID, email: null }),
+    ).resolves.toMatchObject({ type: 'invitation', status: 'PENDING' });
+  });
+
+  it('reports the recipient public user id for a user-bound invitation', async () => {
+    const { service } = createService({
+      findByTokenHash: vi.fn().mockResolvedValue(userBoundInvitation()),
+    });
+
+    await expect(service.previewInvitation(TOKEN, RECIPIENT_USER)).resolves.toMatchObject({
+      recipientEmail: null,
+      recipientPublicUserId: RECIPIENT_PUBLIC_ID,
+    });
+  });
+
+  it('rejects previewing a user-bound invitation addressed to somebody else', async () => {
+    const { service } = createService({
+      findByTokenHash: vi.fn().mockResolvedValue(userBoundInvitation()),
+    });
+
+    await expect(
+      service.previewInvitation(TOKEN, { id: OTHER_ID, email: RECIPIENT_EMAIL }),
     ).rejects.toBeInstanceOf(InvitationNotForUserError);
+  });
+
+  it('resolves an invitation id for the user it is addressed to', async () => {
+    const context = userBoundInvitation();
+    const findInvitationForRecipient = vi.fn().mockResolvedValue(context);
+    const { service, mocks } = createService({ findInvitationForRecipient });
+
+    await expect(service.previewInvitation(INVITATION_ID, RECIPIENT_USER)).resolves.toMatchObject({
+      type: 'invitation',
+    });
+    expect(findInvitationForRecipient).toHaveBeenCalledWith(INVITATION_ID, RECIPIENT_ID);
+    expect(mocks.findByTokenHash).not.toHaveBeenCalled();
+  });
+
+  it('rejects an invitation id that is not addressed to the current user', async () => {
+    const { service } = createService({
+      findInvitationForRecipient: vi.fn().mockResolvedValue(null),
+    });
+
+    await expect(
+      service.previewInvitation(INVITATION_ID, { id: OTHER_ID, email: null }),
+    ).rejects.toBeInstanceOf(InvitationNotFoundError);
   });
 
   it('rejects a share-link preview only on recipient rules; matching user succeeds', async () => {
@@ -486,6 +669,64 @@ describe('ShareService.previewInvitation', () => {
       type: 'share-link',
       scope: 'project',
     });
+  });
+});
+
+describe('ShareService.listReceivedInvitations', () => {
+  it('maps the invitations addressed to the current user', async () => {
+    const listReceivedInvitations = vi.fn().mockResolvedValue({
+      items: [
+        {
+          ...userBoundInvitation(),
+          creator: { id: OWNER_ID, email: 'owner@example.com', displayName: 'Owner' },
+        },
+      ],
+      total: 1,
+    });
+    const { service } = createService({ listReceivedInvitations });
+
+    const result = await service.listReceivedInvitations(RECIPIENT_ID, PAGE);
+
+    expect(listReceivedInvitations).toHaveBeenCalledWith(RECIPIENT_ID, PAGE);
+    expect(result.pagination).toEqual({ page: 1, limit: 20, total: 1, totalPages: 1 });
+    expect(result.items).toEqual([
+      {
+        invitationId: INVITATION_ID,
+        scope: 'project',
+        project: {
+          id: PROJECT_ID,
+          name: 'District 2 Apartment',
+          description: null,
+          thumbnail: null,
+          owner: { id: OWNER_ID, email: 'owner@example.com', displayName: null },
+          scanCount: 2,
+        },
+        scan: null,
+        status: 'PENDING',
+        invitedBy: { id: OWNER_ID, email: 'owner@example.com', displayName: 'Owner' },
+        sentAt: NOW.toISOString(),
+        expiresAt: new Date(NOW.getTime() + TTL * 1000).toISOString(),
+      },
+    ]);
+  });
+
+  it('returns an empty list when nothing is addressed to the user', async () => {
+    const { service } = createService();
+
+    await expect(service.listReceivedInvitations(OTHER_ID, PAGE)).resolves.toEqual({
+      items: [],
+      pagination: { page: 1, limit: 20, total: 0, totalPages: 0 },
+    });
+  });
+
+  it('passes the requested page through to the repository', async () => {
+    const listReceivedInvitations = vi.fn().mockResolvedValue({ items: [], total: 45 });
+    const { service } = createService({ listReceivedInvitations });
+
+    const result = await service.listReceivedInvitations(RECIPIENT_ID, { page: 3, limit: 20 });
+
+    expect(listReceivedInvitations).toHaveBeenCalledWith(RECIPIENT_ID, { page: 3, limit: 20 });
+    expect(result.pagination).toEqual({ page: 3, limit: 20, total: 45, totalPages: 3 });
   });
 });
 
@@ -518,11 +759,33 @@ describe('ShareService.acceptInvitation', () => {
     );
   });
 
-  it('rejects accepting when the current user email differs from the invited email', async () => {
+  it('accepts an email invitation for any signed-in holder of the link', async () => {
     const { service, mocks } = createService();
 
     await expect(
       service.acceptInvitation({ id: RECIPIENT_ID, email: 'someone-else@example.com' }, TOKEN),
+    ).resolves.toMatchObject({ type: 'invitation' });
+    expect(mocks.acceptInvitation).toHaveBeenCalled();
+  });
+
+  it('accepts a user-bound invitation for the user it names', async () => {
+    const { service, mocks } = createService({
+      findByTokenHash: vi.fn().mockResolvedValue(userBoundInvitation()),
+    });
+
+    await expect(service.acceptInvitation(RECIPIENT_USER, TOKEN)).resolves.toMatchObject({
+      type: 'invitation',
+    });
+    expect(mocks.acceptInvitation).toHaveBeenCalled();
+  });
+
+  it('rejects accepting a user-bound invitation addressed to somebody else', async () => {
+    const { service, mocks } = createService({
+      findByTokenHash: vi.fn().mockResolvedValue(userBoundInvitation()),
+    });
+
+    await expect(
+      service.acceptInvitation({ id: OTHER_ID, email: RECIPIENT_EMAIL }, TOKEN),
     ).rejects.toBeInstanceOf(InvitationNotForUserError);
     expect(mocks.acceptInvitation).not.toHaveBeenCalled();
   });
@@ -636,11 +899,22 @@ describe('ShareService.declineInvitation', () => {
     expect(mocks.declineInvitation).toHaveBeenCalledWith(INVITATION_ID, NOW);
   });
 
-  it('rejects declining when the current user email differs from the invited email', async () => {
+  it('declines an email invitation for any signed-in holder of the link', async () => {
     const { service, mocks } = createService();
 
     await expect(
       service.declineInvitation({ id: RECIPIENT_ID, email: 'someone-else@example.com' }, TOKEN),
+    ).resolves.toMatchObject({ status: 'DECLINED' });
+    expect(mocks.declineInvitation).toHaveBeenCalled();
+  });
+
+  it('rejects declining a user-bound invitation addressed to somebody else', async () => {
+    const { service, mocks } = createService({
+      findByTokenHash: vi.fn().mockResolvedValue(userBoundInvitation()),
+    });
+
+    await expect(
+      service.declineInvitation({ id: OTHER_ID, email: RECIPIENT_EMAIL }, TOKEN),
     ).rejects.toBeInstanceOf(InvitationNotForUserError);
     expect(mocks.declineInvitation).not.toHaveBeenCalled();
   });
@@ -772,6 +1046,37 @@ describe('ShareService.revokeInvitation', () => {
 });
 
 describe('ShareService.resendInvitation', () => {
+  it('re-sends a user-bound invitation to the address on file today', async () => {
+    const findUserById = vi.fn().mockResolvedValue({
+      id: RECIPIENT_ID,
+      publicUserId: RECIPIENT_PUBLIC_ID,
+      email: 'moved@example.com',
+      displayName: null,
+    });
+    const { service, sendMail } = createService({
+      findInvitationById: vi
+        .fn()
+        .mockResolvedValue(
+          invitationRecord({ recipientEmail: null, recipientUserId: RECIPIENT_ID }),
+        ),
+      resendInvitation: vi
+        .fn()
+        .mockResolvedValue(
+          invitationRecord({ recipientEmail: null, recipientUserId: RECIPIENT_ID }),
+        ),
+      findUserById,
+    });
+
+    const result = await service.resendInvitation(OWNER_ID, INVITATION_ID);
+
+    expect(findUserById).toHaveBeenCalledWith(RECIPIENT_ID);
+    expect(sendMail).toHaveBeenCalledWith(expect.objectContaining({ to: 'moved@example.com' }));
+    expect(result).toMatchObject({
+      recipientEmail: null,
+      recipientPublicUserId: RECIPIENT_PUBLIC_ID,
+    });
+  });
+
   it('refreshes the link, extends the expiry, and re-sends the email', async () => {
     const { service, mocks, sendMail } = createService();
 
@@ -906,6 +1211,128 @@ describe('ShareService.resendInvitation', () => {
   });
 });
 
+describe('ShareService.createInvitationIdempotently', () => {
+  function createIdempotentService(
+    lookupResult: unknown,
+    overrides: Partial<ShareRepository> = {},
+  ) {
+    const { mocks } = createService(overrides);
+    const lookup = vi.fn<(context: IdempotencyContext) => Promise<unknown>>();
+    lookup.mockResolvedValue(lookupResult);
+    const idempotency: IdempotencyGateway = {
+      createContext: vi.fn<IdempotencyGateway['createContext']>().mockReturnValue({
+        userId: OWNER_ID,
+        operation: 'CREATE_INVITATION',
+        parentScope: `project:${PROJECT_ID}`,
+        keyHash: 'k'.repeat(64),
+        requestHash: 'r'.repeat(64),
+      }),
+      // A receipt's stored body is untyped until the caller names its shape, so
+      // the cast happens here rather than being pushed onto the whole gateway.
+      async lookup<T>(context: IdempotencyContext) {
+        return (await lookup(context)) as IdempotencyResult<T> | null;
+      },
+    };
+    const createIdempotently = vi
+      .fn()
+      .mockResolvedValue({ body: {}, statusCode: 201, replayed: false });
+    const repository = {
+      ...mocks,
+      ...overrides,
+      createInvitationIdempotently: createIdempotently,
+    } as unknown as ShareRepository;
+    const service = new ShareService({
+      repository,
+      mailer: { sendMail: vi.fn() },
+      logger: pino({ enabled: false }),
+      clock: () => NOW,
+      invitationTtlSeconds: TTL,
+      invitationBaseUrl: BASE_URL,
+      idempotency,
+    });
+
+    return { service, lookup, createIdempotently };
+  }
+
+  it('fills in the recipient fields when replaying a receipt stored without them', async () => {
+    // A receipt written before invitations became addressable by public user id.
+    const { service } = createIdempotentService({
+      body: {
+        invitationId: INVITATION_ID,
+        invitationUrl: `${BASE_URL}/invitations/${TOKEN}`,
+        recipientEmail: RECIPIENT_EMAIL,
+        expiresAt: NOW.toISOString(),
+        status: 'PENDING',
+        sentAt: NOW.toISOString(),
+      },
+      statusCode: 201,
+      replayed: true,
+    });
+
+    const result = await service.createInvitationIdempotently(
+      OWNER_ID,
+      PROJECT_ID,
+      { recipientEmail: RECIPIENT_EMAIL },
+      'idempotency-key',
+    );
+
+    expect(result.replayed).toBe(true);
+    expect(result.statusCode).toBe(201);
+    expect(result.body).toMatchObject({
+      recipientEmail: RECIPIENT_EMAIL,
+      recipientPublicUserId: null,
+    });
+    // The route parses every response, replayed or not: a legacy body must still
+    // satisfy the contract, otherwise the retry answers 400 instead of 201.
+    expect(() => InvitationCreateResponseSchema.parse(result.body)).not.toThrow();
+  });
+
+  it('builds the same scoped invitationUrl as the non-idempotent path', async () => {
+    const { service, createIdempotently } = createIdempotentService(null);
+
+    await service.createInvitationIdempotently(
+      OWNER_ID,
+      PROJECT_ID,
+      { recipientEmail: RECIPIENT_EMAIL },
+      'idempotency-key',
+    );
+
+    // The mobile universal-link parser reads ?scope= to know what the link
+    // targets before it previews the token, so both creation paths must emit it.
+    const storedResponse = createIdempotently.mock.calls[0]?.[2] as InvitationCreateResult;
+    expect(storedResponse.invitationUrl).toMatch(
+      new RegExp(`^${BASE_URL}/invitations/[A-Za-z0-9_-]{43}\\?scope=project$`),
+    );
+  });
+
+  it('replays a current receipt unchanged', async () => {
+    const body = {
+      invitationId: INVITATION_ID,
+      invitationUrl: `${BASE_URL}/invitations/${TOKEN}`,
+      recipientEmail: null,
+      recipientPublicUserId: RECIPIENT_PUBLIC_ID,
+      expiresAt: NOW.toISOString(),
+      status: 'PENDING' as const,
+      sentAt: NOW.toISOString(),
+    };
+    const { service, createIdempotently } = createIdempotentService({
+      body,
+      statusCode: 201,
+      replayed: true,
+    });
+
+    const result = await service.createInvitationIdempotently(
+      OWNER_ID,
+      PROJECT_ID,
+      { recipientPublicUserId: RECIPIENT_PUBLIC_ID },
+      'idempotency-key',
+    );
+
+    expect(result.body).toEqual(body);
+    expect(createIdempotently).not.toHaveBeenCalled();
+  });
+});
+
 describe('ShareService default clock', () => {
   it('uses the system clock when none is supplied', async () => {
     const { mocks } = createService();
@@ -936,6 +1363,8 @@ describe('ShareService.listShares', () => {
         {
           invitationId: INVITATION_ID,
           recipientEmail: RECIPIENT_EMAIL,
+          recipientPublicUserId: null,
+          recipientDisplayName: null,
           status: 'PENDING',
           sentAt: NOW.toISOString(),
           expiresAt: new Date(NOW.getTime() + TTL * 1000).toISOString(),
@@ -954,14 +1383,36 @@ describe('ShareService.listShares', () => {
 
   it('labels an expired pending invitation as EXPIRED', async () => {
     const { service } = createService({
-      listPendingByProject: vi
-        .fn()
-        .mockResolvedValue([invitationRecord({ expiresAt: new Date(NOW.getTime() - 1) })]),
+      listPendingByProject: vi.fn().mockResolvedValue([
+        {
+          invitation: invitationRecord({ expiresAt: new Date(NOW.getTime() - 1) }),
+          recipient: null,
+        },
+      ]),
     });
 
     const result = await service.listShares(OWNER_ID, PROJECT_ID);
 
     expect(result.pendingInvitations[0]?.status).toBe('EXPIRED');
+  });
+
+  it('reports the recipient public id and display name for a user-bound invitation', async () => {
+    const { service } = createService({
+      listPendingByProject: vi.fn().mockResolvedValue([
+        {
+          invitation: invitationRecord({ recipientEmail: null, recipientUserId: RECIPIENT_ID }),
+          recipient: recipientUser({ displayName: 'Tham Tran' }),
+        },
+      ]),
+    });
+
+    const result = await service.listShares(OWNER_ID, PROJECT_ID);
+
+    expect(result.pendingInvitations[0]).toMatchObject({
+      recipientEmail: null,
+      recipientPublicUserId: RECIPIENT_PUBLIC_ID,
+      recipientDisplayName: 'Tham Tran',
+    });
   });
 
   it('rejects a non-owner', async () => {
@@ -1381,6 +1832,8 @@ describe('ShareService.listScanShares', () => {
         {
           invitationId: INVITATION_ID,
           recipientEmail: RECIPIENT_EMAIL,
+          recipientPublicUserId: null,
+          recipientDisplayName: null,
           status: 'PENDING',
           sentAt: NOW.toISOString(),
           expiresAt: new Date(NOW.getTime() + TTL * 1000).toISOString(),

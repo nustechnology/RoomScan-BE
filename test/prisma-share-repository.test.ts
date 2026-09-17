@@ -13,6 +13,8 @@ const INVITATION_ID = 'b1a2c3d4-e5f6-4890-abcd-ef1234567890';
 const SHARE_LINK_ID = 'c0ffee00-0000-4000-8000-0000000000aa';
 const TOKEN_HASH = 'a'.repeat(64);
 const RECIPIENT_EMAIL = 'recipient@example.com';
+const RECIPIENT_ID = VIEWER_ID;
+const RECIPIENT_PUBLIC_ID = 'GP5HS2WKBE';
 const NOW = new Date('2026-07-29T10:00:00.000Z');
 
 function createInvitationRow(overrides: Record<string, unknown> = {}) {
@@ -22,6 +24,9 @@ function createInvitationRow(overrides: Record<string, unknown> = {}) {
     scanId: null,
     createdById: OWNER_ID,
     recipientEmail: RECIPIENT_EMAIL,
+    recipientUserId: null,
+    recipient: null,
+    creator: { id: OWNER_ID, email: 'owner@example.com', displayName: null },
     tokenHash: TOKEN_HASH,
     status: 'PENDING',
     expiresAt: NOW,
@@ -43,6 +48,7 @@ function createClient() {
     findUnique: vi.fn().mockResolvedValue(createInvitationRow()),
     findMany: vi.fn().mockResolvedValue([createInvitationRow()]),
     updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+    count: vi.fn().mockResolvedValue(0),
   };
   const projectAccess = {
     findFirst: vi.fn().mockResolvedValue({ id: 'access-id' }),
@@ -112,7 +118,20 @@ function createClient() {
   const scan = {
     findFirst: vi.fn().mockResolvedValue({ id: 'scan-id' }),
   };
+  const user = {
+    findUnique: vi.fn().mockResolvedValue({
+      id: RECIPIENT_ID,
+      publicId: RECIPIENT_PUBLIC_ID,
+      email: RECIPIENT_EMAIL,
+      displayName: null,
+    }),
+  };
   const transaction = vi.fn(async (operation: unknown) => {
+    // Prisma's $transaction takes either an array of operations or a callback;
+    // the repository uses both forms, so the double has to honour both.
+    if (Array.isArray(operation)) {
+      return await Promise.all(operation as Array<Promise<unknown>>);
+    }
     return (
       operation as (tx: {
         invitation: {
@@ -152,6 +171,7 @@ function createClient() {
     shareLink,
     project,
     scan,
+    user,
     $transaction: transaction,
   } as unknown as Pick<
     PrismaClient,
@@ -161,10 +181,21 @@ function createClient() {
     | 'shareLink'
     | 'project'
     | 'scan'
+    | 'user'
     | '$transaction'
   >;
 
-  return { client, invitation, projectAccess, scanAccess, shareLink, project, scan, transaction };
+  return {
+    client,
+    invitation,
+    projectAccess,
+    scanAccess,
+    shareLink,
+    project,
+    scan,
+    user,
+    transaction,
+  };
 }
 
 describe('PrismaShareRepository', () => {
@@ -251,6 +282,7 @@ describe('PrismaShareRepository', () => {
         projectId: PROJECT_ID,
         scanId: null,
         recipientEmail: RECIPIENT_EMAIL,
+        recipientUserId: null,
         status: 'PENDING',
         expiresAt: { lte: NOW },
       },
@@ -261,8 +293,9 @@ describe('PrismaShareRepository', () => {
         data: {
           projectId: PROJECT_ID,
           scanId: null,
-          createdById: OWNER_ID,
           recipientEmail: RECIPIENT_EMAIL,
+          recipientUserId: null,
+          createdById: OWNER_ID,
           tokenHash: TOKEN_HASH,
           status: 'PENDING',
           expiresAt: NOW,
@@ -270,6 +303,193 @@ describe('PrismaShareRepository', () => {
         },
       }),
     );
+  });
+
+  it('createInvitation binds the invitation to a recipient user instead of an email', async () => {
+    const { client, invitation } = createClient();
+
+    await new PrismaShareRepository(client).createInvitation({
+      projectId: PROJECT_ID,
+      createdById: OWNER_ID,
+      recipientUserId: RECIPIENT_ID,
+      tokenHash: TOKEN_HASH,
+      expiresAt: NOW,
+      sentAt: NOW,
+    });
+
+    expect(invitation.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: {
+          projectId: PROJECT_ID,
+          scanId: null,
+          recipientEmail: null,
+          recipientUserId: RECIPIENT_ID,
+          createdById: OWNER_ID,
+          tokenHash: TOKEN_HASH,
+          status: 'PENDING',
+          expiresAt: NOW,
+          sentAt: NOW,
+        },
+      }),
+    );
+  });
+
+  it('findUserByPublicId maps the stored public id onto the domain shape', async () => {
+    const { client, user } = createClient();
+
+    await expect(
+      new PrismaShareRepository(client).findUserByPublicId(RECIPIENT_PUBLIC_ID),
+    ).resolves.toEqual({
+      id: RECIPIENT_ID,
+      publicUserId: RECIPIENT_PUBLIC_ID,
+      email: RECIPIENT_EMAIL,
+      displayName: null,
+    });
+    expect(user.findUnique).toHaveBeenCalledWith({
+      where: { publicId: RECIPIENT_PUBLIC_ID },
+      select: { id: true, publicId: true, email: true, displayName: true },
+    });
+  });
+
+  it('findUserByPublicId returns null for an unknown public id', async () => {
+    const { client, user } = createClient();
+    user.findUnique.mockResolvedValue(null);
+
+    await expect(
+      new PrismaShareRepository(client).findUserByPublicId('ZZZZZZZZZZ'),
+    ).resolves.toBeNull();
+  });
+
+  it('findInvitationForRecipient scopes the lookup to the bound recipient', async () => {
+    const { client, invitation } = createClient();
+    invitation.findFirst.mockResolvedValue({
+      ...createInvitationRow({ recipientEmail: null, recipientUserId: RECIPIENT_ID }),
+      project: {
+        id: PROJECT_ID,
+        name: 'District 2 Apartment',
+        description: null,
+        owner: { id: OWNER_ID, email: 'owner@example.com', displayName: null },
+        scans: [],
+        _count: { scans: 0 },
+      },
+      scan: null,
+    });
+
+    const result = await new PrismaShareRepository(client).findInvitationForRecipient(
+      INVITATION_ID,
+      RECIPIENT_ID,
+    );
+
+    expect(result?.invitation.id).toBe(INVITATION_ID);
+    // The invitation id is not a secret — the Owner sees it in the share list —
+    // so the recipient binding is what authorizes the lookup.
+    expect(invitation.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: INVITATION_ID,
+          recipientUserId: RECIPIENT_ID,
+        }) as Record<string, unknown>,
+      }),
+    );
+  });
+
+  it('findInvitationForRecipient excludes invitations whose resource was deleted', async () => {
+    const { client, invitation } = createClient();
+    invitation.findFirst.mockResolvedValue(null);
+
+    await new PrismaShareRepository(client).findInvitationForRecipient(INVITATION_ID, RECIPIENT_ID);
+
+    const where = invitation.findFirst.mock.calls[0]?.[0] as {
+      where: { OR: Array<Record<string, unknown>> };
+    };
+    expect(where.where.OR).toEqual([
+      { projectId: { not: null }, project: { deletedAt: null } },
+      { scanId: { not: null }, scan: { deletedAt: null, project: { deletedAt: null } } },
+    ]);
+  });
+
+  it('findInvitationForRecipient returns null when nothing matches', async () => {
+    const { client, invitation } = createClient();
+    invitation.findFirst.mockResolvedValue(null);
+
+    await expect(
+      new PrismaShareRepository(client).findInvitationForRecipient(INVITATION_ID, VIEWER_ID),
+    ).resolves.toBeNull();
+  });
+
+  it('listReceivedInvitations filters, orders and paginates the inbox', async () => {
+    const { client, invitation, transaction } = createClient();
+    invitation.findMany.mockResolvedValue([
+      {
+        ...createInvitationRow({ recipientEmail: null, recipientUserId: RECIPIENT_ID }),
+        project: {
+          id: PROJECT_ID,
+          name: 'District 2 Apartment',
+          description: null,
+          owner: { id: OWNER_ID, email: 'owner@example.com', displayName: null },
+          scans: [],
+          _count: { scans: 0 },
+        },
+        scan: null,
+      },
+    ]);
+    invitation.count.mockResolvedValue(7);
+
+    const result = await new PrismaShareRepository(client).listReceivedInvitations(RECIPIENT_ID, {
+      page: 2,
+      limit: 5,
+    });
+
+    expect(result.total).toBe(7);
+    expect(result.items).toHaveLength(1);
+    expect(invitation.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          recipientUserId: RECIPIENT_ID,
+          status: 'PENDING',
+        }) as Record<string, unknown>,
+        orderBy: [{ sentAt: 'desc' }, { id: 'desc' }],
+        skip: 5,
+        take: 5,
+      }),
+    );
+    // The page and its total must be read together, or a concurrent write can
+    // produce a total that does not match the rows returned beside it.
+    expect(transaction).toHaveBeenCalled();
+  });
+
+  it('listReceivedInvitations excludes invitations whose resource was deleted', async () => {
+    const { client, invitation } = createClient();
+    invitation.findMany.mockResolvedValue([]);
+    invitation.count.mockResolvedValue(0);
+
+    await new PrismaShareRepository(client).listReceivedInvitations(RECIPIENT_ID, {
+      page: 1,
+      limit: 20,
+    });
+
+    const args = invitation.findMany.mock.calls[0]?.[0] as {
+      where: { OR: Array<Record<string, unknown>> };
+    };
+    expect(args.where.OR).toEqual([
+      { projectId: { not: null }, project: { deletedAt: null } },
+      { scanId: { not: null }, scan: { deletedAt: null, project: { deletedAt: null } } },
+    ]);
+  });
+
+  it('findUserById resolves the recipient bound to an invitation', async () => {
+    const { client, user } = createClient();
+
+    await expect(new PrismaShareRepository(client).findUserById(RECIPIENT_ID)).resolves.toEqual({
+      id: RECIPIENT_ID,
+      publicUserId: RECIPIENT_PUBLIC_ID,
+      email: RECIPIENT_EMAIL,
+      displayName: null,
+    });
+    expect(user.findUnique).toHaveBeenCalledWith({
+      where: { id: RECIPIENT_ID },
+      select: { id: true, publicId: true, email: true, displayName: true },
+    });
   });
 
   it('createInvitation maps a concurrent duplicate to InvitationAlreadySentError', async () => {
@@ -829,6 +1049,7 @@ describe('PrismaShareRepository', () => {
           scanId: SCAN_ID,
           projectId: null,
           recipientEmail: RECIPIENT_EMAIL,
+          recipientUserId: null,
           status: 'PENDING',
           expiresAt: { lte: NOW },
         },
@@ -839,8 +1060,9 @@ describe('PrismaShareRepository', () => {
         data: {
           scanId: SCAN_ID,
           projectId: null,
-          createdById: OWNER_ID,
           recipientEmail: RECIPIENT_EMAIL,
+          recipientUserId: null,
+          createdById: OWNER_ID,
           tokenHash: TOKEN_HASH,
           status: 'PENDING',
           expiresAt: NOW,
@@ -1263,6 +1485,7 @@ describe('PrismaShareRepository', () => {
       invitationId: INVITATION_ID,
       invitationUrl: 'https://example.com/invite',
       recipientEmail: RECIPIENT_EMAIL,
+      recipientPublicUserId: null,
       expiresAt: NOW.toISOString(),
       status: 'PENDING' as const,
       sentAt: NOW.toISOString(),
@@ -1337,6 +1560,7 @@ describe('PrismaShareRepository', () => {
           invitationId: INVITATION_ID,
           invitationUrl: 'https://example.com/invite',
           recipientEmail: RECIPIENT_EMAIL,
+          recipientPublicUserId: null,
           expiresAt: NOW.toISOString(),
           status: 'PENDING',
           sentAt: NOW.toISOString(),
@@ -1370,6 +1594,7 @@ describe('PrismaShareRepository', () => {
           invitationId: INVITATION_ID,
           invitationUrl: 'https://example.com/invite',
           recipientEmail: RECIPIENT_EMAIL,
+          recipientPublicUserId: null,
           expiresAt: NOW.toISOString(),
           status: 'PENDING',
           sentAt: NOW.toISOString(),

@@ -130,6 +130,7 @@ describe('Shared With Me HTTP endpoints', () => {
     findById: vi.fn((userId: string) =>
       Promise.resolve({
         id: userId,
+        publicUserId: 'GP5HS2WKBE',
         email: userId === USER_OWNER ? 'owner@example.com' : 'viewer@example.com',
         displayName: null,
       }),

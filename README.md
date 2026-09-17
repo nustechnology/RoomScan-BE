@@ -169,12 +169,13 @@ docker restart roomscan
 | `PATCH`  | `/api/v1/notes/:noteId`                                | Update note content or color (Owner only)                          |
 | `PATCH`  | `/api/v1/notes/:noteId/position`                       | Move a note to a new 3D position (Owner only)                      |
 | `DELETE` | `/api/v1/notes/:noteId`                                | Delete a note (Owner only)                                         |
-| `POST`   | `/api/v1/projects/:projectId/invitations`              | Create a project invitation for an email (Owner only)              |
-| `POST`   | `/api/v1/scans/:scanId/invitations`                    | Create a scan invitation for an email (Owner only)                 |
+| `POST`   | `/api/v1/projects/:projectId/invitations`              | Create a project invitation (Owner only)                           |
+| `POST`   | `/api/v1/scans/:scanId/invitations`                    | Create a scan invitation (Owner only)                              |
 | `POST`   | `/api/v1/invitations/:invitationId/resend`             | Resend a pending invitation email (Owner only)                     |
-| `GET`    | `/api/v1/invitations/:token`                           | Preview an invitation or share link (anonymous or optional Bearer) |
-| `POST`   | `/api/v1/invitations/:token/accept`                    | Accept and gain Viewer access                                      |
-| `POST`   | `/api/v1/invitations/:token/decline`                   | Decline an invitation                                              |
+| `GET`    | `/api/v1/invitations`                                  | List invitations addressed to the current user (Bearer required)   |
+| `GET`    | `/api/v1/invitations/:reference`                       | Preview an invitation or share link (Bearer required)              |
+| `POST`   | `/api/v1/invitations/:reference/accept`                | Accept and gain Viewer access                                      |
+| `POST`   | `/api/v1/invitations/:reference/decline`               | Decline an invitation                                              |
 | `DELETE` | `/api/v1/invitations/:invitationId`                    | Revoke a pending invitation (Owner only)                           |
 | `GET`    | `/api/v1/projects/:projectId/shares`                   | List project pending invitations and accepted Viewers (Owner only) |
 | `DELETE` | `/api/v1/projects/:projectId/shares/:userId`           | Revoke project Viewer access (Owner only)                          |
@@ -350,21 +351,34 @@ written to logs. Note deletion is soft and emits a tombstone; deleting a scan
 or project soft-deletes descendant notes/assets and emits their tombstones.
 
 Projects and scans are shared through expiring, token-based links. There are
-two kinds: per-recipient invitations addressed to an email, and generic share
-links with no recipient that anyone can accept until they expire or are revoked.
-The Owner creates an invitation (`POST /api/v1/projects/:projectId/invitations`
-or `POST /api/v1/scans/:scanId/invitations`, with `recipientEmail` and optional
-`expiresInSeconds`) only after the project has at least one scan with an
-uploaded model (for a scan, that scan must have an uploaded model); the API
-returns an `invitationUrl` whose raw token is random and never stored (only its
-SHA-256 hash is) and is redacted from request access logs, and sends an
-invitation email to the recipient only after the first successful idempotent
-commit (receipt replay does not resend it). One pending invitation is allowed per
-`(project, email)` and per `(scan, email)` (`409` otherwise), and an expired
-link does not block re-inviting the recipient. Recipients can preview the link
-without signing in, then accept to gain Viewer access or decline; a pending link
-can be re-sent (`POST /api/v1/invitations/:invitationId/resend`), which rotates
-the token and extends the expiry. The Owner can list pending links and active
+two kinds: per-recipient invitations, and generic share links with no recipient
+that anyone can accept until they expire or are revoked.
+
+Every user has a `publicUserId` — a ten-character identifier shown by
+`GET /api/v1/users/me` — which they share so others can invite them. The Owner
+creates an invitation (`POST /api/v1/projects/:projectId/invitations` or
+`POST /api/v1/scans/:scanId/invitations`) with **either**
+`recipientPublicUserId` **or** `recipientEmail`, plus optional
+`expiresInSeconds`, only after the project has at least one scan with an
+uploaded model (for a scan, that scan must have an uploaded model). Addressing
+by public user id binds the invitation to that account, so only that user can
+accept it and it shows up in their `GET /api/v1/invitations` list. Addressing by
+email keeps the flow usable for someone who has not signed up yet, and works
+bearer-style: any signed-in user holding the link may accept it, the same rule
+share links already follow. The signed-in user's email is deliberately never
+compared against the invited address — Apple's Hide My Email gives the account a
+`@privaterelay.appleid.com` address, so that comparison locked out the real
+recipient.
+
+The API returns an `invitationUrl` whose raw token is random and never stored
+(only its SHA-256 hash is) and is redacted from request access logs, and sends
+an invitation email only after the first successful idempotent commit (receipt
+replay does not resend it). One pending invitation is allowed per recipient and
+scope (`409` otherwise), and an expired link does not block re-inviting the
+recipient. Recipients preview the link, then accept to gain Viewer access or
+decline; a pending link can be re-sent
+(`POST /api/v1/invitations/:invitationId/resend`), which rotates the token and
+extends the expiry. The Owner can list pending links and active
 Viewers (`GET /api/v1/projects/:projectId/shares` or
 `GET /api/v1/scans/:scanId/shares`), revoke a pending link, and revoke a
 Viewer's access (`DELETE /api/v1/projects/:projectId/shares/:userId` or

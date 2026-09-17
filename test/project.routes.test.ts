@@ -162,6 +162,7 @@ describe('Project HTTP endpoints', () => {
   const findCurrentUser = vi.fn<CurrentUserRepository['findById']>().mockImplementation((userId) =>
     Promise.resolve({
       id: userId,
+      publicUserId: 'GP5HS2WKBE',
       email: userId === USER_A ? 'owner@example.com' : 'viewer@example.com',
       displayName: null,
     }),

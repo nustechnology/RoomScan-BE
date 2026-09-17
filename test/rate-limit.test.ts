@@ -90,6 +90,7 @@ function createTestApp(overrides: Partial<AppConfig> = {}, stores: RateLimitStor
     refreshToken: 'roomscan-refresh-token',
     user: {
       id: 'eb5d278f-c857-45c7-887d-7be65288cb75',
+      publicUserId: 'GP5HS2WKBE',
       email: 'user@example.com',
       displayName: null,
       provider: 'apple',

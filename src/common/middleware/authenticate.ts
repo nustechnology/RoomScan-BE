@@ -12,6 +12,7 @@ export interface AccessTokenVerifier {
 
 export interface CurrentUser {
   id: string;
+  publicUserId: string;
   email: string | null;
   displayName: string | null;
 }
