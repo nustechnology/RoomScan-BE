@@ -197,6 +197,7 @@ important groups are summarized below.
 | `DATABASE_URL`                                                          | Required                                    | PostgreSQL connection string used by Prisma                                           |
 | `TRUST_PROXY`                                                           | Disabled                                    | Exact trusted hop count or comma-separated proxy IP/CIDR list; never set to `true`    |
 | `APPLE_CLIENT_ID`                                                       | Required                                    | Expected Apple identity-token audience                                                |
+| `APPLE_APP_STORE_ID`                                                    | Empty                                       | Optional numeric App Store id for the invitation landing page Smart App Banner        |
 | `AUTH_ACCESS_TOKEN_SECRET`, `AUTH_REFRESH_TOKEN_SECRET`                 | Required                                    | Independent HS256 secrets of at least 32 characters                                   |
 | `AUTH_ACCESS_TOKEN_TTL_SECONDS`, `AUTH_REFRESH_TOKEN_TTL_SECONDS`       | `3600`, `2592000`                           | Access and refresh token lifetimes; refresh must be longer                            |
 | `SYNC_CRYPTO_KEY`                                                       | Required                                    | Stable base64-encoded 32-byte key for idempotency receipts and sync cursors           |
@@ -252,7 +253,8 @@ production must use `MAIL_PROVIDER=smtp` with their required credentials.
 │   │   ├── shared-scans/           # Viewer-facing shared scan surface
 │   │   ├── sync/                   # Offline-first change feed and readiness
 │   │   ├── health/                 # Liveness and database readiness
-│   │   └── well-known/             # Apple universal-link discovery
+│   │   ├── well-known/             # Apple universal-link discovery
+│   │   └── invitation-landing/     # Browser fallback page for invitation links
 │   ├── openapi/                    # Combined OpenAPI 3.1 document
 │   └── jobs/                       # Standalone idempotent cleanup jobs
 ├── prisma/
@@ -371,6 +373,10 @@ Owner or removed by the Viewer.
 
 The host-root `/.well-known/apple-app-site-association` route supports native
 universal links for invitation URLs and intentionally sits outside `/api/v1`.
+When a link is opened in a browser instead of the app, the host root also serves
+a fallback page at `/invitations/{token}` with an "Open" button that launches the
+app through its `roomscan://` custom scheme, plus a Safari Smart App Banner when
+`APPLE_APP_STORE_ID` is configured.
 
 ### Offline synchronization and concurrency
 
@@ -440,15 +446,16 @@ route and schema reference.
 
 ### Public routes
 
-| Method | Route                                     | Purpose                                           |
-| ------ | ----------------------------------------- | ------------------------------------------------- |
-| `GET`  | `/api/v1/health`                          | Process liveness without a database query         |
-| `GET`  | `/api/v1/ready`                           | Database readiness through `SELECT 1`             |
-| `POST` | `/api/v1/auth/apple`                      | Verify Apple identity and issue RoomScan tokens   |
-| `POST` | `/api/v1/auth/refresh`                    | Rotate a refresh token and issue a new token pair |
-| `GET`  | `/api-doc`                                | Interactive Swagger UI                            |
-| `GET`  | `/api-doc.json`                           | Generated OpenAPI 3.1 document                    |
-| `GET`  | `/.well-known/apple-app-site-association` | Apple universal-link declaration at the host root |
+| Method | Route                                     | Purpose                                                         |
+| ------ | ----------------------------------------- | --------------------------------------------------------------- |
+| `GET`  | `/api/v1/health`                          | Process liveness without a database query                       |
+| `GET`  | `/api/v1/ready`                           | Database readiness through `SELECT 1`                           |
+| `POST` | `/api/v1/auth/apple`                      | Verify Apple identity and issue RoomScan tokens                 |
+| `POST` | `/api/v1/auth/refresh`                    | Rotate a refresh token and issue a new token pair               |
+| `GET`  | `/api-doc`                                | Interactive Swagger UI                                          |
+| `GET`  | `/api-doc.json`                           | Generated OpenAPI 3.1 document                                  |
+| `GET`  | `/.well-known/apple-app-site-association` | Apple universal-link declaration at the host root               |
+| `GET`  | `/invitations/:token`                     | Browser fallback page that opens the app for an invitation link |
 
 ### Authenticated route groups
 

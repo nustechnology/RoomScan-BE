@@ -59,6 +59,7 @@ const config: AppConfig = {
   downloadUrlRateLimitWindowSeconds: 300,
   downloadUrlRateLimitMaxRequests: 60,
   appleClientId: 'com.example.roomscan',
+  appleAppStoreId: '123456789',
   accessTokenSecret: 'access-secret-that-is-at-least-32-characters',
   refreshTokenSecret: 'refresh-secret-that-is-at-least-32-characters',
   syncCryptoKey: 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=',
@@ -409,6 +410,19 @@ describe('RoomScan HTTP application', () => {
         ],
       },
     });
+  });
+
+  it('serves the invitation landing page for a browser-opened invitation link', async () => {
+    const token = 'AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-abXYZ';
+    const response = await request(app)
+      .get(`/invitations/${token}`)
+      .query({ scope: 'project' })
+      .expect(200);
+
+    expect(response.headers['content-type']).toContain('text/html');
+    expect(response.text).toContain('Open app to accept the invitation');
+    expect(response.text).toContain(`href="roomscan://invitations/${token}?scope=project"`);
+    expect(response.text).toContain('app-id=123456789');
   });
 
   it('returns the standard error envelope for an unknown route', async () => {

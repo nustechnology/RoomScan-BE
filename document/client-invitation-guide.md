@@ -251,6 +251,27 @@ Rate limit: 30 accepts per 5 minutes per IP by default
 (`RATE_LIMIT_INVITATION_ACCEPT_*`). Preview and decline are not subject to that
 policy.
 
+## Flow 4b — opening a link in a browser
+
+The invitation URL is a universal link. When a recipient taps it in a supported
+context the app opens directly, but when it is pasted into Safari — or the app is
+not installed — the browser loads the backend fallback page
+`{INVITATION_BASE_URL}/invitations/{token}`. That page shows an "Open" button
+targeting the app custom scheme:
+
+```text
+roomscan://invitations/{token}?scope=project|scan
+```
+
+The app must register the `roomscan` URL scheme and route that URL to the same
+reference preview/accept path as the universal link, using the path token as the
+`reference` and treating `scope` as an informational hint only, exactly like the
+universal link. This is required because iOS does not open a universal link that
+is tapped on the same domain in Safari, while a custom-scheme navigation does
+launch the app. The page additionally offers a Safari Smart App Banner when the
+backend is configured with an App Store id; that banner is a Safari-owned
+affordance and needs no app work beyond the associated domain.
+
 ## Flow 5 — the Owner's share list
 
 `GET /api/v1/projects/:projectId/shares` and `GET /api/v1/scans/:scanId/shares`
@@ -295,8 +316,11 @@ only hard requirement is tolerating nullable recipient fields.
 5. Build the invitation inbox from `GET /api/v1/invitations`.
 6. Point universal-link handling and the inbox at the same reference-based
    preview/accept path.
-7. Update the share list to fall back across the three recipient fields.
-8. Handle `RECIPIENT_USER_NOT_FOUND` and `CANNOT_INVITE_SELF`.
+7. Register the `roomscan` URL scheme and route `roomscan://invitations/{token}`
+   to the same preview/accept path, so the browser fallback page can open the
+   app.
+8. Update the share list to fall back across the three recipient fields.
+9. Handle `RECIPIENT_USER_NOT_FOUND` and `CANNOT_INVITE_SELF`.
 
 ## Verifying locally
 

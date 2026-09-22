@@ -31,8 +31,11 @@ schema owns the `User`, `RefreshToken`, `Project`, `ProjectAccess`, `Scan`,
 7. The well-known router serves the Apple App Site Association file at the
    host root `/.well-known/apple-app-site-association`, outside `/api/v1` and
    without authentication or rate limiting.
-8. Unknown routes and thrown errors pass through the central error middleware.
-9. The response contains a request ID without exposing internal exceptions.
+8. The invitation-landing router serves the browser fallback page for
+   invitation links at the host root `/invitations/:token`, likewise outside
+   `/api/v1`, without authentication, and not part of the OpenAPI document.
+9. Unknown routes and thrown errors pass through the central error middleware.
+10. The response contains a request ID without exposing internal exceptions.
 
 ## Boundaries
 
@@ -51,6 +54,22 @@ app-links declaration (`application/json`) so invitation links
 (`{INVITATION_BASE_URL}/invitations/{token}`) can open the native app. Because
 Apple fetches this without credentials, the route requires no authentication and
 is exempt from the API rate limiter.
+
+The `invitation-landing` module serves the browser fallback for invitation and
+share-link deep links. `GET /invitations/:token`, mounted at the host root
+outside `/api/v1` and absent from the OpenAPI document, returns `text/html` with
+a short "Open app to accept the invitation" card and an `Open` button whose href
+is the app custom-scheme deep link `roomscan://invitations/{token}`, preserving
+`?scope=project|scan` from the request when it is one of those two values. The
+custom scheme is used because Safari does not open a universal link tapped on
+the page's own domain, while a custom-scheme navigation does launch the app. The
+page also emits a Safari Smart App Banner (`<meta name="apple-itunes-app">`)
+whose `app-argument` is the invitation's universal link when `APPLE_APP_STORE_ID`
+is configured, and omits the banner when that id is empty. The token is validated
+against the 43-character base64url invitation token pattern before the page is
+built, so a malformed token falls through to the standard `404` and the handler
+never reflects unvalidated input. Responses are `Cache-Control: no-store` and
+`X-Robots-Tag: noindex`.
 
 Business modules should depend on small interfaces rather than importing the
 global Prisma client directly. Runtime composition belongs in `server.ts`.

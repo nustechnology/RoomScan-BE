@@ -47,6 +47,12 @@
   `application/json`, declaring the `B66DTGYFS9.com.nus.roomscan` app and the
   `/invitations/*` path so universal links can open invitation links in the
   native app.
+- A browser fallback page for invitation and share-link deep links is served
+  without authentication at the host root `GET /invitations/:token` as
+  `text/html`, outside `/api/v1` and outside the OpenAPI document. It shows an
+  "Open" button that launches the app through the
+  `roomscan://invitations/{token}` custom scheme; see
+  [Architecture](architecture.md) for the module contract.
 - Resource paths use plural nouns and kebab-case when business modules arrive.
 
 ## Validation and documentation

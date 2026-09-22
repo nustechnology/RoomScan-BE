@@ -72,7 +72,7 @@ Layout:
 - `src/config` — environment validation (fails closed on missing/invalid vars) and constants.
 - `src/common` — `AppError` + standard error envelope, middleware (auth, rate limit, error handler), idempotency helpers, revision/`If-Match` helpers, shared Zod schemas.
 - `src/infrastructure` — Prisma/PostgreSQL, Apple identity-token verification, JWT issuance, storage (local fake vs MinIO/S3), mail (log fake vs SMTP), logging.
-- `src/modules/*` — one directory per product surface (`auth`, `project`, `scan`, `scan-asset`, `note`, `share`, `shared-projects`, `shared-scans`, `sync`, `health`, `well-known`); each owns its router, Zod schemas, service, and OpenAPI registration.
+- `src/modules/*` — one directory per product surface (`auth`, `project`, `scan`, `scan-asset`, `note`, `share`, `shared-projects`, `shared-scans`, `sync`, `health`, `well-known`, `invitation-landing`); each owns its router, Zod schemas, service, and OpenAPI registration.
 - `src/openapi` — combines module registries into the public OpenAPI 3.1 document served at `/api-doc.json`.
 - `src/generated/prisma` — generated Prisma Client; never hand-edit or commit.
 
@@ -80,8 +80,9 @@ Request pipeline (in order): Pino request ID/logger → Helmet/CORS → general
 `/api/v1` IP rate limiter (mounted before body parsing, plus path-specific
 limiters on `/api/v1/auth/apple` and `/api/v1/auth/refresh`) → compression/body
 parsers → Swagger/versioned routers → Zod validation → central error
-middleware. `/.well-known/apple-app-site-association` is served at the host
-root outside `/api/v1`, unauthenticated and rate-limit-exempt.
+middleware. `/.well-known/apple-app-site-association` and the
+`/invitations/:token` browser fallback page are served at the host root outside
+`/api/v1`, unauthenticated and rate-limit-exempt.
 
 **Errors**: expected failures throw `AppError` subclasses (`statusCode` +
 stable `code`) caught by the central error handler into the envelope

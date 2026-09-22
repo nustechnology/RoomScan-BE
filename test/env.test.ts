@@ -41,6 +41,7 @@ describe('loadConfig', () => {
       downloadUrlRateLimitWindowSeconds: 300,
       downloadUrlRateLimitMaxRequests: 60,
       appleClientId: 'com.example.roomscan',
+      appleAppStoreId: '',
       accessTokenSecret: 'access-secret-that-is-at-least-32-characters',
       refreshTokenSecret: 'refresh-secret-that-is-at-least-32-characters',
       syncCryptoKey: validEnvironment.SYNC_CRYPTO_KEY,

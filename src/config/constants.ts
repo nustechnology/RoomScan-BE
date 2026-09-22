@@ -6,6 +6,9 @@ export const API_DOC_PATH = '/api-doc';
 export const TOKEN_ISSUER = 'roomscan-api';
 export const TOKEN_AUDIENCE = 'roomscan-mobile';
 
+/** Custom URL scheme registered by the mobile app for invitation deep links. */
+export const INVITATION_APP_URL_SCHEME = 'roomscan';
+
 export const LOCAL_TEST_APPLE_IDENTITY_TOKEN = 'roomscan-local-test-user';
 export const LOCAL_TEST_APPLE_PROVIDER_ID = 'roomscan-local-test-user';
 export const LOCAL_TEST_USER_ID = '00000000-0000-4000-8000-000000000001';

@@ -45,6 +45,7 @@ const baseConfig: AppConfig = {
   downloadUrlRateLimitWindowSeconds: 300,
   downloadUrlRateLimitMaxRequests: 60,
   appleClientId: 'com.example.roomscan',
+  appleAppStoreId: '',
   accessTokenSecret: 'access-secret-that-is-at-least-32-characters',
   refreshTokenSecret: 'refresh-secret-that-is-at-least-32-characters',
   syncCryptoKey: 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=',

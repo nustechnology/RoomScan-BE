@@ -130,6 +130,13 @@ export const environmentSchema = z
     RATE_LIMIT_DOWNLOAD_URL_WINDOW_SECONDS: rateLimitWindowSecondsSchema.default(300),
     RATE_LIMIT_DOWNLOAD_URL_MAX_REQUESTS: rateLimitMaxRequestsSchema.default(60),
     APPLE_CLIENT_ID: z.string().trim().min(1).max(255),
+    APPLE_APP_STORE_ID: z
+      .string()
+      .trim()
+      .default('')
+      .refine((value) => value === '' || /^\d+$/.test(value), {
+        message: 'APPLE_APP_STORE_ID must be a numeric App Store id',
+      }),
     AUTH_ACCESS_TOKEN_SECRET: z.string().min(32),
     AUTH_REFRESH_TOKEN_SECRET: z.string().min(32),
     SYNC_CRYPTO_KEY: syncCryptoKeySchema,
@@ -277,6 +284,7 @@ export interface AppConfig {
   downloadUrlRateLimitWindowSeconds: number;
   downloadUrlRateLimitMaxRequests: number;
   appleClientId: string;
+  appleAppStoreId: string;
   accessTokenSecret: string;
   refreshTokenSecret: string;
   syncCryptoKey: string;
@@ -343,6 +351,7 @@ export function loadConfig(input: NodeJS.ProcessEnv = process.env): AppConfig {
     downloadUrlRateLimitWindowSeconds: environment.RATE_LIMIT_DOWNLOAD_URL_WINDOW_SECONDS,
     downloadUrlRateLimitMaxRequests: environment.RATE_LIMIT_DOWNLOAD_URL_MAX_REQUESTS,
     appleClientId: environment.APPLE_CLIENT_ID,
+    appleAppStoreId: environment.APPLE_APP_STORE_ID,
     accessTokenSecret: environment.AUTH_ACCESS_TOKEN_SECRET,
     refreshTokenSecret: environment.AUTH_REFRESH_TOKEN_SECRET,
     syncCryptoKey: environment.SYNC_CRYPTO_KEY,

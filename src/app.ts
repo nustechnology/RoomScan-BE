@@ -22,6 +22,7 @@ import type { DatabaseHealth } from './infrastructure/database/database.js';
 import { createAuthRouter } from './modules/auth/auth.routes.js';
 import type { AppleAuthService, TokenRefreshService } from './modules/auth/auth.types.js';
 import { createHealthRouter } from './modules/health/health.routes.js';
+import { createInvitationLandingRouter } from './modules/invitation-landing/invitation-landing.routes.js';
 import { createNoteRouter } from './modules/note/note.routes.js';
 import type { NoteService } from './modules/note/note.service.js';
 import { createProjectRouter } from './modules/project/project.routes.js';
@@ -262,6 +263,13 @@ export function createApp({
   );
 
   app.use(createWellKnownRouter());
+
+  app.use(
+    createInvitationLandingRouter({
+      invitationBaseUrl: config.invitationBaseUrl,
+      appleAppStoreId: config.appleAppStoreId,
+    }),
+  );
 
   app.use(notFoundHandler);
   app.use(errorHandler);
