@@ -17,7 +17,6 @@ and token-verification implementations.
 
 - **Company:** [NUS Technology](https://www.nustechnology.com/)
 - **Repository:** [nustechnology/RoomScan-BE](https://github.com/nustechnology/RoomScan-BE)
-- **API documentation:** `http://localhost:3000/api-doc`
 
 ## Table of contents
 
